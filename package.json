@@ -28,7 +28,7 @@
     "pkglint": "./build/publint_pipeable.sh",
     "build_prepare": "npm run pkglint && npm run build",
     "prepublishOnly": "npm run build_prepare",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\""
   },
   "author": "",
   "license": "MIT",

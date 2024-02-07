@@ -54,27 +54,29 @@ export default function postgresWhereClauseBuilder<T = any>(filter:WhereFilter<T
     return {whereClauseStatement, statementArguments};
 }
 
+function addSubClauseString<T>(andClauses: string[], statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap, type: WhereFilterLogicOperatorsTyped, subFilters: WhereFilter<T>[]):string[] {
+    let subClauseString = '';
+    const subClauses = [...subFilters].map(subFilter => _postgresWhereClauseBuilder(subFilter, statementArguments, propertySqlMap));
+    if( type==='NOT' ) {
+        subClauseString =`NOT (${subClauses.join(' OR ')})`;
+    } else {
+        subClauseString = subClauses.length===1? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
+    }
+    if( !subClauseString ) throw new Error("Sub Clause String should always be set");
+    return [...andClauses, subClauseString];
+}
+
 function _postgresWhereClauseBuilder<T = any>(filter:WhereFilter<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap):string {
+    
     
 
     if( isLogicFilter(filter) ) {
-        const andClauses:string[] = [];
-
-        function addSubClauseString(type: WhereFilterLogicOperatorsTyped, subFilters: WhereFilter<T>[]):void {
-            let subClauseString = '';
-            const subClauses = [...subFilters].map(subFilter => _postgresWhereClauseBuilder(subFilter, statementArguments, propertySqlMap));
-            if( type==='NOT' ) {
-                subClauseString =`NOT (${subClauses.join(' OR ')})`;
-            } else {
-                subClauseString = subClauses.length===1? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
-            }
-            if( !subClauseString ) throw new Error("Sub Clause String should always be set");
-            andClauses.push(subClauseString);
-        }
+        let andClauses:string[] = [];
 
         for( const type of WhereFilterLogicOperators ) {
-            const value = filter[type];
-            if( isWhereFilterArray(value) ) addSubClauseString(type, value);
+            if( isWhereFilterArray(filter[type]) ) {
+                andClauses = addSubClauseString(andClauses, statementArguments, propertySqlMap, type, filter[type]);
+            }
         }
         
         return andClauses.length===1? andClauses[0] : `(${andClauses.join(' AND ')})`;

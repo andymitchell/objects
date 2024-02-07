@@ -2,15 +2,34 @@
   "name": "objects",
   "version": "0.1.0",
   "description": "",
-  "main": "index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "require": {
+        "types": "./dist/index.d.ts",
+        "require": "./dist/index.js"
+      },
+      "import": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    }
+  },
+  "files": ["dist", "README.MD", "LICENSE"],
   "scripts": {
+    "build": "tsup ./src/index.ts --format cjs,esm --dts --clean",
+    "pkglint": "npx publint",
+    "prepublishOnly": "npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "@types/lodash-es": "^4.17.12",
-    "esbuild": "0.20.0",
+    "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   },
   "dependencies": {

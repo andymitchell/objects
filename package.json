@@ -1,10 +1,10 @@
 {
   "name": "@andyrmitchell/objects",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "",
   "exports": {
     ".": {
-        "module": "./dist/index.mjs",
+      "module": "./dist/index.mjs",
       "require": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"

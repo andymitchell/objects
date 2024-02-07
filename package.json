@@ -1,6 +1,6 @@
 {
   "name": "@andyrmitchell/objects",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -18,7 +18,11 @@
       }
     }
   },
-  "files": ["dist", "README.MD", "LICENSE"],
+  "files": [
+    "dist",
+    "README.MD",
+    "LICENSE"
+  ],
   "publishConfig": {
     "access": "public"
   },

@@ -1,0 +1,21 @@
+{
+  "name": "objects",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
+    "esbuild": "0.20.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "dot-prop": "^8.0.2",
+    "lodash-es": "^4.17.21",
+    "zod": "^3.22.4"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "name": "objects",
+  "name": "@andyrmitchell/objects",
   "version": "0.1.0",
   "description": "",
   "main": "./dist/index.js",
@@ -19,10 +19,15 @@
     }
   },
   "files": ["dist", "README.MD", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build_release": "npm run build_prepare && np",
     "build": "tsup ./src/index.ts --format cjs,esm --dts --clean",
-    "pkglint": "npx publint",
-    "prepublishOnly": "npm run build",
+    "pkglint": "./build/publint_pipeable.sh",
+    "build_prepare": "npm run pkglint && npm run build",
+    "prepublishOnly": "npm run build_prepare",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

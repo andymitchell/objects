@@ -1,8 +1,15 @@
 import { z } from "zod";
 import { WriteAction, createWriteActionSchema } from "./types";
 
-export function test() {
-    // TODO Turn this into a proper test
+describe('write-actions type check', () => {
+    // This is just a type file for convenience to see if typeCheck's code flags type errors
+    test('empty', () => {
+        expect(true).toBe(true);
+    })
+})
+
+function typeCheck() {
+    
 
 
         // Example usage

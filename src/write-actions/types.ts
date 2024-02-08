@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DotPropPathToArray, DotPropPathValidArrayValue } from "../dot-prop-paths/types";
-import { UpdatingMethod, UpdatingMethodSchema, WhereFilter, WhereFilterSchema } from "../where-filter/types"
+import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 
 
 export const VALUE_TO_DELETE_KEY = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
@@ -81,18 +81,18 @@ type WriteActionPayloadCreate<T extends Record<string, any>> = {
 type WriteActionPayloadUpdate<T extends Record<string, any>> = {
     type: 'update',
     data: Partial<T>, // #VALUE_TO_DELETE_KEY
-    where: WhereFilter<T>,
+    where: WhereFilterDefinition<T>,
     method: UpdatingMethod
 }
 type WriteActionPayloadArrayPush<T extends Record<string, any>> = {
     type: 'array_push',
     path: DotPropPathToArray<T>,
     value: DotPropPathValidArrayValue<T>,
-    where: WhereFilter<T>
+    where: WhereFilterDefinition<T>
 }
 type WriteActionPayloadDelete<T extends Record<string, any>> = {
     type: 'delete',
-    where: WhereFilter<T>
+    where: WhereFilterDefinition<T>
 }
 export type WriteActionPayload<T extends Record<string, any>> = WriteActionPayloadCreate<T> | WriteActionPayloadUpdate<T> | WriteActionPayloadDelete<T> | WriteActionPayloadArrayPush<T>;
 export type WriteAction<T extends Record<string, any>> = {

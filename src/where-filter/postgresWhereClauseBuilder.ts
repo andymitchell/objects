@@ -1,6 +1,6 @@
 
 import { z } from "zod";
-import { getValidFilterType, isLogicFilter, isValueComparisonArrayContains, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, ValueComparison, ValueComparisonNumericOperators, ValueComparisonNumericOperatorsTyped, WhereFilter, WhereFilterLogicOperators, WhereFilterLogicOperatorsTyped } from "./types";
+import { isLogicFilter, isValueComparisonArrayContains, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, ValueComparison, ValueComparisonNumericOperators, ValueComparisonNumericOperatorsTyped, WhereFilterDefinition, WhereFilterLogicOperators, WhereFilterLogicOperatorsTyped } from "./types";
 import { convertSchemaToDotPropPathKind } from "../dot-prop-paths/zod";
 
 export type PreparedWhereClauseStatement = {whereClauseStatement:string, statementArguments:PreparedStatementArgument[]};
@@ -47,14 +47,14 @@ export function postgresCreatePropertySqlMapFromSchema(schema:z.ZodTypeAny, sqlC
     return (dotPropPath:string) => pathsToSqlKey[dotPropPath];
 }
 
-export default function postgresWhereClauseBuilder<T = any>(filter:WhereFilter<T>, propertySqlMap:PropertySqlMap):PreparedWhereClauseStatement {
+export default function postgresWhereClauseBuilder<T = any>(filter:WhereFilterDefinition<T>, propertySqlMap:PropertySqlMap):PreparedWhereClauseStatement {
     const statementArguments:PreparedStatementArgument[] = [];
 
     const whereClauseStatement = _postgresWhereClauseBuilder(filter, statementArguments, propertySqlMap);
     return {whereClauseStatement, statementArguments};
 }
 
-function addSubClauseString<T>(andClauses: string[], statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap, type: WhereFilterLogicOperatorsTyped, subFilters: WhereFilter<T>[]):string[] {
+function addSubClauseString<T>(andClauses: string[], statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap, type: WhereFilterLogicOperatorsTyped, subFilters: WhereFilterDefinition<T>[]):string[] {
     let subClauseString = '';
     const subClauses = [...subFilters].map(subFilter => _postgresWhereClauseBuilder(subFilter, statementArguments, propertySqlMap));
     if( type==='NOT' ) {
@@ -66,7 +66,7 @@ function addSubClauseString<T>(andClauses: string[], statementArguments: Prepare
     return [...andClauses, subClauseString];
 }
 
-function _postgresWhereClauseBuilder<T = any>(filter:WhereFilter<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap):string {
+function _postgresWhereClauseBuilder<T = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap):string {
     
     
 

@@ -18,11 +18,11 @@ export type ValueComparison = ValueComparisonContains | ValueComparisonArrayCont
 
 type PartialObjectFilter<T> = Partial<DotPropPathsRecordWithOptionalAdditionalValues<T, ValueComparison>>;
 type LogicFilter<T> = {
-    OR?: WhereFilter<T>[],
-    AND?: WhereFilter<T>[],
-    NOT?: WhereFilter<T>[]
+    OR?: WhereFilterDefinition<T>[],
+    AND?: WhereFilterDefinition<T>[],
+    NOT?: WhereFilterDefinition<T>[]
 }
-export type WhereFilter<T = any> =
+export type WhereFilterDefinition<T = any> =
     PartialObjectFilter<T>
     |
     LogicFilter<T>
@@ -33,14 +33,14 @@ type ExampleGeneric<T> = {
     age: number,
     address: T
 }
-const a:WhereFilter<ExampleGeneric<{city: string}>> = {
+const a:WhereFilterDefinition<ExampleGeneric<{city: string}>> = {
     age: 1
 };
 class Bob<T> {
     constructor() {
         this.list({})
     }
-    list(where: WhereFilter<ExampleGeneric<T>>) {
+    list(where: WhereFilterDefinition<ExampleGeneric<T>>) {
 
     }
 }
@@ -70,7 +70,7 @@ const ValueComparison = z.union([
 //type WhereFilterValue = z.infer<typeof ValueComparison>;
 
 // Recursive definition of WhereFilter
-export const WhereFilterSchema: ZodType<WhereFilter<any>, any> = z.lazy(() =>
+export const WhereFilterSchema: ZodType<WhereFilterDefinition<any>, any> = z.lazy(() =>
     z.union([
         z.record(ValueComparison),
         z.object({
@@ -96,7 +96,7 @@ const WhereFilterSchema2 = <T>(schema: ZodType<T, any, any>) => z.union([
   
 
 
-export function isWhereFilterArray(x:unknown): x is WhereFilter<any>[] {
+export function isWhereFilterArray(x:unknown): x is WhereFilterDefinition<any>[] {
     return !!x && Array.isArray(x) && x.every(x => isPlainObject(x));
 }
 
@@ -129,12 +129,12 @@ function safeJson(object:any):string | undefined {
 export type UpdatingMethod = 'merge' | 'assign';
 export const UpdatingMethodSchema = z.enum(['merge', 'assign']);
 
-export function isLogicFilter<T>(filter:WhereFilter<any>):filter is LogicFilter<T> {
+export function isLogicFilter<T>(filter:WhereFilterDefinition<any>):filter is LogicFilter<T> {
     return WhereFilterLogicOperators.some(type => {
-        filter.hasOwnProperty(type) && Array.isArray(filter[type])
+        return filter.hasOwnProperty(type) && Array.isArray(filter[type])
     });
 }
-export function getValidFilterType(filter:WhereFilter<any>, debugPath?:WhereFilter<any>[]):'logic' | 'value' | undefined {
+export function getValidFilterType(filter:WhereFilterDefinition<any>, debugPath?:WhereFilterDefinition<any>[]):'logic' | 'value' | undefined {
     if( isPlainObject(filter) ) { 
         if( isLogicFilter(filter) ) {
             return 'logic';

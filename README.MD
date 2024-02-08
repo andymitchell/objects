@@ -35,7 +35,7 @@ The build process was heavily inspired by https://mikeesto.com/posts/publishing-
 
 https://github.com/frehner/modern-guide-to-packaging-js-library is a very helpful resource for understanding the options. 
 
-I switched from 'objects' to a scoped package, @andymitchell/objects
+I switched from 'objects' to a scoped package, @andyrmitchell/objects
 - Note my GitHub is @andymitchell, but NPM is @andyrmitchell (r in the middle). It has to be andyrmitchell for permission on NPM. 
 - When you scope something by changing the name to use @, it switches to publishing privately. 
     - Therefore in package.json I set `publishConfig.access` to 'public' 

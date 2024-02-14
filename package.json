@@ -41,7 +41,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@andyrmitchell/trowser": "^0.1.8",
+    "@andyrmitchell/trowser": "^0.1.9",
     "@types/jest": "^29.5.12",
     "@types/lodash-es": "^4.17.12",
     "jest": "^29.7.0",

@@ -1,4 +1,4 @@
-import applyWritesToItems from "./applyWritesToItems";
+import applyWritesToItems from "./applyWritesToItems/index";
 import { WriteAction, WriteActionPayload, createWriteActionSchema } from "./types";
 
 export const WriteActions = {

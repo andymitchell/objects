@@ -11,7 +11,7 @@ export interface WriteStrategy<T> {
     update_handler: (writeActionPayload: WriteActionPayloadUpdate<T>, target: T, alreadyCloned?: boolean) => { updated: boolean, item: T }
 }
 
-type ListRulesCore<T = {}> = {
+type ListRulesCore<T = Record<string, any>> = {
     version: number,
     primary_key: keyof T,
     permissions?: {

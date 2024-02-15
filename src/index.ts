@@ -2,7 +2,7 @@ import { DotPropPaths, DotPropPathsRecord, DotPropPathsUnion } from "./dot-prop-
 import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "./getKeyValue";
 import isPlainObject from "./isPlainObject";
 import { WhereFilter, WhereFilterDefinition } from "./where-filter";
-import { WriteAction, WriteActionPayload, WriteActions } from "./write-actions";
+import { DDL, WriteAction, WriteActionPayload, WriteActions } from "./write-actions";
 
 export {isPlainObject, safeKeyValue, makePrimaryKeyGetter};
 export type {PrimaryKeyValue, PrimaryKeyGetter}
@@ -14,5 +14,5 @@ export { DotPropPaths };
 export type {DotPropPathsUnion, DotPropPathsRecord};
 
 export {WriteActions};
-export type {WriteAction, WriteActionPayload};
+export type {WriteAction, WriteActionPayload, DDL};
 

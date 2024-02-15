@@ -1,4 +1,4 @@
-import applyWritesToItems from "./applyWritesToItems/index";
+import { applyWritesToItems, DDL } from "./applyWritesToItems/index";
 import { WriteAction, WriteActionPayload, createWriteActionSchema } from "./types";
 
 export const WriteActions = {
@@ -6,4 +6,4 @@ export const WriteActions = {
     createWriteActionSchema
 }
 
-export type {WriteAction, WriteActionPayload}
+export type {WriteAction, WriteActionPayload, DDL}

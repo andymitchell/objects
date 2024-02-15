@@ -96,7 +96,6 @@ describe('applyWritesToItems test', () => {
     });
 
     test('delete', () => {
-
         const result = applyWritesToItems<Obj>(
             [
                 makeWrite({

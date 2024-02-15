@@ -15,6 +15,11 @@
 - Change `np` to prevent auto publishing, by using the `--no-publish` flag (see https://github.com/sindresorhus/np)
 - Set up a GitHub Action (see https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages)
 
+## What is responsible for the building? Babel? 
+
+- tsup is responsible (I believe uses esbuild under the hood)
+- Babel is *only* installed to make Jest work 
+
 # Troubleshooting
 
 ## "You do not have permission to publish" / "You do not have write permissions required to publish this package."
@@ -39,3 +44,5 @@ I switched from 'objects' to a scoped package, @andyrmitchell/objects
 - Note my GitHub is @andymitchell, but NPM is @andyrmitchell (r in the middle). It has to be andyrmitchell for permission on NPM. 
 - When you scope something by changing the name to use @, it switches to publishing privately. 
     - Therefore in package.json I set `publishConfig.access` to 'public' 
+
+- Had to install Babel to get jest to correctly work with ES Modules (like lodash-es, dot-prop). It feels like a lot of cruft just for that.

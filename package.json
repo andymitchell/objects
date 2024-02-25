@@ -32,7 +32,7 @@
     "build_release": "npm run build_prepare && np",
     "build": "tsup ./src/index.ts --format cjs,esm --dts --clean",
     "pkglint": "./build/publint_pipeable.sh",
-    "build_prepare": "npm run pkglint && npm run build",
+    "build_prepare": "npm run build && npm run pkglint",
     "prepublishOnly": "npm run build_prepare",
     "test": "jest",
     "test:watch": "jest --watch",

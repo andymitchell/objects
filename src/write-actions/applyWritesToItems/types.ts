@@ -1,5 +1,6 @@
 import { DotPropPathToArraySpreadingArrays, DotPropPathValidArrayValue } from "../../dot-prop-paths/types";
 import { PrimaryKeyValue } from "../../getKeyValue";
+import { IfAny } from "../../types";
 import { EnsureRecord } from "../../types";
 import { WriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types";
 
@@ -42,9 +43,12 @@ export type DDL<T extends Record<string, any>> = {
 */
 
 
+
+
+
 type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
     version: number,
-    primary_key: keyof T,
+    primary_key: IfAny<T, string, keyof T>,
     permissions?: {
         type: 'opa',
         wasm_path: string, // https://stackoverflow.com/questions/49611290/using-webassembly-in-chrome-extension https://groups.google.com/a/chromium.org/g/chromium-extensions/c/zVaQo3jpSpw/m/932YZv2UAgAJ 
@@ -61,12 +65,33 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
         delete_key: keyof T
     }
 }
-export type ListRules<T extends Record<string, any>> = ListRulesCore<T>;
+export type ListRules<T extends Record<string, any> = Record<string, any>> = ListRulesCore<T>;
 
 
+export type DDL<T extends Record<string, any>> = 
+    IfAny<
+    T,
+    {
+        '.': ListRules<any>;
+    },
+    {
+        [K in DotPropPathToArraySpreadingArrays<T>]: ListRules<EnsureRecord<DotPropPathValidArrayValue<T, K>>>
+    } & {
+        '.': ListRules<T>;
+    }
+    >
+    
 
-export type DDL<T extends Record<string, any> = Record<string, any>> = {
-    [K in DotPropPathToArraySpreadingArrays<T>]: ListRules<EnsureRecord<DotPropPathValidArrayValue<T, K>>>
-} & {
-    '.': ListRules<T>;
+const typeCheck1:DDL<any> = {
+    '.': {
+        version: 1,
+        primary_key: 'whatever'
+    }
+}
+
+const typeCheck2:DDL<{id: string/*, friends: {fid: string}[]*/}> = {
+    '.': {
+        version: 1,
+        primary_key: 'id'
+    }
 }

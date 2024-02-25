@@ -136,3 +136,13 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     return output;
 }
 
+/*
+function blah<T extends Record<string, any>>(primary_key: keyof T) {
+    const ddl:DDL<T> = {
+        '.': {
+            version: 1,
+            primary_key
+        }
+    }
+}
+*/

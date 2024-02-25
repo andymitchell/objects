@@ -1,0 +1,1 @@
+export type EnsureRecord<T> = T extends Record<string, any> ? T : never;

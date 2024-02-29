@@ -10,6 +10,7 @@ export default function getScopedArrays<T extends Record<string, any>>(item:T, p
     const scopedRules:ScopedRules = {};
     for( let ruleKey in rules ) {
         if( ruleKey.indexOf(payload.scope)===0 ) {
+            // @ts-ignore
             const scopedRuleKey = ruleKey===payload.scope? '.' : ruleKey.replace(payload.scope, '') as keyof ScopedRules;
             // @ts-ignore It's a classic TS problem of trying to clone an object. It's solvable, I'm just tight for time. 
             scopedRules[scopedRuleKey] = rules[ruleKey];

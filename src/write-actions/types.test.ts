@@ -62,6 +62,7 @@ function typeCheck() {
         ]
     }
 
+
     const actionFakeA: WriteAction<Fake> = {
         type: 'write',
         ts: Date.now(),
@@ -96,6 +97,27 @@ function typeCheck() {
             }
         ]
     }
+
+    
+    type RealOptional = { id: string, text: string, owner: { age: number, name: string }, sub_tasks?: { text: string, siblings: {id:string, text:string}[] }[] };
+    const actionC: WriteActionPayloadArrayScope<RealOptional, 'sub_tasks.siblings'> = {
+        type: "array_scope",
+        scope: 'sub_tasks.siblings',
+        actions: [
+            {
+                type: 'write',
+                ts: 0,
+                payload: {
+                    type: 'create',
+                    data: {
+                        id: '1',
+                        text: 'bob'
+                    }
+                }
+            }
+        ]
+    }
+    
 
 
     const resultA = writeActionSchema.writeAction.safeParse(actionA); // Expect OK

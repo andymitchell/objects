@@ -1,8 +1,12 @@
 import applyWritesToItems from ".";
-import { WriteAction, WriteActionPayload } from "../types";
+import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope } from "../types";
 import { DDL } from "./types";
 
 describe('applyWritesToItems test', () => {
+    test('empty', () => {
+        expect(true).toBe(true);
+    })
+    
     type Obj = {
         id: string,
         text?: string,
@@ -31,19 +35,28 @@ describe('applyWritesToItems test', () => {
         id: '2'
     };
     
-    const makeWrite = <T extends Record<string, any>>(payload:WriteActionPayload<T>):WriteAction<T> => {
-        return {type: 'write', ts: 0, payload};
+    const makeWrite = (payload:WriteActionPayload<Obj>) => {
+        return {
+            type: 'write',
+            ts: 0,
+            payload
+        }
     }
-    
     
     test('create', () => {
 
+        const data2 = JSON.parse(JSON.stringify(obj2)); //structuredClone(obj2);
+
         const result = applyWritesToItems<Obj>(
             [
-                makeWrite({
-                    type: 'create',
-                    data: structuredClone(obj2)
-                })
+                {
+                    type: 'write', 
+                    ts: 0,
+                    payload: {
+                        type: 'create',
+                        data: data2
+                    }
+                }
             ], 
             [
                 obj1
@@ -51,6 +64,8 @@ describe('applyWritesToItems test', () => {
             ddl
         );
 
+        
+        
         expect(
             result.added[0]
         ).toEqual(obj2);
@@ -62,14 +77,16 @@ describe('applyWritesToItems test', () => {
         expect(
             result.final_items.length
         ).toEqual(2);
+        
     });
 
+    
 
     test('update', () => {
 
         const result = applyWritesToItems<Obj>(
             [
-                makeWrite({
+                {type: 'write', ts: 0, payload: {
                     type: 'update',
                     method: 'merge',
                     data: {
@@ -78,7 +95,7 @@ describe('applyWritesToItems test', () => {
                     where: {
                         id: '1'
                     }
-                })
+                }}
             ], 
             [
                 structuredClone(obj1)
@@ -98,12 +115,12 @@ describe('applyWritesToItems test', () => {
     test('delete', () => {
         const result = applyWritesToItems<Obj>(
             [
-                makeWrite({
+                {type: 'write', ts: 0, payload: {
                     type: 'delete',
                     where: {
                         id: '1'
                     }
-                })
+                }}
             ], 
             [
                 structuredClone(obj1)
@@ -133,37 +150,48 @@ describe('applyWritesToItems test', () => {
             ]
         }
         
-        const result = applyWritesToItems<Obj>(
-            [
-                makeWrite({
-                    type: 'array_scope',
-                    scope: 'children.children',
-                    actions: [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            payload: {type: 'create',
-                                data: {
-                                    ccid: 'cc1'
-                                }
+        
+        const payload:WriteActionPayloadArrayScope<Obj, 'children.children'> = {
+            
+                type: 'array_scope',
+                scope: 'children.children',
+                actions: [
+                    {
+                        type: 'write',
+                        ts: 0,
+                        payload: {
+                            type: 'create',
+                            data: {
+                                ccid: 'cc1'
                             }
                         }
-                    ]
-                })
+                    }
+                ]
+            
+        }
+        const result = applyWritesToItems<Obj>(
+            [
+                {
+                    type: 'write',
+                    ts: 0,
+                    payload
+                }
             ], 
             [
                 objWithChildren
             ], 
             ddl
         );
+        
+       
 
         expect(
-            result.final_items[0].children[0].children[0].ccid
+            result.final_items[0].children![0].children[0].ccid
         ).toEqual('cc1');
 
 
         expect(
-            result.final_items[0].children[0].children.length
+            result.final_items[0].children![0].children.length
         ).toEqual(1);
 
     });

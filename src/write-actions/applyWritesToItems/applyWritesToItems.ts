@@ -91,7 +91,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                 mutableUpdatedItem = structuredClone(item);
                             }
                             // Get all arrays that match the scope, then recurse into applyWritesToItems for them
-                            const scopedArrays = getScopedArrays(item, action.payload, ddl);
+                            const scopedArrays = getScopedArrays<T>(item, action.payload, ddl);
 
                             for( const scopedArray of scopedArrays ) {
                                 const arrayChanges = applyWritesToItems(scopedArray.writeActions, scopedArray.items, scopedArray.ddl);

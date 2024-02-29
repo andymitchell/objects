@@ -56,10 +56,6 @@ export type NonArrayProperty<T> = {
     [P in keyof T]: T[P] extends Array<any> ? never : P
 }[keyof T];
 
-export type DotPropPathToArrayInPlainObject<T extends Record<string, any>> = {
-    [P in DotPropPathsUnion<T>]: PathValue<T, P> extends Array<any> ? P : never
-}[DotPropPathsUnion<T>];
-
 /*
 export type DotPropPathToArraySpreadingArrays<T, Prefix extends string = ''> = T extends object ? { // Can handle nesting arrays as well as object keys, e.g. {arr: {arr2: {}[]}} yields 'arr' | 'arr.arr2'
     [K in keyof T]-?: K extends string
@@ -75,33 +71,71 @@ export type DotPropPathToArraySpreadingArrays<T, Prefix extends string = ''> = T
 */
 
 
-//export type DotPropPathValidArrayValue<T, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? ElementType : never;
-export type DotPropPathValidArrayValueSimple<T extends Record<string, any>, P extends DotPropPathToArrayInPlainObject<T> = DotPropPathToArrayInPlainObject<T>> = PathValue<T, P> extends Array<infer ElementType> ? ElementType : never;
 
 
-export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
+export type PathValue<T extends Record<string, any>, P, Depth extends number = 8> = P extends `${infer Key}.${infer Rest}`
     ? Key extends keyof T
-        ? T[Key] extends Array<infer U>
+        ? NonNullable<T[Key]> extends Array<infer U>
             ? PathValue<EnsureRecord<U>, Rest>
             : PathValue<T[Key], Rest>
         : never
     : P extends keyof T
         ? T[P]
         : never;
-export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends object ? { // Can handle nesting arrays as well as object keys, e.g. {arr: {arr2: {}[]}} yields 'arr' | 'arr.arr2'
-    [K in keyof T]-?: K extends string
-        ? T[K] extends Array<infer U>
+        
+
+/*
+export type PathValue<T extends Record<string, any>, P, Depth extends number = 8> = 
+  Depth extends 0 ? never : // Check if depth is 0, return any
+  P extends `${infer Key}.${infer Rest}` 
+    ? Key extends keyof T 
+      ? NonNullable<T[Key]> extends Array<infer U> 
+        ? PathValue<EnsureRecord<U>, Rest, Prev[Depth]> // Decrement depth for arrays
+        : PathValue<T[Key], Rest, Prev[Depth]> // Decrement depth for objects
+      : never 
+    : P extends keyof T 
+      ? T[P] 
+      : never;
+      */
+      
+
+// Helper type to decrement depth
+type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];
+
+export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
+    [K in keyof T]?: K extends string 
+        ? NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
             ? U extends object
-                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, ''>}` | `${Prefix}${K}`
+                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
                 : `${Prefix}${K}`
             : T[K] extends object
-                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<T[K], ''>}`
+                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`
+                : never
+        : never;
+}[keyof T] : '';
+
+export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
+    [K in keyof T]-?: K extends string 
+        ? NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
+            ? U extends object // Check if the elements of array are objects
+                ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
+                : never // Exclude if the elements are not objects
+            : T[K] extends object
+                ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`
                 : never
         : never;
 }[keyof T] : '';
 
 
+
+
+
+
+
+
+
 export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? EnsureRecord<ElementType> : never;
+
 
 function test() {
     type Example = {
@@ -155,7 +189,7 @@ function test() {
     }
 
 
-    const g: DotPropPathToArrayInPlainObject<Example> = 'family';
+    //const g: DotPropPathToArrayInPlainObject<Example> = 'family';
     type ArrayElementType<T> = T extends (infer E)[] ? E : never;
    
     type ArrayPush<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T>> = {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DotPropPathToArraySpreadingArrays, DotPropPathToArrayInPlainObject, DotPropPathValidArrayValue, DotPropPathValidArrayValueSimple, PathValue } from "../dot-prop-paths/types";
+import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, PathValue } from "../dot-prop-paths/types";
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 
 
@@ -87,19 +87,11 @@ export type WriteActionPayloadUpdate<T extends Record<string, any>> = {
     where: WhereFilterDefinition<T>,
     method: UpdatingMethod
 }
-export type WriteActionPayloadArrayScope<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = {
+export type WriteActionPayloadArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>> = {
     type: 'array_scope',
     scope: P,
-    actions: WriteAction<DotPropPathValidArrayValue<T, P>>[] // FYI If you don't explicitly state the P generic, this will allow any array's values from T. 
+    actions: WriteAction<DotPropPathValidArrayValue<T, P>>[] // FYI If you don't explicitly state the P generic, this will fail
 }
-/*
-export type WriteActionPayloadArrayIterator<T extends Record<string, any>, P extends DotPropPathToArrayInPlainObject<T> = DotPropPathToArrayInPlainObject<T>> = {
-    type: 'array_iterator',
-    path: P,
-    data: WriteActionPayloadArrayIterator<DotPropPathValidArrayValueSimple<T, P>> | WriteActionPayloadCreate<DotPropPathValidArrayValueSimple<T, P>> | WriteActionPayloadUpdate<DotPropPathValidArrayValueSimple<T, P>> // FYI If you don't explicitly state the P generic, this will allow any array's values from T. 
-    where: WhereFilterDefinition<DotPropPathValidArrayValueSimple<T, P>>
-}
-*/
 type WriteActionPayloadDelete<T extends Record<string, any>> = {
     type: 'delete',
     where: WhereFilterDefinition<T>

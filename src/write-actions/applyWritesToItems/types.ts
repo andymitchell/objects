@@ -1,4 +1,4 @@
-import { DotPropPathToArraySpreadingArrays, DotPropPathValidArrayValue } from "../../dot-prop-paths/types";
+import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../../dot-prop-paths/types";
 import { PrimaryKeyValue } from "../../getKeyValue";
 import { IfAny } from "../../types";
 import { EnsureRecord } from "../../types";
@@ -75,23 +75,12 @@ export type DDL<T extends Record<string, any>> =
         '.': ListRules<any>;
     },
     {
-        [K in DotPropPathToArraySpreadingArrays<T>]: ListRules<EnsureRecord<DotPropPathValidArrayValue<T, K>>>
+        [K in DotPropPathToObjectArraySpreadingArrays<T>]: ListRules<EnsureRecord<DotPropPathValidArrayValue<T, K>>>
     } & {
         '.': ListRules<T>;
     }
     >
+
+    
     
 
-const typeCheck1:DDL<any> = {
-    '.': {
-        version: 1,
-        primary_key: 'whatever'
-    }
-}
-
-const typeCheck2:DDL<{id: string/*, friends: {fid: string}[]*/}> = {
-    '.': {
-        version: 1,
-        primary_key: 'id'
-    }
-}

@@ -89,6 +89,7 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
         while( pathArray.length ) {
             count++;
             const key = pathArray.shift();
+            if( !key ) break;
             if( traversalPath ) traversalPath += '.';
             traversalPath += key;
 

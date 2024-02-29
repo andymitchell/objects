@@ -50,11 +50,11 @@ describe('isPlainObject', () => {
     });
 
     test('object with function succeeds', () => {
-        expect(isPlainObject({f: () => null})).toBe(true);
+        expect(isPlainObject({f: ():null => null})).toBe(true);
     });
 
     test('lodash parity: object with function succeeds', () => {
-        expect(isPlainObjectLodash({f: () => null})).toBe(true);
+        expect(isPlainObjectLodash({f: ():null => null})).toBe(true);
     });
 
     test('structuredClone succeeds', () => {

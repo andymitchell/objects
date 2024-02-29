@@ -3,7 +3,7 @@ import { ListRules } from "./types";
 
 export default function convertWriteActionToGrowSetSafe<T extends Record<string, any>>(
     action:WriteAction<T>,
-    item: T,
+    item: Readonly<T>,
     rules: ListRules<T>
     ):WriteAction<T>[] {
 

@@ -22,12 +22,12 @@ export type PathValue<T, P> = P extends `${infer Key}.${infer Rest}`
 
 import { EnsureRecord } from "../types";
 
-export type DotPropPathsRecord<T> = {
+export type DotPropPathsRecord<T extends Record<string, any>> = {
     [P in DotPropPathsUnion<T> as string & P]: PathValue<T, P>
 };
 
 
-export type DotPropPathsRecordWithOptionalAdditionalValues<T, EV> = {
+export type DotPropPathsRecordWithOptionalAdditionalValues<T extends Record<string, any>, EV> = {
     [P in DotPropPathsUnion<T> as string & P]: PathValue<T, P> | EV
 };
 
@@ -56,7 +56,7 @@ export type NonArrayProperty<T> = {
     [P in keyof T]: T[P] extends Array<any> ? never : P
 }[keyof T];
 
-export type DotPropPathToArrayInPlainObject<T> = {
+export type DotPropPathToArrayInPlainObject<T extends Record<string, any>> = {
     [P in DotPropPathsUnion<T>]: PathValue<T, P> extends Array<any> ? P : never
 }[DotPropPathsUnion<T>];
 
@@ -76,7 +76,7 @@ export type DotPropPathToArraySpreadingArrays<T, Prefix extends string = ''> = T
 
 
 //export type DotPropPathValidArrayValue<T, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? ElementType : never;
-export type DotPropPathValidArrayValueSimple<T, P extends DotPropPathToArrayInPlainObject<T> = DotPropPathToArrayInPlainObject<T>> = PathValue<T, P> extends Array<infer ElementType> ? ElementType : never;
+export type DotPropPathValidArrayValueSimple<T extends Record<string, any>, P extends DotPropPathToArrayInPlainObject<T> = DotPropPathToArrayInPlainObject<T>> = PathValue<T, P> extends Array<infer ElementType> ? ElementType : never;
 
 
 export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
@@ -101,7 +101,7 @@ export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Pre
 }[keyof T] : '';
 
 
-export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? ElementType : never;
+export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? EnsureRecord<ElementType> : never;
 
 function test() {
     type Example = {
@@ -141,7 +141,7 @@ function test() {
     type ExampleGenericTypedValues2 = Partial<DotPropPathsRecordWithOptionalAdditionalValues<ExampleGeneric<{ city: string }>, ValueComparison>>;
     const e: ExampleGenericTypedValues2 = { 'address.city': { contains: 'Lon' } };
 
-    type Filter<T> = Partial<DotPropPathsRecordWithOptionalAdditionalValues<T, ValueComparison>>
+    type Filter<T extends Record<string, any>> = Partial<DotPropPathsRecordWithOptionalAdditionalValues<T, ValueComparison>>
     const f: Filter<ExampleGeneric<{ city: string }>> = { age: 1, 'address.city': 'New York' }; // OK
     class ExampleClass<T> {
         constructor() {
@@ -158,7 +158,7 @@ function test() {
     const g: DotPropPathToArrayInPlainObject<Example> = 'family';
     type ArrayElementType<T> = T extends (infer E)[] ? E : never;
    
-    type ArrayPush<T, P extends DotPropPathToArraySpreadingArrays<T>> = {
+    type ArrayPush<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T>> = {
         type: 'array_create',
         path: P,
         value: ArrayElementType<PathValue<T, P>>

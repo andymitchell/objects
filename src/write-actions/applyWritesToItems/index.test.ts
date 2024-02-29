@@ -31,7 +31,7 @@ describe('applyWritesToItems test', () => {
         id: '2'
     };
     
-    const makeWrite = <T>(payload:WriteActionPayload<T>):WriteAction<T> => {
+    const makeWrite = <T extends Record<string, any>>(payload:WriteActionPayload<T>):WriteAction<T> => {
         return {type: 'write', ts: 0, payload};
     }
     
@@ -157,7 +157,6 @@ describe('applyWritesToItems test', () => {
             ddl
         );
 
-    
         expect(
             result.final_items[0].children[0].children[0].ccid
         ).toEqual('cc1');

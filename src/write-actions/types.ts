@@ -3,7 +3,7 @@ import { DotPropPathToArraySpreadingArrays, DotPropPathToArrayInPlainObject, Dot
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 
 
-export const VALUE_TO_DELETE_KEY = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
+export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
 
 
 export function createWriteActionSchema(schema: z.AnyZodObject) {
@@ -111,7 +111,7 @@ export type WriteAction<T extends Record<string, any>> = {
     payload: WriteActionPayload<T>
 }
 
-export function isUpdateOrDeleteWriteActionPayload<T>(x: unknown): x is WriteActionPayloadUpdate<T> | WriteActionPayloadDelete<T> | WriteActionPayloadArrayScope<T>{
+export function isUpdateOrDeleteWriteActionPayload<T extends Record<string, any>>(x: unknown): x is WriteActionPayloadUpdate<T> | WriteActionPayloadDelete<T> | WriteActionPayloadArrayScope<T>{
     return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete');
 }
 

@@ -47,14 +47,14 @@ export function postgresCreatePropertySqlMapFromSchema(schema:z.ZodTypeAny, sqlC
     return (dotPropPath:string) => pathsToSqlKey[dotPropPath];
 }
 
-export default function postgresWhereClauseBuilder<T = any>(filter:WhereFilterDefinition<T>, propertySqlMap:PropertySqlMap):PreparedWhereClauseStatement {
+export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:PropertySqlMap):PreparedWhereClauseStatement {
     const statementArguments:PreparedStatementArgument[] = [];
 
     const whereClauseStatement = _postgresWhereClauseBuilder(filter, statementArguments, propertySqlMap);
     return {whereClauseStatement, statementArguments};
 }
 
-function addSubClauseString<T>(andClauses: string[], statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap, type: WhereFilterLogicOperatorsTyped, subFilters: WhereFilterDefinition<T>[]):string[] {
+function addSubClauseString<T extends Record<string, any>>(andClauses: string[], statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap, type: WhereFilterLogicOperatorsTyped, subFilters: WhereFilterDefinition<T>[]):string[] {
     let subClauseString = '';
     const subClauses = [...subFilters].map(subFilter => _postgresWhereClauseBuilder(subFilter, statementArguments, propertySqlMap));
     if( type==='NOT' ) {
@@ -66,7 +66,7 @@ function addSubClauseString<T>(andClauses: string[], statementArguments: Prepare
     return [...andClauses, subClauseString];
 }
 
-function _postgresWhereClauseBuilder<T = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap):string {
+function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:PropertySqlMap):string {
     
     
 
@@ -74,8 +74,9 @@ function _postgresWhereClauseBuilder<T = any>(filter:WhereFilterDefinition<T>, s
         let andClauses:string[] = [];
 
         for( const type of WhereFilterLogicOperators ) {
-            if( isWhereFilterArray(filter[type]) ) {
-                andClauses = addSubClauseString(andClauses, statementArguments, propertySqlMap, type, filter[type]);
+            const filterType = filter[type];
+            if( isWhereFilterArray(filterType) ) {
+                andClauses = addSubClauseString(andClauses, statementArguments, propertySqlMap, type, filterType);
             }
         }
         

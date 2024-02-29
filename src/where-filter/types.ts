@@ -16,13 +16,13 @@ export type ValueComparison = ValueComparisonContains | ValueComparisonArrayCont
 
 
 
-type PartialObjectFilter<T> = Partial<DotPropPathsRecordWithOptionalAdditionalValues<T, ValueComparison>>;
-type LogicFilter<T> = {
+type PartialObjectFilter<T extends Record<string, any>> = Partial<DotPropPathsRecordWithOptionalAdditionalValues<T, ValueComparison>>;
+type LogicFilter<T extends Record<string, any>> = {
     OR?: WhereFilterDefinition<T>[],
     AND?: WhereFilterDefinition<T>[],
     NOT?: WhereFilterDefinition<T>[]
 }
-export type WhereFilterDefinition<T = any> =
+export type WhereFilterDefinition<T extends Record<string, any> = any> =
     PartialObjectFilter<T>
     |
     LogicFilter<T>
@@ -129,7 +129,7 @@ function safeJson(object:any):string | undefined {
 export type UpdatingMethod = 'merge' | 'assign';
 export const UpdatingMethodSchema = z.enum(['merge', 'assign']);
 
-export function isLogicFilter<T>(filter:WhereFilterDefinition<any>):filter is LogicFilter<T> {
+export function isLogicFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<any>):filter is LogicFilter<T> {
     return WhereFilterLogicOperators.some(type => {
         return filter.hasOwnProperty(type) && Array.isArray(filter[type])
     });

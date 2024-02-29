@@ -8,7 +8,7 @@ export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 
 
 
-export interface WriteStrategy<T> {
+export interface WriteStrategy<T extends Record<string, any>> {
     create_handler: (writeActionPayload: WriteActionPayloadCreate<T>) => { created: true, item: T } | { created: false, item: undefined };
     update_handler: (writeActionPayload: WriteActionPayloadUpdate<T>, target: T, alreadyCloned?: boolean) => { updated: boolean, item: T }
 }

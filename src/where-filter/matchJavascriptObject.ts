@@ -23,7 +23,7 @@ export default function matchJavascriptObject<T extends Record<string, any> = Re
         }
         throw new Error("matchJavascriptObject requires plain object. Received: "+json)
     }
-    console.warn("RUNNING MATCH PASSED: "+JSON.stringify(object));
+    //console.warn("RUNNING MATCH PASSED: "+JSON.stringify(object));
     return _matchJavascriptObject(object, filter, [filter]);
 }
 function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:T, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {

@@ -74,7 +74,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                 // TODO Check permissions
 
                 // Check if it's a grow set (otherwise just do the action)
-                const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, mutableUpdatedItem, rules);
+                const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, item, rules);
                 
                 for (const action of maybeExpandedWriteActions) {
                     switch (action.payload.type) {

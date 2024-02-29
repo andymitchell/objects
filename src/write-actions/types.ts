@@ -41,6 +41,20 @@ export function createWriteActionSchema(schema: z.AnyZodObject) {
     }
 
     const WriteActionPayloadArrayCreateSchema = z.object({
+        type: z.literal('array_scope'),
+        scope: z.string(),
+        actions: z.array(z.any()), // This gets tighter control in the .refine below 
+    }).refine((data) => {
+        return true;
+        // TODO Restore this: 
+        //return validateValueAtPath(schema, data.path, data.value);
+    }, {
+        message: "Value does not match the schema at the specified path",
+        path: ["value"]
+    });
+
+    /*
+    const WriteActionPayloadArrayCreateSchema = z.object({
         type: z.literal('array_create'),
         path: z.string(),
         value: z.any(), // This gets tighter control in the .refine below 
@@ -51,6 +65,7 @@ export function createWriteActionSchema(schema: z.AnyZodObject) {
         message: "Value does not match the schema at the specified path",
         path: ["value"]
     });
+    */
 
     const WriteActionPayloadDeleteSchema = z.object({
         type: z.literal('delete'),

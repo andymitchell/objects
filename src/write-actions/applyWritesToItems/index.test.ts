@@ -1,17 +1,32 @@
+import { z } from "zod";
 import applyWritesToItems from ".";
 import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope } from "../types";
 import { DDL } from "./types";
 
 describe('applyWritesToItems test', () => {
-    test('empty', () => {
-        expect(true).toBe(true);
-    })
     
-    type Obj = {
+    
+    const ObjSchema = z.object({
+        id: z.string(),
+        text: z.string().optional(),
+        children: z.array(
+          z.object({
+            cid: z.string(),
+            children: z.array(
+              z.object({
+                ccid: z.string(),
+              }).strict()
+            ),
+          }).strict()
+        ).optional(),
+      }).strict();
+      
+    type Obj = z.infer<typeof ObjSchema>;
+    /*{
         id: string,
         text?: string,
         children?: {cid: string, children: {ccid: string}[]}[]
-    }
+    }*/
 
     const ddl:DDL<Obj> = {
         '.': {
@@ -57,25 +72,28 @@ describe('applyWritesToItems test', () => {
                         data: data2
                     }
                 }
-            ], 
+            ]
+            ,
             [
                 obj1
             ], 
+            ObjSchema,
             ddl
         );
 
         
+        expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
+        expect(
+            result.changes.added[0]
+        ).toEqual(obj2);
+
         
         expect(
-            result.added[0]
+            result.changes.final_items[1]
         ).toEqual(obj2);
 
         expect(
-            result.final_items[1]
-        ).toEqual(obj2);
-
-        expect(
-            result.final_items.length
+            result.changes.final_items.length
         ).toEqual(2);
         
     });
@@ -100,15 +118,17 @@ describe('applyWritesToItems test', () => {
             [
                 structuredClone(obj1)
             ], 
+            ObjSchema,
             ddl
         );
 
+        expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
         expect(
-            result.updated[0]
+            result.changes.updated[0]
         ).toEqual({...obj1, text: 'T1'});
 
         expect(
-            result.final_items[0]
+            result.changes.final_items[0]
         ).toEqual({...obj1, text: 'T1'});
     });
 
@@ -125,15 +145,17 @@ describe('applyWritesToItems test', () => {
             [
                 structuredClone(obj1)
             ], 
+            ObjSchema,
             ddl
         );
 
+        expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
         expect(
-            result.deleted.length
+            result.changes.deleted.length
         ).toEqual(1);
 
         expect(
-            result.final_items.length
+            result.changes.final_items.length
         ).toEqual(0);
     });
     
@@ -180,20 +202,53 @@ describe('applyWritesToItems test', () => {
             [
                 objWithChildren
             ], 
+            ObjSchema,
             ddl
         );
         
        
-
+        
+        expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
         expect(
-            result.final_items[0].children![0].children[0].ccid
+            result.changes.final_items[0].children![0].children[0].ccid
         ).toEqual('cc1');
 
 
         expect(
-            result.final_items[0].children![0].children.length
+            result.changes.final_items[0].children![0].children.length
         ).toEqual(1);
 
     });
+
+    
+    test('update break schema', () => {
+
+        const result = applyWritesToItems<Obj>(
+            [
+                {type: 'write', ts: 0, payload: {
+                    type: 'update',
+                    method: 'merge',
+                    data: {
+                        // @ts-ignore wilfully breaking schema here 
+                        none_key: 'T1'
+                    },
+                    where: {
+                        id: '1'
+                    }
+                }}
+            ], 
+            [
+                structuredClone(obj1)
+            ], 
+            ObjSchema,
+            ddl
+        );
+
+        expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
+        expect(
+            result.error.failed
+        ).toEqual({...obj1, none_key: 'T1'});
+    });
+    
     
 });

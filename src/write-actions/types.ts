@@ -3,10 +3,12 @@ import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArr
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 
 
+
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
 
 
-export function createWriteActionSchema(schema: z.AnyZodObject) {
+
+export function createWriteActionSchema(schema: z.AnyZodObject = z.object({}).catchall(z.unknown())) {
     const WriteActionPayloadCreateSchema = z.object({
         type: z.literal('create'),
         data: schema.strict()
@@ -85,8 +87,10 @@ export function createWriteActionSchema(schema: z.AnyZodObject) {
         payload: WriteActionPayloadSchema,
     });
 
-    return { writeAction: WriteActionSchema, payload: WriteActionPayloadSchema };
+    return { writeAction: WriteActionSchema, payload: WriteActionPayloadSchema }
 }
+
+
 
 type NonArrayProperty<T> = {
     [P in keyof T]: T[P] extends Array<any> ? never : P
@@ -124,3 +128,10 @@ export function isUpdateOrDeleteWriteActionPayload<T extends Record<string, any>
 
 export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], final_items: T[] }
 
+export type AppliedWritesOutputResponse<T extends Record<string, any>> = {
+    status: 'ok',
+    changes: AppliedWritesOutput<T>
+} | {
+    status: 'error', 
+    error: Record<string, any> & {message: string, type?: string}
+}

@@ -1,6 +1,6 @@
 import { merge } from "lodash-es";
 import { WriteStrategy } from "../types";
-import deleteUnwantedKeysFromDestination from "../deleteUnwantedKeysFromDestination";
+import deleteUnusedKeysFromDestination from "../deleteUnusedKeysFromDestination";
 import { VALUE_TO_DELETE_KEY } from "../../types";
 
 const writeLww: WriteStrategy<Record<string, any>> = {
@@ -19,7 +19,7 @@ const writeLww: WriteStrategy<Record<string, any>> = {
         } else {
             Object.assign(target, writeActionPayload.data); // MUTATION
         }
-        deleteUnwantedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
+        deleteUnusedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
 
 
         return { updated: true, item: target };

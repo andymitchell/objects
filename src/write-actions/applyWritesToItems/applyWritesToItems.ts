@@ -1,5 +1,5 @@
 import { isEqual } from "lodash-es";
-import { AppliedWritesOutput, WriteAction,  isUpdateOrDeleteWriteActionPayload } from "../types";
+import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  isUpdateOrDeleteWriteActionPayload } from "../types";
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter";
 import safeKeyValue from "../../getKeyValue";
@@ -8,9 +8,10 @@ import applyAccumulatorToHashes from "./applyAccumulatorToHashes";
 import convertWriteActionToGrowSetSafe from "./convertWriteActionToGrowSetSafe";
 import writeLww from "./writeStrategies/lww";
 import getScopedArrays from "./getScopedArrays";
+import { z } from "zod";
 
 
-export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>>, ddl: DDL<T>, accumulator?: AppliedWritesOutput<T>): AppliedWritesOutput<T> {
+export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>>, schema: z.ZodType<T, any, any>, ddl: DDL<T>, accumulator?: AppliedWritesOutput<T>): AppliedWritesOutputResponse<T> {
 
     // Load the rules
     const rules:ListRules<T> | undefined = ddl['.'];
@@ -91,14 +92,17 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                 mutableUpdatedItem = structuredClone(item);
                             }
                             // Get all arrays that match the scope, then recurse into applyWritesToItems for them
-                            const scopedArrays = getScopedArrays<T>(item, action.payload, ddl);
+                            const scopedArrays = getScopedArrays<T>(item, action.payload, schema, ddl);
 
                             for( const scopedArray of scopedArrays ) {
-                                const arrayChanges = applyWritesToItems(scopedArray.writeActions, scopedArray.items, scopedArray.ddl);
+                                const arrayResponse = applyWritesToItems(scopedArray.writeActions, scopedArray.items, scopedArray.schema, scopedArray.ddl);
+                                if( arrayResponse.status!=='ok' ) {
+                                    return arrayResponse;
+                                }
                                 setProperty(
                                     mutableUpdatedItem,
                                     scopedArray.path,
-                                    arrayChanges.final_items
+                                    arrayResponse.changes.final_items
                                 )
                             }
 
@@ -131,18 +135,24 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     }
     final = [...final];
 
-    const output: AppliedWritesOutput<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), deleted: Object.values(deletedHash), final_items: final };
+    const changes: AppliedWritesOutput<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), deleted: Object.values(deletedHash), final_items: final };
 
-    return output;
-}
-
-/*
-function blah<T extends Record<string, any>>(primary_key: keyof T) {
-    const ddl:DDL<T> = {
-        '.': {
-            version: 1,
-            primary_key
+    // Verify that every object is still in schema
+    const modified = [...changes.added, ...changes.updated];
+    const failed = modified.find(x => !schema.safeParse(x).success);
+    if( failed ) {
+        const parseResult = schema.safeParse(failed);
+        if( parseResult.success ) throw new Error("TypeGuard - it should only ever be unsuccessful");
+        return {
+            status: 'error',
+            error: {
+                type: 'schema_fail',
+                message: "Apply writes to item broke the schema.",
+                issues: parseResult.error.issues,
+                failed
+            }
         }
     }
+
+    return {status: 'ok', changes};
 }
-*/

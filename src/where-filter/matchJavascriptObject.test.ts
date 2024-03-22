@@ -167,6 +167,32 @@ describe('testMatchJavascriptObject', () => {
         )).toBe(true);
     });
 
+    /*
+    TODO
+    test('Match nested array', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    addresses: [
+                        {
+                            city: 'York'
+                        }
+                        , 
+                        {
+                            city: 'London'
+                        }]
+                }
+            },
+            {
+                'contact.addresses': {
+                    array_contains: ''
+                }
+            }
+        )).toBe(true);
+    });
+    */
+
 
     test('Do not match as array does not contain Houston', () => {
         expect(matchJavascriptObject(

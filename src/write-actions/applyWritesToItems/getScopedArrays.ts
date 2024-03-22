@@ -1,9 +1,11 @@
+import { z } from "zod";
 import { getPropertySpreadingArrays } from "../../dot-prop-paths/getPropertySimpleDot";
 import { DotPropPathValidArrayValue } from "../../dot-prop-paths/types";
+import { getZodSchemaAtSchemaDotPropPath } from "../../dot-prop-paths/zod";
 import { WriteAction, WriteActionPayloadArrayScope } from "../types";
 import { DDL } from "./types";
 
-export default function getScopedArrays<T extends Record<string, any>>(item:T, payload:Readonly<WriteActionPayloadArrayScope<T>>, rules:DDL<T>) {
+export default function getScopedArrays<T extends Record<string, any>>(item:T, payload:Readonly<WriteActionPayloadArrayScope<T>>, schema: z.ZodType<T, any, any>, rules:DDL<T>) {
     type ScopedType = DotPropPathValidArrayValue<T, typeof payload.scope>; // Note that because of generics, this type is meaningless to the type checker. Helpful to read though. 
 
     type ScopedRules = Partial<DDL<ScopedType>>;
@@ -19,12 +21,16 @@ export default function getScopedArrays<T extends Record<string, any>>(item:T, p
 
     const propertyResults = getPropertySpreadingArrays(item, payload.scope);
 
+    const scopedSchema = getZodSchemaAtSchemaDotPropPath(schema, payload.scope);
+    if( !scopedSchema ) throw new Error("Could not scope the schema. Suggests the schema and the dot-prop-path don't align.");
+
     return propertyResults.map(scopedItems => {
         if( !Array.isArray(scopedItems.value) ) throw new Error('array_scope paths must be to an array');
         return {
             writeActions: payload.actions as WriteAction<ScopedType>[],
             items: scopedItems.value as ScopedType[],
             path: scopedItems.path,
+            schema: scopedSchema,
             ddl: scopedRules as DDL<ScopedType>
         }
     });

@@ -196,7 +196,7 @@ const writeLww: WriteStrategy<Record<string, any>> = {
         } else {
             Object.assign(target, writeActionPayload.data); // MUTATION
         }
-        deleteUnwantedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
+        deleteUnusedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
 
 
         return { updated: true, item: target };
@@ -460,7 +460,7 @@ function applyWritesToItemsOLD<T extends Record<string, any>>(writeActions: Writ
                         } else {
                             Object.assign(mutableUpdatedItem, action.payload.data); // MUTATION
                         }
-                        deleteUnwantedKeysFromDestination<T>(action.payload.data, mutableUpdatedItem, VALUE_TO_DELETE_KEY);
+                        deleteUnusedKeysFromDestination<T>(action.payload.data, mutableUpdatedItem, VALUE_TO_DELETE_KEY);
                     } else if (action.payload.type === 'array_create') {
                         let existingArray = DotPropPaths.getProperty(mutableUpdatedItem, action.payload.path) as unknown as unknown[] | undefined;
                         if (existingArray === undefined) existingArray = [];

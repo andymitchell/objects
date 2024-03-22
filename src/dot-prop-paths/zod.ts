@@ -51,17 +51,33 @@ function _convertSchemaToDotPropPathKind(
 
 
 export function getZodKindAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropPath): ZodKind | undefined {
+
+    const schemaAtPath = getZodSchemaAtSchemaDotPropPath(schema, path);
+    return schemaAtPath?._def.typeName;
+
+
+}
+
+
+export function getZodSchemaAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropPath): ZodTypeAny | undefined {
     const keys = path.split('.');
     let currentSchema: ZodTypeAny = schema;
 
     for (const key of keys) {
+        while( currentSchema instanceof z.ZodArray || currentSchema._def.innerType ) {
+            // Step into it
+            if( currentSchema instanceof z.ZodArray ) {
+                currentSchema = currentSchema.element;
+            } else if( currentSchema._def.innerType ) {
+                // Schemas like z.ZodOptional and z.Nullable wrap the type
+                currentSchema = currentSchema._def.innerType;
+            }
+        }
+
         // @ts-ignore
         if (currentSchema.shape) {
             // @ts-ignore
             currentSchema = currentSchema.shape[key];
-        } else if (currentSchema._def.innerType) {
-            // For schemas like arrays or nullable, where the type is wrapped.
-            currentSchema = currentSchema._def.innerType;
         } else {
             return undefined; // Path is not valid for the given schema
         }
@@ -71,6 +87,9 @@ export function getZodKindAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropP
         }
     }
 
-    return currentSchema._def.typeName;
+    if( currentSchema instanceof z.ZodArray ) currentSchema = currentSchema.element;
+
+    return currentSchema;
 
 }
+

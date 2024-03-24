@@ -1,55 +1,49 @@
 import { z } from "zod";
 import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, PathValue } from "../dot-prop-paths/types";
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
+import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod";
 
 
 
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
 
 
+type ArrayScopeActionData = {
+    type: "array_scope";
+    scope: string;
+    actions: any[];
+};
 
-export function createWriteActionSchema(schema: z.AnyZodObject = z.object({}).catchall(z.unknown())) {
+function checkArrayScopeActions(schema:z.ZodTypeAny, data: ArrayScopeActionData):boolean {
+    const subSchema = getZodSchemaAtSchemaDotPropPath(schema, data.scope);
+    if( !(subSchema instanceof z.ZodObject) ) {
+        return false;
+    }
+    const subActionSchema = createWriteActionSchema(subSchema);
+    return data.actions.every(x => subActionSchema.writeAction.safeParse(x).success);
+}
+
+//z.object({}).catchall(z.unknown())
+export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
+    const schema:z.ZodTypeAny = objectSchema ?? z.record(z.any());
     const WriteActionPayloadCreateSchema = z.object({
         type: z.literal('create'),
-        data: schema.strict()
+        data: objectSchema? objectSchema.strict() : schema
     });
 
     const WriteActionPayloadUpdateSchema = z.object({
         type: z.literal('update'),
-        data: schema.partial().strict(),
+        data: objectSchema? objectSchema.partial().strict() : schema,
         where: WhereFilterSchema,
         method: UpdatingMethodSchema,
     });
-
-    function validateValueAtPath(schema: z.ZodTypeAny, path: string, value: unknown): boolean {
-        if( typeof path!=='string' ) return false;
-        
-        const pathParts = path.split('.');
-        let currentSchema: z.ZodTypeAny = schema;
-        for (const part of pathParts) {
-            if (currentSchema instanceof z.ZodObject) {
-                currentSchema = currentSchema.shape[part] || z.any();
-            } else {
-                // TODO Maybe... Handle other types (arrays, unions, etc.) as needed
-                return false; // Path does not correctly correspond to the schema
-            }
-        }
-        if( !(currentSchema instanceof z.ZodArray) ) {
-            return false;
-        }
-        currentSchema = currentSchema.element;
-        const result = currentSchema.safeParse(value);
-        return result.success;
-    }
 
     const WriteActionPayloadArrayCreateSchema = z.object({
         type: z.literal('array_scope'),
         scope: z.string(),
         actions: z.array(z.any()), // This gets tighter control in the .refine below 
     }).refine((data) => {
-        return true;
-        // TODO Restore this: 
-        //return validateValueAtPath(schema, data.path, data.value);
+        return checkArrayScopeActions(schema, data);
     }, {
         message: "Value does not match the schema at the specified path",
         path: ["value"]
@@ -87,9 +81,13 @@ export function createWriteActionSchema(schema: z.AnyZodObject = z.object({}).ca
         payload: WriteActionPayloadSchema,
     });
 
-    return { writeAction: WriteActionSchema, payload: WriteActionPayloadSchema }
+    return { writeAction: WriteActionSchema as typeof schema, payload: WriteActionPayloadSchema }
 }
 
+type EnsureBidirectionalCompatibility<T1, T2> = [T1] extends [T2] ? [T2] extends [T1] ? true : false : false;
+function isTypeEqual<T1, T2>(value: EnsureBidirectionalCompatibility<T1, T2> extends true ? true : never) {}
+const writeActionSchema = createWriteActionSchema().writeAction;
+isTypeEqual<z.infer<typeof writeActionSchema>, WriteAction<any>>(true);
 
 
 type NonArrayProperty<T> = {

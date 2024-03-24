@@ -79,15 +79,17 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
         type: z.literal('write'),
         ts: z.number(),
         payload: WriteActionPayloadSchema,
-    });
+    }) as z.ZodType<WriteAction<any>>;
 
-    return { writeAction: WriteActionSchema as typeof schema, payload: WriteActionPayloadSchema }
+    return { writeAction: WriteActionSchema, payload: WriteActionPayloadSchema }
 }
 
 type EnsureBidirectionalCompatibility<T1, T2> = [T1] extends [T2] ? [T2] extends [T1] ? true : false : false;
 function isTypeEqual<T1, T2>(value: EnsureBidirectionalCompatibility<T1, T2> extends true ? true : never) {}
 const writeActionSchema = createWriteActionSchema().writeAction;
 isTypeEqual<z.infer<typeof writeActionSchema>, WriteAction<any>>(true);
+
+
 
 
 type NonArrayProperty<T> = {

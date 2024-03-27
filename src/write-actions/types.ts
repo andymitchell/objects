@@ -1,7 +1,9 @@
-import { z } from "zod";
+import { ZodIssueCode, z } from "zod";
 import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, PathValue } from "../dot-prop-paths/types";
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod";
+import isTypeEqual from "../isTypeEqual";
+import { PrimaryKeyValue } from "../getKeyValue";
 
 
 
@@ -84,8 +86,6 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
     return { writeAction: WriteActionSchema, payload: WriteActionPayloadSchema }
 }
 
-type EnsureBidirectionalCompatibility<T1, T2> = [T1] extends [T2] ? [T2] extends [T1] ? true : false : false;
-function isTypeEqual<T1, T2>(value: EnsureBidirectionalCompatibility<T1, T2> extends true ? true : never) {}
 const writeActionSchema = createWriteActionSchema().writeAction;
 isTypeEqual<z.infer<typeof writeActionSchema>, WriteAction<any>>(true);
 
@@ -126,6 +126,86 @@ export function isUpdateOrDeleteWriteActionPayload<T extends Record<string, any>
     return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete');
 }
 
+/*
+export const WriteSchemaFailuresSchema = z.object({
+    items: z.array(z.object({
+        item: z.record(z.any()),
+        actions: z.array(z.object({
+            action: createWriteActionSchema().writeAction,
+            issues: z.array(z.any())    
+        }))
+    })),
+    actions: z.array(createWriteActionSchema().writeAction)
+});
+export type WriteSchemaFailures<T extends Record<string, any>> = {
+    items: Array<{item: T, actions: {action: WriteAction<T>, issues: z.ZodIssue[]}[]}>,
+    actions: WriteAction<T>[]
+}
+isTypeEqual<z.infer<typeof WriteSchemaFailuresSchema>, WriteSchemaFailures<any>>(true);
+*/
+
+
+export function createWriteActionFailuresSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.array(z.object({
+        action: (createWriteActionSchema().writeAction as z.ZodType<WriteAction<T>>),
+        affected_items: z.array(z.object({
+            item: (z.record(z.any()) as z.ZodType<T>),
+            error_details: z.array(z.union([
+                z.record(z.any()).and(z.object({type: z.literal('custom')})),
+                z.object({
+                    type: z.literal('schema'),
+                    issues: (z.array(z.any()) as z.ZodType<z.ZodIssue[]>)
+                }),
+                z.object({
+                    type: z.literal('missing_key'),
+                    primary_key: z.union([z.string(), z.number(), z.symbol()])
+                })
+            ]))
+        }))
+    }));
+}
+const WriteActionFailuresSchema = createWriteActionFailuresSchema();
+export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'custom'} | 
+    {
+        type: 'schema',
+        issues: z.ZodIssue[]
+    } | 
+    {
+        type: 'missing_key',
+        primary_key: string | number | symbol
+    };
+export type WriteActionFailures<T extends Record<string, any> = Record<string, any>> = {
+    action: WriteAction<T>,
+    affected_items: {
+        item: T,
+        error_details: WriteActionFailuresErrorDetails[]
+    }[]
+
+}[];
+isTypeEqual<z.infer<typeof WriteActionFailuresSchema>, WriteActionFailures<any>>(true);
+/*
+Clever type system for making it generic, BUT, it's not equivalent to WriteActionFailures, or even other WriteActionFailuresGeneric of same T.. it's a very complex inference. 
+function inferWriteActionFailures<T extends Record<string, any>>() {
+    return createWriteActionFailuresSchema<T>();
+}
+export type WriteActionFailuresGeneric<T extends Record<string, any> = Record<string, any>> = z.infer<ReturnType<typeof inferWriteActionFailures<T>>>;
+*/
+
+
+// TODO Replace this with createCustomGeneralError (currently in breef codebase)
+export const WriteActionErrorSchema = z.record(z.any()).and(z.object({
+    message: z.string(),
+    type: z.string().optional(),
+    failed_actions: WriteActionFailuresSchema
+}));
+export type WriteActionError<T extends Record<string, any> = Record<string, any>> = Record<string, any> & {
+    message: string, 
+    type?: string, 
+    failed_actions: WriteActionFailures<T>
+}
+isTypeEqual<z.infer<typeof WriteActionErrorSchema>, WriteActionError<any>>(true);
+
+
 export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], final_items: T[] }
 
 export type AppliedWritesOutputResponse<T extends Record<string, any>> = {
@@ -133,5 +213,5 @@ export type AppliedWritesOutputResponse<T extends Record<string, any>> = {
     changes: AppliedWritesOutput<T>
 } | {
     status: 'error', 
-    error: Record<string, any> & {message: string, type?: string}
+    error:  WriteActionError<T>
 }

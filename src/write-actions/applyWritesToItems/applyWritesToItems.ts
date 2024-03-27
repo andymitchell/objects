@@ -1,5 +1,5 @@
 import { isEqual } from "lodash-es";
-import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  isUpdateOrDeleteWriteActionPayload } from "../types";
+import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionFailures,  WriteActionFailuresErrorDetails,  isUpdateOrDeleteWriteActionPayload } from "../types";
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter";
 import safeKeyValue from "../../getKeyValue";
@@ -9,12 +9,21 @@ import convertWriteActionToGrowSetSafe from "./convertWriteActionToGrowSetSafe";
 import writeLww from "./writeStrategies/lww";
 import getScopedArrays from "./getScopedArrays";
 import { z } from "zod";
+import WriteActionFailuresTracker from "./WriteActionFailuresTracker";
+
+
+
+
 
 
 export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>>, schema: z.ZodType<T, any, any>, ddl: DDL<T>, accumulator?: AppliedWritesOutput<T>): AppliedWritesOutputResponse<T> {
 
     // Load the rules
     const rules:ListRules<T> | undefined = ddl['.'];
+
+    // Track schema issues
+    // #fail_continues: the higher up ideally wants to know every action that fails (so a it can mark them as unrecoverable in one hit), and every item that'll fail as a consequence (because if it applied optimistic updates, it needs to roll them back)
+    const failureTracker = new WriteActionFailuresTracker<T>(schema, rules);
 
     // Choose the strategy
     let writeStrategy: WriteStrategy<T>;
@@ -39,18 +48,27 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     const existingIds = new Set(items.map(item => safeKeyValue(item[rules.primary_key])));
     for (const action of writeActions) {
         if (action.payload.type === 'create') {
-            const pk = safeKeyValue(action.payload.data[rules.primary_key]);
-            if (!existingIds.has(pk)) {
-                // TODO Check permissions
-                const createdResult = writeStrategy.create_handler(action.payload);
-                if (createdResult.created) {
-                    // TODO Run pretriggers
-                    addedHash[pk] = createdResult.item;
+            const pk = safeKeyValue(action.payload.data[rules.primary_key], true);
+            // Allow missing pk, which will arise if the schema or DDL is wrong... we then want it to 
+            if( pk ) {
+                if (!existingIds.has(pk)) {
+                    // TODO Check permissions
+                    const createdResult = writeStrategy.create_handler(action.payload);
+                    if (createdResult.created) {
+                        // TODO Run pretriggers
+
+                        const schemaOk = failureTracker.testSchema(action, createdResult.item);
+                        if( schemaOk ) {
+                            addedHash[pk] = createdResult.item;
+                        } // #fail_continues
+                    } else {
+                        // TODO Handle or just ignore?
+                    }
                 } else {
-                    // TODO Handle or just ignore?
+                    console.warn("applyWriteItems: Tried to create an object with an ID that already exists.");
                 }
             } else {
-                console.warn("applyWriteItems: Tried to create an object with an ID that already exists.");
+                failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
             }
         }
     }
@@ -84,7 +102,12 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                 mutableUpdatedItem = structuredClone(item);
                             }
 
-                            mutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem, true).item;
+                            const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem, true).item;
+                            const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
+                            if( schemaOk ) {
+                                mutableUpdatedItem = unvalidatedMutableUpdatedItem;
+                            } // #fail_continues
+
 
                             break;
                         case 'array_scope':
@@ -97,6 +120,9 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                             for( const scopedArray of scopedArrays ) {
                                 const arrayResponse = applyWritesToItems(scopedArray.writeActions, scopedArray.items, scopedArray.schema, scopedArray.ddl);
                                 if( arrayResponse.status!=='ok' ) {
+                                    if( arrayResponse.error.type==='schema_failure' ) {
+                                        failureTracker.mergeUnderAction(action, arrayResponse.error.failed_actions);
+                                    }
                                     return arrayResponse;
                                 }
                                 setProperty(
@@ -137,22 +163,18 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
 
     const changes: AppliedWritesOutput<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), deleted: Object.values(deletedHash), final_items: final };
 
-    // Verify that every object is still in schema
-    const modified = [...changes.added, ...changes.updated];
-    const failed = modified.find(x => !schema.safeParse(x).success);
-    if( failed ) {
-        const parseResult = schema.safeParse(failed);
-        if( parseResult.success ) throw new Error("TypeGuard - it should only ever be unsuccessful");
+    if( failureTracker.length()>0 ) {
         return {
             status: 'error',
             error: {
-                type: 'schema_fail',
-                message: "Apply writes to item broke the schema.",
-                issues: parseResult.error.issues,
-                failed
+                type: 'write_action_fail',
+                message: "Some write actions failed.",
+                failed_actions: failureTracker.get()
             }
         }
     }
 
     return {status: 'ok', changes};
 }
+
+

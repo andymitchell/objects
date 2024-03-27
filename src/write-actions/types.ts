@@ -148,6 +148,8 @@ isTypeEqual<z.infer<typeof WriteSchemaFailuresSchema>, WriteSchemaFailures<any>>
 export function createWriteActionFailuresSchema<T extends Record<string, any> = Record<string, any>>() {
     return z.array(z.object({
         action: (createWriteActionSchema().writeAction as z.ZodType<WriteAction<T>>),
+        unrecoverable: z.boolean().optional(),
+        back_off_until_ts: z.number().optional(),
         affected_items: z.array(z.object({
             item: (z.record(z.any()) as z.ZodType<T>),
             error_details: z.array(z.union([
@@ -176,6 +178,8 @@ export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'cust
     };
 export type WriteActionFailures<T extends Record<string, any> = Record<string, any>> = {
     action: WriteAction<T>,
+    unrecoverable?: boolean,
+    back_off_until_ts?: number,
     affected_items: {
         item: T,
         error_details: WriteActionFailuresErrorDetails[]

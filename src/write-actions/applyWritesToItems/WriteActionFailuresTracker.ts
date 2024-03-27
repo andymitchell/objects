@@ -44,17 +44,19 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
         return {failedAction, failedItem} as IMA extends true? {failedAction:FailedAction<T>, failedItem: FailedItem<T>} : {failedAction?:FailedAction<T>, failedItem?: FailedItem<T>}
     }
 
-    private addErrorDetails(item:FailedItem<T>, errorDetails:WriteActionFailuresErrorDetails) {
+    private addErrorDetails(action:FailedAction<T>, item:FailedItem<T>, errorDetails:WriteActionFailuresErrorDetails) {
         if( item.error_details.some(x => isEqual(x, errorDetails)) ) {
             return;
         }
         switch(errorDetails.type) {
             case 'schema': {
                 // TODO Should it merge issues instead? Otherwise the list of issues might involve lots of duplication. 
+                action.unrecoverable = true;
                 item.error_details.push(errorDetails);
                 break;
             }
             case 'missing_key': {
+                action.unrecoverable = true;
                 item.error_details.push(errorDetails);
                 break;
             }
@@ -68,7 +70,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
         const result = this.schema.safeParse(item);
         if( !result.success ) {
             const {failedAction, failedItem} = this.findActionAndItem(action, item, true);
-            this.addErrorDetails(failedItem, {
+            this.addErrorDetails(failedAction, failedItem, {
                 type: 'schema',
                 issues: result.error.issues
             });
@@ -79,7 +81,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
 
     report(action:WriteAction<T>, item: T, errorDetails: WriteActionFailuresErrorDetails):void {
         const {failedAction, failedItem} = this.findActionAndItem(action, item, true);
-        this.addErrorDetails(failedItem, errorDetails);
+        this.addErrorDetails(failedAction, failedItem, errorDetails);
     }
 
     mergeUnderAction(action:WriteAction<T>, failedActions:WriteActionFailures<T>):void {
@@ -88,7 +90,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
             for( const subItem of subAction.affected_items ) {
                 const {failedAction, failedItem} = this.findActionAndItem(action, subItem.item, true);
                 for( const errorDetails of subItem.error_details ) {
-                    this.addErrorDetails(failedItem, errorDetails);
+                    this.addErrorDetails(failedAction, failedItem, errorDetails);
                 }
             }
         }

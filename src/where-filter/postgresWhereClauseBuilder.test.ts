@@ -1,5 +1,7 @@
 import postgresWhereClauseBuilder, {  PropertySqlMap, postgresCreatePropertySqlMapFromSchema } from "./postgresWhereClauseBuilder";
 import { z } from "zod";
+import {newDb} from 'pg-mem';
+import { WhereFilterDefinition } from "./types";
 
 
 
@@ -16,6 +18,7 @@ const RecordSchema = z.object({
         })
     })
 });
+type Record = z.infer<typeof RecordSchema>;
 const dotPropPathToSqlKey = postgresCreatePropertySqlMapFromSchema(RecordSchema, 'recordColumn');
 
 
@@ -123,7 +126,7 @@ describe('postgres where clause builder', () => {
                 },
                 dotPropPathToSqlKey
             ) 
-        ).toEqual({whereClauseStatement: `(recordColumn#>>'{contact,name}')::text = $1`, statementArguments: ['Andy']});
+        ).toEqual({whereClauseStatement: `(recordColumn->'contact'->>'name')::text = $1`, statementArguments: ['Andy']});
     });
 
     test('postgres jsonb OR/AND ok', () => {
@@ -149,7 +152,7 @@ describe('postgres where clause builder', () => {
                 },
                 dotPropPathToSqlKey
             )
-        ).toEqual({whereClauseStatement: `((recordColumn#>>'{contact,name}')::text = $1 OR ((recordColumn#>>'{contact,age}')::numeric = $2 AND (recordColumn#>>'{contact,address}')::text = $3))`, statementArguments: ['Andy', 100, 'York']});
+        ).toEqual({whereClauseStatement: `((recordColumn->'contact'->>'name')::text = $1 OR ((recordColumn->'contact'->>'age')::numeric = $2 AND (recordColumn->'contact'->>'address')::text = $3))`, statementArguments: ['Andy', 100, 'York']});
     });
 
     test('postgres jsonb NOT ok', () => {
@@ -168,7 +171,146 @@ describe('postgres where clause builder', () => {
                 },
                 dotPropPathToSqlKey
             )
-        ).toEqual({whereClauseStatement: `NOT ((recordColumn#>>'{contact,name}')::text = $1 OR (recordColumn#>>'{contact,name}')::text = $2)`, statementArguments: ['Andy', 'Bob']} );
+        ).toEqual({whereClauseStatement: `NOT ((recordColumn->'contact'->>'name')::text = $1 OR (recordColumn->'contact'->>'name')::text = $2)`, statementArguments: ['Andy', 'Bob']} );
     });
+
+    function setupPgMem() {
+        const instance = newDb();
+
+
+
+        instance.public.query(`CREATE TABLE IF NOT EXISTS test_table (pk SERIAL PRIMARY KEY,recordColumn JSONB NOT NULL)`);
+        instance.public.query(`INSERT INTO test_table (recordColumn) VALUES ('{"contact": {"name": "Bob", "age": 1, "address": "London", "next_kin": {"name": "Sue"}}}')`);
+        instance.public.query(`INSERT INTO test_table (recordColumn) VALUES ('{"contact": {"name": "Sue", "age": 2, "address": "New York", "next_kin": {"name": "Bob"}}}')`);
+
+        function query(whereFilter:WhereFilterDefinition<Record>):Record[] {
+            const clause = postgresWhereClauseBuilder(whereFilter, dotPropPathToSqlKey);
+            let finalQuery = clause.whereClauseStatement;
+
+            // Iterate over the parameters
+            clause.statementArguments.forEach((param, index) => {
+                const placeholder = new RegExp(`\\$${index + 1}`, 'g');
+
+                const safeParam = typeof param === 'string' ? param.replace(/'/g, "''") : param;
+                finalQuery = finalQuery.replace(placeholder, `'${safeParam}'`);
+            });
+            
+            const query = `SELECT * FROM test_table WHERE ${finalQuery}`;
+            return instance.public.query(query).rows;
+        }
+
+        return {instance, query};
+    }
+
+    test('postgres jsonb pg-mem basic', () => {
+        
+        const db = setupPgMem();
+        expect(db.query({
+            'contact.name': 'Bob'
+        }).length).toBe(1);
+
+        expect(db.query({
+            'contact.name': 'Rita'
+        }).length).toBe(0);
+
+
+        expect(db.query({
+            'contact.next_kin.name': 'Bob'
+        }).length).toBe(1);
+    })
+
+    test('postgres jsonb pg-mem OR', () => {
+        
+        const db = setupPgMem();
+        expect(db.query({
+            OR: [
+                {
+                    'contact.name': 'Bob'
+                },
+                {
+                    'contact.name': 'Rita'
+                }
+            ]
+        }).length).toBe(1);
+        
+
+        expect(db.query({
+            OR: [
+                {
+                    'contact.name': 'Bob'
+                },
+                {
+                    'contact.name': 'Sue'
+                }
+            ]
+        }).length).toBe(2);
+    })
+
+    test('postgres jsonb pg-mem AND', () => {
+        
+        const db = setupPgMem();
+        
+        
+
+        expect(db.query({
+            AND: [
+                {
+                    'contact.name': 'Bob'
+                },
+                {
+                    'contact.name': 'Sue'
+                }
+            ]
+        }).length).toBe(0);
+
+
+        expect(db.query({
+            AND: [
+                {
+                    'contact.name': 'Bob'
+                },
+                {
+                    'contact.next_kin.name': 'Sue'
+                }
+            ]
+        }).length).toBe(1);
+    })
+
+
+    test('postgres jsonb pg-mem NOT', () => {
+        
+        const db = setupPgMem();
+        
+        
+
+        expect(db.query({
+            NOT: [
+                {
+                    'contact.name': 'Bob'
+                }
+            ]
+        }).length).toBe(1);
+
+
+        expect(db.query({
+            NOT: [
+                {
+                    'contact.name': 'Rita'
+                }
+            ]
+        }).length).toBe(2);
+
+
+        expect(db.query({
+            NOT: [
+                {
+                    'contact.name': 'Bob'
+                },
+                {
+                    'contact.name': 'Sue'
+                }
+            ]
+        }).length).toBe(0);
+    })
 })
     

@@ -60,6 +60,11 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
                 item.error_details.push(errorDetails);
                 break;
             }
+            case 'update_altered_key': {
+                action.unrecoverable = true;
+                item.error_details.push(errorDetails);
+                break;
+            }
             case 'custom': {
                 item.error_details.push(errorDetails);
             }

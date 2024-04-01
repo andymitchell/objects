@@ -322,5 +322,42 @@ describe('applyWritesToItems test', () => {
         expect(secondFailedAction.affected_items[1].item.id).toBe('a2');
     });
     
+    test('not allowed to change primary key', () => {
+
+        const result = applyWritesToItems<Obj>(
+            [
+                {type: 'write', ts: 0, payload: {
+                    type: 'create',
+                    data: {
+                        id: 'a1',
+                        text: 'bob'
+                    }
+                }},
+                {type: 'write', ts: 0, payload: {
+                    type: 'update',
+                    method: 'merge',
+                    data: {
+                        id: 'a2'
+                    },
+                    where: {
+                        id: 'a1'
+                    }
+                }},
+            ], 
+            [
+                structuredClone(obj1)
+            ], 
+            ObjSchema,
+            ddl
+        );
+        
+
+        expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
+        const firstFailedAction = result.error.failed_actions[0];
+        expect(firstFailedAction.action.payload.type).toBe('update'); if( firstFailedAction.action.payload.type!=='update' ) throw new Error("noop - update");
+        expect(firstFailedAction.affected_items[0].item.id).toBe('a1');
+        expect(firstFailedAction.affected_items[0].error_details[0].type).toBe('update_altered_key');
+        expect(firstFailedAction.unrecoverable).toBe(true);
+    });
     
 });

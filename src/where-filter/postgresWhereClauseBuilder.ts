@@ -31,7 +31,7 @@ export function postgresCreatePropertySqlMapFromSchema(schema:z.ZodTypeAny, sqlC
         // dotPropPath is 'person.age', etc. 
         const zodKind = pathsToKindMap[dotPropPath];
 
-        const jsonbParts = dotPropPath.split(".").join(`,`);
+        const jsonbParts = dotPropPath.split(".");
         const castingMap = {
             'ZodString': '::text', 
             'ZodNumber': '::numeric', 
@@ -40,8 +40,19 @@ export function postgresCreatePropertySqlMapFromSchema(schema:z.ZodTypeAny, sqlC
             'ZodNull': ''
         }
 
-        // This should yield a query like... (task#>>'{person,age}')::numeric (for a schema like z.object({person: z.object({age: z.number()})}))
-        pathsToSqlKey[dotPropPath] = `(${sqlColumnName}#>>'{${jsonbParts}}')${castingMap[zodKind] ?? ''}`;
+        
+        let jsonbPath:string = '';
+        while(jsonbParts.length) {
+            const part = jsonbParts.shift();
+            jsonbPath += `${jsonbParts.length? '->' : '->>'}'${part}'`;
+        }
+
+        // The #>> syntax is not supported by pg-mem, which harms testing. 
+        //pathsToSqlKey[dotPropPath] = `(${sqlColumnName}#>>'{${jsonbParts.join(',')}}')${castingMap[zodKind] ?? ''}`;
+        // Use the older nesting syntax instead:
+        pathsToSqlKey[dotPropPath] = `(${sqlColumnName}${jsonbPath})${castingMap[zodKind] ?? ''}`;
+
+        // TODO This does not support array indexing? Does it need to? That might just be a separate 'contains' clause. 
     });
 
     return (dotPropPath:string) => pathsToSqlKey[dotPropPath];

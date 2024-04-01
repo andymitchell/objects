@@ -105,7 +105,19 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                             const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem, true).item;
                             const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
                             if( schemaOk ) {
-                                mutableUpdatedItem = unvalidatedMutableUpdatedItem;
+
+                                // An update is not allowed to change the primary key 
+                                if( safeKeyValue(mutableUpdatedItem[rules.primary_key])===pk ) {
+                                    mutableUpdatedItem = unvalidatedMutableUpdatedItem;
+                                } else {
+                                    failureTracker.report(action, item, {
+                                        'type': 'update_altered_key',
+                                        primary_key: rules.primary_key
+                                    })
+                                }
+                                
+
+                                
                             } // #fail_continues
 
 

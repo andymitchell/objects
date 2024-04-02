@@ -3,7 +3,7 @@ import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter }
 import isPlainObject from "./isPlainObject";
 import { EnsureRecord } from "./types";
 import { PropertySqlMap, WhereFilter, WhereFilterDefinition } from "./where-filter";
-import { DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions } from "./write-actions";
+import { AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions } from "./write-actions";
 
 export {isPlainObject, safeKeyValue, makePrimaryKeyGetter};
 export type {PrimaryKeyValue, PrimaryKeyGetter}
@@ -15,6 +15,6 @@ export { DotPropPaths };
 export type {DotPropPathsUnion, DotPropPathsRecord};
 
 export {WriteActions};
-export type {WriteAction, WriteActionPayload, DDL, WriteActionFailures, WriteActionError};
+export type {WriteAction, WriteActionPayload, DDL, WriteActionFailures, WriteActionError, AppliedWritesOutput};
 
 export type {EnsureRecord}

@@ -131,9 +131,7 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ], false);
 
-        expect(filter).toEqual({
-            OR: []
-        })
+        expect(filter).toBe(undefined)
     });
 
     

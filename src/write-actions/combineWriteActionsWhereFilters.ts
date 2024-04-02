@@ -15,7 +15,7 @@ import { WriteAction } from "./types";
  * @param writeActions 
  * @returns 
  */
-export default function combineWriteActionsWhereFilters<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, writeActions:WriteAction<T>[], includeDelete = true):WhereFilterDefinition<T> {
+export default function combineWriteActionsWhereFilters<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, writeActions:WriteAction<T>[], includeDelete = true):WhereFilterDefinition<T> | undefined {
     const filtersForExisting:WhereFilterDefinition<T>[] = writeActions.map(x => {
         if( x.payload.type==='create' ) {
             const key = ddl['.'].primary_key;
@@ -35,5 +35,5 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
         OR: filtersForExisting
     }
 
-    return whereFilterForExisting;
+    return filtersForExisting.length? whereFilterForExisting : undefined;
 }

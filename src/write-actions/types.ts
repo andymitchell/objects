@@ -163,6 +163,10 @@ export function createWriteActionFailuresSchema<T extends Record<string, any> = 
                     primary_key: z.union([z.string(), z.number(), z.symbol()])
                 }),
                 z.object({
+                    type: z.literal('create_duplicated_key'),
+                    primary_key: z.union([z.string(), z.number(), z.symbol()])
+                }),
+                z.object({
                     type: z.literal('update_altered_key'),
                     primary_key: z.union([z.string(), z.number(), z.symbol()])
                 })
@@ -182,6 +186,10 @@ export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'cust
     } | 
     {
         type: 'update_altered_key',
+        primary_key: string | number | symbol
+    } | 
+    {
+        type: 'create_duplicated_key',
         primary_key: string | number | symbol
     };
 export type WriteActionFailures<T extends Record<string, any> = Record<string, any>> = {

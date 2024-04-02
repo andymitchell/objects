@@ -1,22 +1,27 @@
-import { isEqual } from "lodash-es";
+import { isEqual, isMatch } from "lodash-es";
 import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionFailures,  WriteActionFailuresErrorDetails,  isUpdateOrDeleteWriteActionPayload } from "../types";
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter";
 import safeKeyValue from "../../getKeyValue";
 import { DDL, ItemHash, ListRules, WriteStrategy } from "./types";
-import applyAccumulatorToHashes from "./applyAccumulatorToHashes";
-import convertWriteActionToGrowSetSafe from "./convertWriteActionToGrowSetSafe";
+import applyAccumulatorToHashes from "./helpers/applyAccumulatorToHashes";
+import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe";
 import writeLww from "./writeStrategies/lww";
-import getScopedArrays from "./getScopedArrays";
+import getArrayScopeItemActions from "./helpers/getArrayScopeItemActions";
 import { z } from "zod";
-import WriteActionFailuresTracker from "./WriteActionFailuresTracker";
+import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker";
+import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs";
 
 
 
 
 
 
-export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>>, schema: z.ZodType<T, any, any>, ddl: DDL<T>, accumulator?: AppliedWritesOutput<T>): AppliedWritesOutputResponse<T> {
+type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
+    accumulator?: AppliedWritesOutput<T>,
+    attempt_recover_duplicate_create?: boolean
+}
+export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>>, schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: ApplyWritesToItemsOptions<T>): AppliedWritesOutputResponse<T> {
 
     // Load the rules
     const rules:ListRules<T> | undefined = ddl['.'];
@@ -39,8 +44,8 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     const updatedHash: ItemHash<T> = {};
     const deletedHash: ItemHash<T> = {};
 
-    if (accumulator) {
-        applyAccumulatorToHashes<T>(accumulator, rules.primary_key, addedHash, updatedHash, deletedHash);
+    if (options?.accumulator) {
+        applyAccumulatorToHashes<T>(options?.accumulator, rules.primary_key, addedHash, updatedHash, deletedHash);
     }
 
 
@@ -49,23 +54,31 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     for (const action of writeActions) {
         if (action.payload.type === 'create') {
             const pk = safeKeyValue(action.payload.data[rules.primary_key], true);
-            // Allow missing pk, which will arise if the schema or DDL is wrong... we then want it to 
             if( pk ) {
-                if (!existingIds.has(pk)) {
-                    // TODO Check permissions
-                    const createdResult = writeStrategy.create_handler(action.payload);
-                    if (createdResult.created) {
-                        // TODO Run pretriggers
-
-                        const schemaOk = failureTracker.testSchema(action, createdResult.item);
-                        if( schemaOk ) {
-                            addedHash[pk] = createdResult.item;
-                        } // #fail_continues
+                if (existingIds.has(pk)) {
+                    if( options?.attempt_recover_duplicate_create ) {
+                        // Recovery = at any point, does the item, with updates applied, match the create payload. If so, skip this create but don't generate an error.
+                        const existing = items.find(x => pk===safeKeyValue(x[rules.primary_key]));
+                        if( existing && equivalentCreateOccurs<T>(schema, ddl, existing, action, writeActions) ) {
+                            // Skip it -> it already exists matches (or will match, with updates in writeActions), the desired create 
+                        } else {
+                            failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
+                        }
                     } else {
-                        // TODO Handle or just ignore?
+                        failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                     }
                 } else {
-                    console.warn("applyWriteItems: Tried to create an object with an ID that already exists.");
+                    // TODO Check permissions
+                    const newItem = writeStrategy.create_handler(action.payload);
+                
+                    // TODO Run pretriggers
+
+                    const schemaOk = failureTracker.testSchema(action, newItem);
+                    if( schemaOk ) {
+                        existingIds.add(pk);
+                        addedHash[pk] = newItem;
+                    } // #fail_continues
+                
                 }
             } else {
                 failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
@@ -102,7 +115,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                 mutableUpdatedItem = structuredClone(item);
                             }
 
-                            const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem, true).item;
+                            const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem, true);
                             const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
                             if( schemaOk ) {
 
@@ -127,7 +140,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                 mutableUpdatedItem = structuredClone(item);
                             }
                             // Get all arrays that match the scope, then recurse into applyWritesToItems for them
-                            const scopedArrays = getScopedArrays<T>(item, action.payload, schema, ddl);
+                            const scopedArrays = getArrayScopeItemActions<T>(item, action.payload, schema, ddl);
 
                             for( const scopedArray of scopedArrays ) {
                                 const arrayResponse = applyWritesToItems(scopedArray.writeActions, scopedArray.items, scopedArray.schema, scopedArray.ddl);

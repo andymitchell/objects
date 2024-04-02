@@ -3,6 +3,7 @@ import applyWritesToItems from ".";
 import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope } from "../types";
 import { DDL } from "./types";
 
+
 describe('applyWritesToItems test', () => {
     
     
@@ -207,8 +208,6 @@ describe('applyWritesToItems test', () => {
             ddl
         );
         
-       
-        
         expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
         expect(
             result.changes.final_items[0].children![0].children[0].ccid
@@ -359,5 +358,132 @@ describe('applyWritesToItems test', () => {
         expect(firstFailedAction.affected_items[0].error_details[0].type).toBe('update_altered_key');
         expect(firstFailedAction.unrecoverable).toBe(true);
     });
+
+    
+    test('cannot dupe primary key', () => {
+
+        const result = applyWritesToItems<Obj>(
+            [
+                {type: 'write', ts: 0, payload: {
+                    type: 'create',
+                    data: {
+                        id: 'a1',
+                        text: 'bob'
+                    }
+                }},
+                {type: 'write', ts: 0, payload: {
+                    type: 'create',
+                    data: {
+                        id: 'a1',
+                        text: 'sue'
+                    }
+                }},
+            ], 
+            [
+                structuredClone(obj1)
+            ], 
+            ObjSchema,
+            ddl
+        );
+        
+
+        expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
+        
+        const firstFailedAction = result.error.failed_actions[0];
+        expect(firstFailedAction.unrecoverable).toBe(true);
+        expect(firstFailedAction.affected_items[0].error_details[0].type).toBe('create_duplicated_key');
+    });
+
+
+    test('attempt_recover_duplicate_create', () => {
+
+        const actions:WriteAction<Obj>[] = [
+            {
+                type: 'write',
+                ts: 0,
+                payload: {
+                    type: 'create',
+                    data: {
+                        id: '1',
+                        'text': 'Wrong'
+                    }
+                }
+            }
+        ]
+
+        const existing:Obj = {
+            'id': '1',
+            'text': 'Right'
+        }
+
+        const result = applyWritesToItems<Obj>(
+            actions, 
+            [existing], 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: true
+            }
+        );
+
+        expect(result.status).toBe('error');
+
+        // This action creates parity with the existing, allowing the create to work
+        actions.push({
+            type: 'write',
+            ts: 0,
+            payload: {
+                type: 'update',
+                method: 'merge',
+                data: {
+                    text: 'Right'
+                },
+                where: {
+                    id: '1'
+                }
+            }
+        })
+
+        actions.push({
+            type: 'write',
+            ts: 0,
+            payload: {
+                type: 'update',
+                method: 'merge',
+                data: {
+                    text: 'Right2'
+                },
+                where: {
+                    id: '1'
+                }
+            }
+        })
+
+        const result2 = applyWritesToItems<Obj>(
+            actions, 
+            [existing], 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: true
+            }
+        );
+        expect(result2.status).toBe('ok'); if( result2.status!=='ok' ) throw new Error("noop");
+        expect(result2.changes.final_items[0].text).toBe('Right2');
+
+
+        const result3 = applyWritesToItems<Obj>(
+            actions, 
+            [existing], 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: false
+            }
+        );
+        expect(result3.status).toBe('error'); if( result3.status!=='error' ) throw new Error("noop");
+
+
+    })
     
 });

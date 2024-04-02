@@ -1,11 +1,11 @@
 import { merge } from "lodash-es";
 import { WriteStrategy } from "../types";
-import deleteUnusedKeysFromDestination from "../deleteUnusedKeysFromDestination";
+import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination";
 import { VALUE_TO_DELETE_KEY } from "../../types";
 
 const writeLww: WriteStrategy<Record<string, any>> = {
     create_handler: (writeActionPayload) => {
-        return { created: true, item: writeActionPayload.data };
+        return writeActionPayload.data;
     },
     update_handler(writeActionPayload, target, alreadyCloned) {
         target = alreadyCloned ? target : structuredClone(target);
@@ -22,7 +22,7 @@ const writeLww: WriteStrategy<Record<string, any>> = {
         deleteUnusedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
 
 
-        return { updated: true, item: target };
+        return target;
     }
 }
 

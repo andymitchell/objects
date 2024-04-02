@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../types";
-import { ListRules } from "./types";
+import { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../../types";
+import { ListRules } from "../types";
 import { isEqual } from "lodash-es";
-import safeKeyValue from "../../getKeyValue";
+import safeKeyValue from "../../../getKeyValue";
 
 type FailedAction<T extends Record<string, any>> = WriteActionFailures<T>[number];
 type FailedItem<T extends Record<string, any>> = WriteActionFailures<T>[number]['affected_items'][number];
@@ -56,6 +56,11 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
                 break;
             }
             case 'missing_key': {
+                action.unrecoverable = true;
+                item.error_details.push(errorDetails);
+                break;
+            }
+            case 'create_duplicated_key': {
                 action.unrecoverable = true;
                 item.error_details.push(errorDetails);
                 break;

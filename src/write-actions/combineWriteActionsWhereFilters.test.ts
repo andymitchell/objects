@@ -38,6 +38,7 @@ describe('combineWriteActionsWhereFilters', () => {
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'create',
                     data: {
@@ -68,6 +69,7 @@ describe('combineWriteActionsWhereFilters', () => {
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'update',
                     method: 'merge',
@@ -98,6 +100,7 @@ describe('combineWriteActionsWhereFilters', () => {
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'delete',
                     where
@@ -124,6 +127,7 @@ describe('combineWriteActionsWhereFilters', () => {
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'delete',
                     where

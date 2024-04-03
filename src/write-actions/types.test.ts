@@ -31,6 +31,7 @@ describe('write-actions type check', () => {
         const actionA: WriteAction<Real> = {
             type: 'write',
             ts: Date.now(),
+            uuid: '1',
             payload: {
                 type: 'update',
                 method: 'merge',
@@ -47,6 +48,7 @@ describe('write-actions type check', () => {
                 {
                     type: 'write',
                     ts: 0,
+                    uuid: '1',
                     payload: {
                         type: 'update',
                         method: 'merge',
@@ -63,6 +65,7 @@ describe('write-actions type check', () => {
         const actionB: WriteAction<Real> = {
             type: 'write', 
             ts: Date.now(),
+            uuid: '1',
             payload: actionBPayload
         }
 
@@ -70,6 +73,7 @@ describe('write-actions type check', () => {
         const actionFakeA: WriteAction<Fake> = {
             type: 'write',
             ts: Date.now(),
+            uuid: '1',
             payload: {
                 type: 'update',
                 method: 'merge',
@@ -88,6 +92,7 @@ describe('write-actions type check', () => {
                 {
                     type: 'write',
                     ts: 0,
+                    uuid: '1',
                     payload: {
                         type: 'update',
                         method: 'merge',
@@ -105,6 +110,7 @@ describe('write-actions type check', () => {
         const actionFakeB: WriteAction<Fake> = {
             type: 'write', 
             ts: Date.now(),
+            uuid: '1',
             payload: actionFakeBPayload
         }
 
@@ -117,6 +123,7 @@ describe('write-actions type check', () => {
                 {
                     type: 'write',
                     ts: 0,
+                    uuid: '1',
                     payload: {
                         type: 'create',
                         data: {

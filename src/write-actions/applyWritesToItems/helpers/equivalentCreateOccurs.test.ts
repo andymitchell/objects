@@ -25,6 +25,7 @@ describe('equivalentCreateOccurs', () => {
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'create',
                     data: {
@@ -46,6 +47,7 @@ describe('equivalentCreateOccurs', () => {
         actions.push({
             type: 'write',
             ts: 0,
+            uuid: '0',
             payload: {
                 type: 'update',
                 method: 'merge',

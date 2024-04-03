@@ -69,6 +69,7 @@ describe('applyWritesToItems test', () => {
                 {
                     type: 'write', 
                     ts: 0,
+                    uuid: '0',
                     payload: {
                         type: 'create',
                         data: data2
@@ -106,7 +107,7 @@ describe('applyWritesToItems test', () => {
 
         const result = applyWritesToItems<Obj>(
             [
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'update',
                     method: 'merge',
                     data: {
@@ -137,7 +138,7 @@ describe('applyWritesToItems test', () => {
     test('delete', () => {
         const result = applyWritesToItems<Obj>(
             [
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'delete',
                     where: {
                         id: '1'
@@ -183,6 +184,7 @@ describe('applyWritesToItems test', () => {
                     {
                         type: 'write',
                         ts: 0,
+                        uuid: '0',
                         payload: {
                             type: 'create',
                             data: {
@@ -198,6 +200,7 @@ describe('applyWritesToItems test', () => {
                 {
                     type: 'write',
                     ts: 0,
+                    uuid: '0',
                     payload
                 }
             ], 
@@ -225,7 +228,7 @@ describe('applyWritesToItems test', () => {
 
         const result = applyWritesToItems<Obj>(
             [
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'update',
                     method: 'merge',
                     data: {
@@ -260,28 +263,28 @@ describe('applyWritesToItems test', () => {
 
         const result = applyWritesToItems<Obj>(
             [
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'create',
                     data: {
                         id: 'a1',
                         text: 'bob'
                     }
                 }},
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'create',
                     data: {
                         // @ts-ignore wilfully breaking schema here 
                         none_key: 'T1'
                     }
                 }},
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'create',
                     data: {
                         id: 'a2',
                         text: 'bob'
                     }
                 }},
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'update',
                     method: 'merge',
                     data: {
@@ -325,14 +328,14 @@ describe('applyWritesToItems test', () => {
 
         const result = applyWritesToItems<Obj>(
             [
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'create',
                     data: {
                         id: 'a1',
                         text: 'bob'
                     }
                 }},
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'update',
                     method: 'merge',
                     data: {
@@ -364,14 +367,14 @@ describe('applyWritesToItems test', () => {
 
         const result = applyWritesToItems<Obj>(
             [
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'create',
                     data: {
                         id: 'a1',
                         text: 'bob'
                     }
                 }},
-                {type: 'write', ts: 0, payload: {
+                {type: 'write', ts: 0, uuid: '0', payload: {
                     type: 'create',
                     data: {
                         id: 'a1',
@@ -401,6 +404,7 @@ describe('applyWritesToItems test', () => {
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'create',
                     data: {
@@ -432,6 +436,7 @@ describe('applyWritesToItems test', () => {
         actions.push({
             type: 'write',
             ts: 0,
+            uuid: '0',
             payload: {
                 type: 'update',
                 method: 'merge',
@@ -447,6 +452,7 @@ describe('applyWritesToItems test', () => {
         actions.push({
             type: 'write',
             ts: 0,
+            uuid: '0',
             payload: {
                 type: 'update',
                 method: 'merge',

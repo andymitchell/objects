@@ -80,6 +80,7 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
     const WriteActionSchema = z.object({
         type: z.literal('write'),
         ts: z.number(),
+        uuid: z.string(),
         payload: WriteActionPayloadSchema,
     }) as z.ZodType<WriteAction<any>>;
 
@@ -119,6 +120,7 @@ export type WriteActionPayload<T extends Record<string, any>> = WriteActionPaylo
 export type WriteAction<T extends Record<string, any>> = {
     type: 'write',
     ts: number,
+    uuid: string,
     payload: WriteActionPayload<T>
 }
 

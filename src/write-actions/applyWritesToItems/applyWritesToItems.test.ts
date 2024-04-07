@@ -491,5 +491,167 @@ describe('applyWritesToItems test', () => {
 
 
     })
+
+    test('test accumulator', () => {
+
+
+
+
+        const existing:Obj = {
+            'id': '1',
+            'text': 'Right'
+        }
+
+        const result = applyWritesToItems<Obj>(
+            [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '2',
+                            text: 'Too'
+                        }
+                    }
+                },
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'update',
+                        method: 'merge',
+                        data: {
+                            text: 'One-ahh'
+                        },
+                        where: {
+                            id: '1'
+                        }
+                    }
+                }
+            ], 
+            [existing], 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: true
+            }
+        );
+
+        expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
+        let accumulation = result.changes;
+
+        // Run it again, with accumulator...
+        const result2 = applyWritesToItems<Obj>(
+            [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'update',
+                        method: 'merge',
+                        data: {
+                            text: 'Too-ahh'
+                        },
+                        where: {
+                            id: '2'
+                        }
+                    }
+                }
+            ], 
+            result.changes.final_items, 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: true,
+                accumulator: accumulation
+            }
+        );
+
+        expect(result2.status).toBe('ok'); if( result2.status!=='ok' ) throw new Error("noop");
+
+        expect(result2.changes.final_items.length).toBe(2);
+        expect(result2.changes.added.length).toBe(1);
+        expect(result2.changes.added[0].text).toBe('Too-ahh');
+        expect(result2.changes.updated.length).toBe(1);
+        expect(result2.changes.updated[0].text).toBe('One-ahh');
+        
+        accumulation = result2.changes;
+
+        // Run it again, with accumulator...
+        const result3 = applyWritesToItems<Obj>(
+            [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'delete',
+                        where: {
+                            id: '2'
+                        }
+                    }
+                }
+            ], 
+            result2.changes.final_items, 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: true,
+                accumulator: accumulation
+            }
+        );
+
+        expect(result3.status).toBe('ok'); if( result3.status!=='ok' ) throw new Error("noop");
+
+        expect(result3.changes.final_items.length).toBe(1);
+        expect(result3.changes.added.length).toBe(0);
+        expect(result3.changes.deleted.length).toBe(1);
+        expect(result3.changes.deleted[0].text).toBe('Too-ahh');
+        expect(result3.changes.updated.length).toBe(1);
+        expect(result3.changes.updated[0].text).toBe('One-ahh');
+
+
+        accumulation = result3.changes;
+
+        // Run it again, with accumulator...
+        const result4 = applyWritesToItems<Obj>(
+            [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '2',
+                            text: 'Too-brr'
+                        }
+                    }
+                }
+            ], 
+            result3.changes.final_items, 
+            ObjSchema,
+            ddl,
+            {
+                attempt_recover_duplicate_create: true,
+                accumulator: accumulation
+            }
+        );
+
+        expect(result4.status).toBe('ok'); if( result4.status!=='ok' ) throw new Error("noop");
+
+        expect(result4.changes.final_items.length).toBe(2);
+        expect(result4.changes.added.length).toBe(1);
+        expect(result4.changes.added[0].text).toBe('Too-brr');
+        expect(result4.changes.deleted.length).toBe(0);
+        expect(result4.changes.updated.length).toBe(1);
+        expect(result4.changes.updated[0].text).toBe('One-ahh');
+
+
+    })
     
 });

@@ -2,7 +2,7 @@ import { isEqual, isMatch } from "lodash-es";
 import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionFailures,  WriteActionFailuresErrorDetails,  isUpdateOrDeleteWriteActionPayload } from "../types";
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter";
-import safeKeyValue from "../../getKeyValue";
+import safeKeyValue, { PrimaryKeyValue } from "../../getKeyValue";
 import { DDL, ItemHash, ListRules, WriteStrategy } from "./types";
 import applyAccumulatorToHashes from "./helpers/applyAccumulatorToHashes";
 import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe";
@@ -50,7 +50,8 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
 
 
     // Apply all the Creates
-    const existingIds = new Set(items.map(item => safeKeyValue(item[rules.primary_key])));
+    const initialExistingIds = new Set(items.map(item => safeKeyValue(item[rules.primary_key])));
+    const existingIds = new Set(initialExistingIds);
     for (const action of writeActions) {
         if (action.payload.type === 'create') {
             const pk = safeKeyValue(action.payload.data[rules.primary_key], true);
@@ -77,6 +78,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                     if( schemaOk ) {
                         existingIds.add(pk);
                         addedHash[pk] = newItem;
+                        if( deletedHash[pk] ) delete deletedHash[pk];
                     } // #fail_continues
                 
                 }
@@ -87,7 +89,8 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     }
 
     // When given many write actions, they might update a newly created one, so it must be addressable 
-    const itemsIncNewToUpdate: ReadonlyArray<Readonly<T>> = [...items, ...Object.values(addedHash)];
+    const itemsIncNewToUpdate: ReadonlyArray<Readonly<T>> = [...items, ...Object.values(addedHash).filter(item => !initialExistingIds.has(safeKeyValue(item[rules.primary_key])))];
+    
     
 
     // Now go through items and update with each write action  
@@ -161,6 +164,8 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                         case 'delete':
                             deleted = true;
                             deletedHash[pk] = item;
+                            if( addedHash[pk] ) delete addedHash[pk];
+                            if( updatedHash[pk] ) delete updatedHash[pk];
                             break;
                     }
                 }

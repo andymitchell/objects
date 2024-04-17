@@ -228,7 +228,7 @@ export type WriteActionError<T extends Record<string, any> = Record<string, any>
 isTypeEqual<z.infer<typeof WriteActionErrorSchema>, WriteActionError<any>>(true);
 
 
-export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], final_items: T[] }
+export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] }
 
 export type AppliedWritesOutputResponse<T extends Record<string, any>> = {
     status: 'ok',

@@ -7,8 +7,7 @@ const writeLww: WriteStrategy<Record<string, any>> = {
     create_handler: (writeActionPayload) => {
         return writeActionPayload.data;
     },
-    update_handler(writeActionPayload, target, alreadyCloned) {
-        target = alreadyCloned ? target : structuredClone(target);
+    update_handler(writeActionPayload, target) {
 
     
         if( Array.isArray(target) ) {

@@ -2,7 +2,7 @@ import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArr
 import { PrimaryKeyValue } from "../../getKeyValue";
 import { IfAny } from "../../types";
 import { EnsureRecord } from "../../types";
-import { WriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types";
+import { AppliedWritesOutput, WriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types";
 
 export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 
@@ -10,7 +10,13 @@ export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 
 export interface WriteStrategy<T extends Record<string, any>> {
     create_handler: (writeActionPayload: WriteActionPayloadCreate<T>) => T;
-    update_handler: (writeActionPayload: WriteActionPayloadUpdate<T>, target: T, alreadyCloned?: boolean) => T
+    update_handler: (writeActionPayload: WriteActionPayloadUpdate<T>, target: T) => T
+}
+
+export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
+    accumulator?: AppliedWritesOutput<T>,
+    attempt_recover_duplicate_create?: boolean,
+    immer_optimized?: boolean 
 }
 
 /*

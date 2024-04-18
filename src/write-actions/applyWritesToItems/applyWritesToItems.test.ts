@@ -52,7 +52,7 @@ describe('applyWritesToItems test', () => {
         callback("mutable", {immer_compatible: true});
     }
     
-
+    
     testImmutableAndImmerOptimisedModes((name, options) => {
         test(`create [${name}]`, () => {
 
@@ -598,6 +598,7 @@ describe('applyWritesToItems test', () => {
 
         });
     });
+    
 
     testImmutableAndImmerOptimisedModes((name, options) => {
         test(`attempt_recover_duplicate_create [${name}]`, () => {
@@ -641,7 +642,7 @@ describe('applyWritesToItems test', () => {
             actions.push({
                 type: 'write',
                 ts: 0,
-                uuid: '0',
+                uuid: '1',
                 payload: {
                     type: 'update',
                     method: 'merge',
@@ -657,7 +658,7 @@ describe('applyWritesToItems test', () => {
             actions.push({
                 type: 'write',
                 ts: 0,
-                uuid: '0',
+                uuid: '2',
                 payload: {
                     type: 'update',
                     method: 'merge',
@@ -670,9 +671,14 @@ describe('applyWritesToItems test', () => {
                 }
             })
 
+            const existing2:Obj = {
+                'id': '1',
+                'text': 'Right'
+            }
+
             const result2 = applyWritesToItems<Obj>(
                 actions, 
-                [existing], 
+                [existing2], 
                 ObjSchema,
                 ddl,
                 Object.assign(
@@ -704,6 +710,7 @@ describe('applyWritesToItems test', () => {
         })
     });
 
+    
     testImmutableAndImmerOptimisedModes((name, options) => {
         test(`test accumulator [${name}]`, () => {
 
@@ -1000,5 +1007,6 @@ describe('applyWritesToItems test', () => {
         expect(finalItems[0]===originalItems[0]).toBe(true);
         expect(finalItems[1]===originalItems[1]).toBe(true);
     })
+    
 
 });

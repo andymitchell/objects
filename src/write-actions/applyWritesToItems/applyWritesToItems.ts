@@ -11,7 +11,7 @@ import getArrayScopeItemActions from "./helpers/getArrayScopeItemActions";
 import { z } from "zod";
 import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker";
 import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs";
-import { current, isDraft } from "immer";
+import { Draft, current, isDraft } from "immer";
 
 
 
@@ -57,9 +57,13 @@ class UndoableArrayMutation<T extends Record<string, any>> {
     }
 }
 
+export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: ApplyWritesToItemsOptions<T>): AppliedWritesOutputResponse<T> {
 
-export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>>, schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: ApplyWritesToItemsOptions<T>): AppliedWritesOutputResponse<T> {
-
+    
+    if( isDraft(items) ) {
+        if( !options ) options = {};
+        options.immer_compatible = true;
+    }
     
     // Load the rules
     const rules:ListRules<T> | undefined = ddl['.'];
@@ -74,7 +78,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     }
 
     const undoable = options?.immer_compatible? new UndoableArrayMutation<T>() : undefined;
-    const mutableItems = options?.immer_compatible? items as T[] : [...items];
+    const mutableItems = options?.immer_compatible? items as T[] : [...items] as T[];
     if( writeActions.length ) {
 
 
@@ -93,7 +97,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
         }
 
         // Apply all the Creates
-        const existingIds = new Set(new Set(items.map(item => safeKeyValue(item[rules.primary_key]))));
+        const existingIds = new Set(mutableItems.map(item => safeKeyValue(item[rules.primary_key])));
         for (const action of writeActions) {
             if (action.payload.type === 'create') {
                 const pk = safeKeyValue(action.payload.data[rules.primary_key], true);
@@ -101,7 +105,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                     if (existingIds.has(pk)) {
                         if( options?.attempt_recover_duplicate_create ) {
                             // Recovery = at any point, does the item, with updates applied, match the create payload? If so, skip this create but don't generate an error.
-                            const existing = items.find(x => pk===safeKeyValue(x[rules.primary_key]));
+                            const existing = mutableItems.find((x)=> pk===safeKeyValue(x[rules.primary_key]));
                             if( existing && equivalentCreateOccurs<T>(schema, ddl, existing, action, writeActions) ) {
                                 // Skip it -> it already exists and matches (or will match, with updates in writeActions) the desired create 
                             } else {

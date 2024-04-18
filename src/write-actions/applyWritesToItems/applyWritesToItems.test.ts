@@ -2,6 +2,7 @@ import { z } from "zod";
 import applyWritesToItems from ".";
 import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope } from "../types";
 import { ApplyWritesToItemsOptions, DDL } from "./types";
+import { produce } from "immer";
 
 
 describe('applyWritesToItems test', () => {
@@ -48,7 +49,7 @@ describe('applyWritesToItems test', () => {
 
     function testImmutableAndImmerOptimisedModes<T extends Record<string, any> = Obj>(callback:(name: 'immutable' | 'mutable', options:ApplyWritesToItemsOptions<T>) => void) {
         callback("immutable", {});
-        callback("mutable", {immer_optimized: true});
+        callback("mutable", {immer_compatible: true});
     }
     
 
@@ -489,7 +490,7 @@ describe('applyWritesToItems test', () => {
             originalItemsNonImmer, 
             ObjSchema,
             ddl,
-            {immer_optimized: false}
+            {immer_compatible: false}
         );
 
         const resultImmer = applyWritesToItems<Obj>(
@@ -497,7 +498,7 @@ describe('applyWritesToItems test', () => {
             originalItemsImmer, 
             ObjSchema,
             ddl,
-            {immer_optimized: true}
+            {immer_compatible: true}
         );
         
         expect(resultNonImmer.status).toBe('ok'); if( resultNonImmer.status!=='ok' ) throw new Error("noop");
@@ -929,4 +930,75 @@ describe('applyWritesToItems test', () => {
         })
     })
     
+    test('Immer compatible - change', async () => {
+
+        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
+        
+        const actions:WriteAction<Obj>[] = [
+            {type: 'write', ts: 0, uuid: '0', payload: {
+                type: 'create',
+                data: {
+                    id: 'a1'
+                }
+            }},
+            {type: 'write', ts: 0, uuid: '0', payload: {
+                type: 'update',
+                method: 'merge',
+                data: {
+                    text: 'sue'
+                },
+                where: {
+                    id: obj2.id
+                }
+            }}
+        ]
+
+        const finalItems = produce(originalItems, draft => {
+            applyWritesToItems<Obj>(
+                actions, 
+                draft, 
+                ObjSchema,
+                ddl,
+                {immer_compatible: true}
+            );
+        });
+
+        expect(finalItems===originalItems).toBe(false);
+        expect(finalItems[0]===originalItems[0]).toBe(true);
+        expect(finalItems[1]===originalItems[1]).toBe(false);
+    })
+
+
+    test('Immer compatible - 0 change', async () => {
+
+        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
+        
+        const actions:WriteAction<Obj>[] = [
+            {type: 'write', ts: 0, uuid: '0', payload: {
+                type: 'update',
+                method: 'merge',
+                data: {
+                    text: 'sue'
+                },
+                where: {
+                    id: 'no exist'
+                }
+            }}
+        ]
+
+        const finalItems = produce(originalItems, draft => {
+            applyWritesToItems<Obj>(
+                actions, 
+                draft, 
+                ObjSchema,
+                ddl,
+                {immer_compatible: true}
+            );
+        });
+
+        expect(finalItems===originalItems).toBe(true);
+        expect(finalItems[0]===originalItems[0]).toBe(true);
+        expect(finalItems[1]===originalItems[1]).toBe(true);
+    })
+
 });

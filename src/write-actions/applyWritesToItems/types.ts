@@ -16,7 +16,7 @@ export interface WriteStrategy<T extends Record<string, any>> {
 export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
     accumulator?: AppliedWritesOutput<T>,
     attempt_recover_duplicate_create?: boolean,
-    immer_optimized?: boolean 
+    immer_compatible?: boolean 
 }
 
 /*

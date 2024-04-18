@@ -1,4 +1,4 @@
-import { isEqual, isMatch } from "lodash-es";
+
 import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionFailures,  WriteActionFailuresErrorDetails,  isUpdateOrDeleteWriteActionPayload } from "../types";
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter";
@@ -11,13 +11,19 @@ import getArrayScopeItemActions from "./helpers/getArrayScopeItemActions";
 import { z } from "zod";
 import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker";
 import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs";
+import { current, isDraft } from "immer";
 
 
 
 
 
 function getMutableItem<T extends Record<string, any>>(item:T, index: number, undoable?: UndoableArrayMutation<T>):T {
-    if( undoable ) undoable.update(index, item);
+    if( undoable ) {
+        // If undoable present, it's Immer compatible and probably a draft object
+        undoable.update(index, item);
+        // Before clone, convert back:
+        if( isDraft(item) ) item = current(item);
+    }
     const clone = structuredClone(item) as T;
     return clone;
 }
@@ -67,8 +73,8 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
         applyAccumulatorToHashes<T>(options.accumulator, rules.primary_key, addedHash, updatedHash, deletedHash);
     }
 
-    const undoable = options?.immer_optimized? new UndoableArrayMutation<T>() : undefined;
-    const mutableItems = options?.immer_optimized? items as T[] : [...items];
+    const undoable = options?.immer_compatible? new UndoableArrayMutation<T>() : undefined;
+    const mutableItems = options?.immer_compatible? items as T[] : [...items];
     if( writeActions.length ) {
 
 
@@ -164,7 +170,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
 
                                     // An update is not allowed to change the primary key 
                                     if( safeKeyValue(mutableUpdatedItem[rules.primary_key])===pk ) {
-                                        mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.immer_optimized decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
+                                        mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.immer_compatible decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
                                     } else {
                                         failureTracker.report(action, item, {
                                             'type': 'update_altered_key',
@@ -230,7 +236,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
         }
 
         if( failureTracker.length()>0 ) {
-            if( options?.immer_optimized ) {
+            if( options?.immer_compatible ) {
                 // Restore the mutableItems to their state pre any changes, in an Immer compatible way 
                 undoable!.restore(mutableItems);
             }

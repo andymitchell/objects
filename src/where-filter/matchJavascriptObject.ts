@@ -1,10 +1,13 @@
+import { Draft } from "immer";
 import getPropertyWithDotPropPath from "../dot-prop-paths/getPropertySimpleDot";
 import isPlainObject from "../isPlainObject";
 import { isLogicFilter, isValueComparisonArrayContains, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition } from "./types";
 
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
-export default function matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:T, filter:WhereFilterDefinition<T>):boolean {
+type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
+
+export default function matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean {
     if( !isPlainObject(object) ) {
         let json: string = 'redacted';
         if( process.env.NODE_ENV==='test' ) {
@@ -14,19 +17,12 @@ export default function matchJavascriptObject<T extends Record<string, any> = Re
                 json = 'unknowable'
             }
 
-            console.warn("FAILING");
-            //console.warn("typeof: "+typeof object);
-            let proto = Object.getPrototypeOf(object);
-            //console.warn("has proto? "+!!proto);
-            console.warn("proto has the correct prototype? "+(proto===Object.prototype));
-            console.warn("Object.prototype.toString.call(object) = "+Object.prototype.toString.call(object))
         }
         throw new Error("matchJavascriptObject requires plain object. Received: "+json)
     }
-    //console.warn("RUNNING MATCH PASSED: "+JSON.stringify(object));
     return _matchJavascriptObject(object, filter, [filter]);
 }
-function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:T, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {
+function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {
     
     if( isLogicFilter(filter) ) {
         // Treat it as recursive
@@ -45,7 +41,7 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
     
 }
 
-export function filterJavascriptObjects<T extends {} = {}>(objects:T[], filter:WhereFilterDefinition<T>):T[] {
+export function filterJavascriptObjects<T extends {} = {}>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<T>):ObjOrDraft<T>[] {
     return objects.filter(x => matchJavascriptObject<T>(x, filter));
 }
 

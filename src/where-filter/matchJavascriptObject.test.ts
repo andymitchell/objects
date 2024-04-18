@@ -1,3 +1,4 @@
+import { produce } from "immer";
 import matchJavascriptObject from "./matchJavascriptObject";
 
 
@@ -253,6 +254,26 @@ describe('testMatchJavascriptObject', () => {
                 ]
             }
         )).toBe(true);
+    });
+
+
+    test('Immer - Match name', () => {
+
+        const obj = {
+            contact: {
+                name: 'Andy',
+                emailAddress: 'andy@andy.com'
+            }
+        };
+
+        const final = produce(obj, draft => {
+            expect(matchJavascriptObject(
+                draft,
+                {
+                    'contact.name': 'Andy'
+                }
+            )).toBe(true);
+        });
     });
 
 })

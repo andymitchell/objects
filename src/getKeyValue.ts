@@ -1,5 +1,10 @@
+import { z } from "zod";
+import isTypeEqual from "./isTypeEqual";
 
+export const PrimaryKeyValueSchema = z.union([z.string(), z.number()]);
 export type PrimaryKeyValue = string | number;
+isTypeEqual<z.infer<typeof PrimaryKeyValueSchema>, PrimaryKeyValue>(true);
+
 export default function safeKeyValue(x: any, allowMissing?: boolean):PrimaryKeyValue {
     if( !x ) {
         if( allowMissing ) return '';
@@ -8,9 +13,9 @@ export default function safeKeyValue(x: any, allowMissing?: boolean):PrimaryKeyV
     if( typeof x==='number' ) return x;
     return typeof x==='string'? x : x+'';
 }
-export type PrimaryKeyGetter<T> = (x:T) => PrimaryKeyValue;
+export type PrimaryKeyGetter<T> = (x:T, allowMissing?: boolean) => PrimaryKeyValue;
 export function makePrimaryKeyGetter<T>(primaryKey:keyof T):PrimaryKeyGetter<T> {
-    return (x:T) => {
-        return safeKeyValue(x[primaryKey]);
+    return (x:T, allowMissing?: boolean) => {
+        return safeKeyValue(x[primaryKey], allowMissing);
     }
 }

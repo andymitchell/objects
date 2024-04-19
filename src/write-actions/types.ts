@@ -3,7 +3,8 @@ import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArr
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod";
 import isTypeEqual from "../isTypeEqual";
-import { PrimaryKeyValue } from "../getKeyValue";
+import { PrimaryKeyValue, PrimaryKeyValueSchema } from "../getKeyValue";
+import { Draft } from "immer";
 
 
 
@@ -13,7 +14,7 @@ export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY 
 type ArrayScopeActionData = {
     type: "array_scope";
     scope: string;
-    actions: any[];
+    action: any;
 };
 
 function checkArrayScopeActions(schema:z.ZodTypeAny, data: ArrayScopeActionData):boolean {
@@ -22,10 +23,10 @@ function checkArrayScopeActions(schema:z.ZodTypeAny, data: ArrayScopeActionData)
         return false;
     }
     const subActionSchema = createWriteActionSchema(subSchema);
-    return data.actions.every(x => subActionSchema.writeAction.safeParse(x).success);
+    return subActionSchema.writeAction.safeParse(data.action).success;
 }
 
-//z.object({}).catchall(z.unknown())
+
 export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
     const schema:z.ZodTypeAny = objectSchema ?? z.record(z.any());
     const WriteActionPayloadCreateSchema = z.object({
@@ -43,7 +44,8 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
     const WriteActionPayloadArrayCreateSchema = z.object({
         type: z.literal('array_scope'),
         scope: z.string(),
-        actions: z.array(z.any()), // This gets tighter control in the .refine below 
+        action: z.record(z.any()), // This gets tighter control in the .refine below 
+        where: WhereFilterSchema,
     }).refine((data) => {
         return checkArrayScopeActions(schema, data);
     }, {
@@ -51,19 +53,7 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
         path: ["value"]
     });
 
-    /*
-    const WriteActionPayloadArrayCreateSchema = z.object({
-        type: z.literal('array_create'),
-        path: z.string(),
-        value: z.any(), // This gets tighter control in the .refine below 
-        where: WhereFilterSchema,
-    }).refine((data) => {
-        return validateValueAtPath(schema, data.path, data.value);
-    }, {
-        message: "Value does not match the schema at the specified path",
-        path: ["value"]
-    });
-    */
+    
 
     const WriteActionPayloadDeleteSchema = z.object({
         type: z.literal('delete'),
@@ -110,7 +100,8 @@ export type WriteActionPayloadUpdate<T extends Record<string, any>> = {
 export type WriteActionPayloadArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>> = {
     type: 'array_scope',
     scope: P,
-    actions: WriteAction<DotPropPathValidArrayValue<T, P>>[] // FYI If you don't explicitly state the P generic, this will fail
+    action: WriteActionPayload<DotPropPathValidArrayValue<T, P>>, // FYI If you don't explicitly state the P generic, this will fail
+    where: WhereFilterDefinition<T>
 }
 type WriteActionPayloadDelete<T extends Record<string, any>> = {
     type: 'delete',
@@ -124,27 +115,13 @@ export type WriteAction<T extends Record<string, any>> = {
     payload: WriteActionPayload<T>
 }
 
+export function isWriteActionArrayScopePayload<T extends Record<string, any> = Record<string, any>>(x: unknown):x is WriteActionPayloadArrayScope<T> {
+    return typeof x==='object' && !!x && "type" in x && x.type==='array_scope';
+}
+
 export function isUpdateOrDeleteWriteActionPayload<T extends Record<string, any>>(x: unknown): x is WriteActionPayloadUpdate<T> | WriteActionPayloadDelete<T> | WriteActionPayloadArrayScope<T>{
     return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete');
 }
-
-/*
-export const WriteSchemaFailuresSchema = z.object({
-    items: z.array(z.object({
-        item: z.record(z.any()),
-        actions: z.array(z.object({
-            action: createWriteActionSchema().writeAction,
-            issues: z.array(z.any())    
-        }))
-    })),
-    actions: z.array(createWriteActionSchema().writeAction)
-});
-export type WriteSchemaFailures<T extends Record<string, any>> = {
-    items: Array<{item: T, actions: {action: WriteAction<T>, issues: z.ZodIssue[]}[]}>,
-    actions: WriteAction<T>[]
-}
-isTypeEqual<z.infer<typeof WriteSchemaFailuresSchema>, WriteSchemaFailures<any>>(true);
-*/
 
 
 export function createWriteActionFailuresSchema<T extends Record<string, any> = Record<string, any>>() {
@@ -152,7 +129,9 @@ export function createWriteActionFailuresSchema<T extends Record<string, any> = 
         action: (createWriteActionSchema().writeAction as z.ZodType<WriteAction<T>>),
         unrecoverable: z.boolean().optional(),
         back_off_until_ts: z.number().optional(),
+        blocked_by_action_uuid: z.string().optional(),
         affected_items: z.array(z.object({
+            item_pk: PrimaryKeyValueSchema,
             item: (z.record(z.any()) as z.ZodType<T>),
             error_details: z.array(z.union([
                 z.record(z.any()).and(z.object({type: z.literal('custom')})),
@@ -193,12 +172,14 @@ export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'cust
     {
         type: 'create_duplicated_key',
         primary_key: string | number | symbol
-    };
+    }
 export type WriteActionFailures<T extends Record<string, any> = Record<string, any>> = {
     action: WriteAction<T>,
     unrecoverable?: boolean,
     back_off_until_ts?: number,
+    blocked_by_action_uuid?: string,
     affected_items: {
+        item_pk: PrimaryKeyValue,
         item: T,
         error_details: WriteActionFailuresErrorDetails[]
     }[]
@@ -213,6 +194,23 @@ function inferWriteActionFailures<T extends Record<string, any>>() {
 export type WriteActionFailuresGeneric<T extends Record<string, any> = Record<string, any>> = z.infer<ReturnType<typeof inferWriteActionFailures<T>>>;
 */
 
+export function createWriteActionSuccessesSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.array(z.object({
+        action: (createWriteActionSchema().writeAction as z.ZodType<WriteAction<T>>),
+        affected_items: z.array(z.object({
+            item_pk: PrimaryKeyValueSchema,
+        }))
+    }))
+}
+export type WriteActionSuccess<T extends Record<string, any>> = {
+    action: WriteAction<T>,
+    affected_items: {
+        item_pk: PrimaryKeyValue
+    }[]
+}
+export type WriteActionSuccesses<T extends Record<string, any> = Record<string, any>> = WriteActionSuccess<T>[];
+const WriteActionSuccessesSchema = createWriteActionSuccessesSchema();
+isTypeEqual<z.infer<typeof WriteActionSuccessesSchema>, WriteActionSuccesses<any>>(true);
 
 // TODO Replace this with createCustomGeneralError (currently in breef codebase)
 export const WriteActionErrorSchema = z.record(z.any()).and(z.object({
@@ -228,12 +226,15 @@ export type WriteActionError<T extends Record<string, any> = Record<string, any>
 isTypeEqual<z.infer<typeof WriteActionErrorSchema>, WriteActionError<any>>(true);
 
 
-export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] }
+export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] | Draft<T>[] }
 
 export type AppliedWritesOutputResponse<T extends Record<string, any>> = {
     status: 'ok',
-    changes: AppliedWritesOutput<T>
+    changes: AppliedWritesOutput<T>,
+    successful_actions: WriteActionSuccesses<T>,
 } | {
     status: 'error', 
+    changes: AppliedWritesOutput<T>,
+    successful_actions: WriteActionSuccesses<T>,
     error:  WriteActionError<T>
 }

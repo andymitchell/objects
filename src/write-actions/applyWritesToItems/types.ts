@@ -14,10 +14,11 @@ export interface WriteStrategy<T extends Record<string, any>> {
 }
 
 export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
-    accumulator?: AppliedWritesOutput<T>,
+    allow_partial_success?: boolean,
     attempt_recover_duplicate_create?: boolean,
-    immer_compatible?: boolean 
+    in_place_mutation?: boolean  // Use for Immer
 }
+
 
 /*
 type ListRulesCore<T = Record<string, any>> = {

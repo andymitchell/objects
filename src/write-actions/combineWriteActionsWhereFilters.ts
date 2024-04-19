@@ -2,7 +2,7 @@ import { z } from "zod";
 import safeKeyValue from "../getKeyValue";
 import { WhereFilterDefinition } from "../where-filter";
 import { DDL } from "./applyWritesToItems";
-import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemActions";
+import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemAction";
 import { WriteAction } from "./types";
 
 /**
@@ -24,9 +24,9 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
             }
             return existingKeyValue;
         } else if( x.payload.type==='array_scope' ) {
-            const scoped = getArrayScopeSchemaAndDDL<T>(x.payload, schema, ddl);
-            const filter = combineWriteActionsWhereFilters(scoped.schema, scoped.ddl, scoped.writeActions);
-            return filter;
+            const scoped = getArrayScopeSchemaAndDDL<T>(x, schema, ddl);
+            const filter = combineWriteActionsWhereFilters(scoped.schema, scoped.ddl, [scoped.writeAction]);
+            return {AND: [x.payload.where, filter]};
         } else if( x.payload.type==='update' || (x.payload.type==='delete') && includeDelete) {
             return x.payload.where;
         }

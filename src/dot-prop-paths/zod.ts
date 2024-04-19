@@ -87,6 +87,7 @@ export function getZodSchemaAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPro
         }
     }
 
+    if( currentSchema instanceof z.ZodOptional ) currentSchema = currentSchema._def.innerType;
     if( currentSchema instanceof z.ZodArray ) currentSchema = currentSchema.element;
 
     return currentSchema;

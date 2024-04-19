@@ -2,21 +2,26 @@ import { z } from "zod";
 import { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../../types";
 import { ListRules } from "../types";
 import { isEqual } from "lodash-es";
-import safeKeyValue from "../../../getKeyValue";
+import safeKeyValue, { PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../getKeyValue";
+
 
 type FailedAction<T extends Record<string, any>> = WriteActionFailures<T>[number];
 type FailedItem<T extends Record<string, any>> = WriteActionFailures<T>[number]['affected_items'][number];
 export default class WriteActionFailuresTracker<T extends Record<string, any>> {
     private schema: z.ZodType<T, any, any>;
-    private rules: ListRules<T>;
     private failures: WriteActionFailures<T>;
+    private pk:PrimaryKeyGetter<T>;
 
     constructor(schema: z.ZodType<T, any, any>, rules: ListRules<T>) {
         this.schema = schema;
-        this.rules = rules;
         this.failures = [];
+        this.pk = makePrimaryKeyGetter(rules.primary_key);
 
         
+    }
+
+    shouldHalt():boolean {
+        return this.length()>0;
     }
 
     private findAction<IMA extends boolean = false>(action:WriteAction<T>, ifMissingAdd?: IMA): IMA extends true? FailedAction<T> : FailedAction<T>  | undefined {
@@ -33,10 +38,10 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
         let failedItem:WriteActionFailures<T>[number]['affected_items'][number] | undefined;
         if( failedAction ) {
 
-            const itemPk = safeKeyValue(item[this.rules.primary_key], true);
-            failedItem = itemPk ? failedAction.affected_items.find(x => itemPk===safeKeyValue(x.item[this.rules.primary_key])) : undefined;
+            const itemPk = this.pk(item, true);
+            failedItem = itemPk ? failedAction.affected_items.find(x => itemPk===this.pk(x.item, true)): undefined;
             if( ifMissingAdd && !failedItem ) {
-                failedItem = {item, error_details: []};
+                failedItem = {item_pk: itemPk, item, error_details: []};
                 failedAction.affected_items.push(failedItem);
             }
         }
@@ -92,6 +97,11 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
     report(action:WriteAction<T>, item: T, errorDetails: WriteActionFailuresErrorDetails):void {
         const {failedAction, failedItem} = this.findActionAndItem(action, item, true);
         this.addErrorDetails(failedAction, failedItem, errorDetails);
+    }
+
+    blocked(action:WriteAction<T>, blocked_by_action_uuid:string):void {
+        const failedAction = this.findAction(action, true);
+        failedAction.blocked_by_action_uuid = blocked_by_action_uuid;
     }
 
     mergeUnderAction(action:WriteAction<T>, failedActions:WriteActionFailures<T>):void {

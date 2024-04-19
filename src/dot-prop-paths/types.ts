@@ -43,9 +43,9 @@ type Path<T> = T extends Array<any>
     : '';
 
 
-
-type RemoveTrailingDot<T> = T extends `${infer S}.` ? never : T;
+export type RemoveTrailingDot<T> = T extends `${infer S}.` ? never : T;
 export type DotPropPathsUnion<T> = { [K in Path<T>]: RemoveTrailingDot<K> }[Path<T>];
+export type DotPropPathsIncArrayUnion<T extends Record<string,any>> = DotPropPathToObjectArraySpreadingArrays<T> | DotPropPathsUnion<T>;
 
 
 type DotPropPathsRecordExplicitValues<T, EV> = {
@@ -73,7 +73,7 @@ export type DotPropPathToArraySpreadingArrays<T, Prefix extends string = ''> = T
 
 
 
-export type PathValue<T extends Record<string, any>, P, Depth extends number = 8> = P extends `${infer Key}.${infer Rest}`
+export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
     ? Key extends keyof T
         ? NonNullable<T[Key]> extends Array<infer U>
             ? PathValue<EnsureRecord<U>, Rest>
@@ -125,10 +125,6 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
                 : never
         : never;
 }[keyof T] : '';
-
-
-
-
 
 
 

@@ -142,29 +142,32 @@ describe('combineWriteActionsWhereFilters', () => {
     test('combineWriteActionsWhereFilters array scope', () => {
         console.warn("TODO combineWriteActionsWhereFilters array scope: it needs a better syntax implementing, and for ts to support array nesting")
         
-        /*
+        
         const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
+                uuid: '0',
                 payload: {
                     type: 'array_scope',
                     scope: 'children',
-                    actions: [{
-                        type: 'write',
-                        ts: 0,
-                        payload: {
+                    action: {
                             type: 'create',
                             data: {
                                 'cid': 'c1',
                                 children: []
                             }
-                        }
-                    }]
-                }
+                        },
+                    where: {
+                        id: '1'
+                    }
+                },
+                
             }
         ]);
+        debugger;
 
+        /*
         const shouldBe:WhereFilterDefinition<Obj> = {
             'OR': [
                 {

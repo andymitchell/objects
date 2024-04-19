@@ -350,6 +350,60 @@ describe('applyWritesToItems test', () => {
 
             expect(result.successful_actions.length).toEqual(1);
             expect(result.successful_actions[0].action.uuid).toEqual('0');
+            expect(result.successful_actions[0].affected_items.length).toEqual(1);
+            expect(result.successful_actions[0].affected_items[0].item_pk).toEqual('a1');
+
+            
+        });
+    });
+
+    testImmutableAndnplaceModes((name, options) => {
+        test(`multiple affected items on success [${name}]`, () => {
+
+            const result = applyWritesToItems<Obj>(
+                [
+                    {type: 'write', ts: 0, uuid: '0', payload: {
+                        type: 'update',
+                        method: 'merge',
+                        data: {
+                            text: 'Alice',
+                        },
+                        where: {
+                            text: 'Bob'
+                        }
+                    }},
+                ], 
+                [
+                    {
+                        id: '1',
+                        text: 'Bob'
+                    },
+                    {
+                        id: '2',
+                        text: 'Bob'
+                    },
+                    {
+                        id: '3',
+                        text: 'Alice'
+                    }
+                ], 
+                ObjSchema,
+                ddl,
+                Object.assign({
+                    allow_partial_success: false
+                }, options)
+                
+            );
+            
+
+            expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
+            
+            expect(result.successful_actions.length).toEqual(1);
+            expect(result.successful_actions[0].action.uuid).toEqual('0');
+            expect(result.successful_actions[0].affected_items.length).toEqual(2);
+            expect(result.successful_actions[0].affected_items[0].item_pk).toEqual('1');
+            expect(result.successful_actions[0].affected_items[1].item_pk).toEqual('2');
+            expect(result.changes.final_items.every(x => x.text==='Alice')).toBe(true);
 
             
         });

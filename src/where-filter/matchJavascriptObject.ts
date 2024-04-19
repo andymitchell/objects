@@ -1,11 +1,12 @@
 import { Draft } from "immer";
 import getPropertyWithDotPropPath from "../dot-prop-paths/getPropertySimpleDot";
 import isPlainObject from "../isPlainObject";
-import { isLogicFilter, isValueComparisonArrayContains, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition } from "./types";
+import { ArrayFilter, ArrayValueComparison, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, LogicFilter, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition, WhereFilterLogicOperators } from "./types";
+import { isEqual } from "lodash-es";
 
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
-type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
+export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
 
 export default function matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean {
     if( !isPlainObject(object) ) {
@@ -20,10 +21,19 @@ export default function matchJavascriptObject<T extends Record<string, any> = Re
         }
         throw new Error("matchJavascriptObject requires plain object. Received: "+json)
     }
+
     return _matchJavascriptObject(object, filter, [filter]);
 }
 function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {
     
+    // If there's more than 1 key on the filter, split it formally into an AND 
+    const keys = Object.keys(filter) as Array<keyof typeof filter>;
+    if( keys.length>1 ) {
+        filter = {
+            AND: keys.map(key => ({[key]: filter[key]}))
+        }
+    }
+
     if( isLogicFilter(filter) ) {
         // Treat it as recursive
         const subMatcher = (subFilter:WhereFilterDefinition) => _matchJavascriptObject(object, subFilter, [...debugPath, subFilter]);
@@ -35,7 +45,12 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
         // Test a single dotprop 
         const dotpropKey = Object.keys(filter)[0];
         const objectValue = getPropertyWithDotPropPath(object, dotpropKey, true);
-        return compareValue(objectValue, filter[dotpropKey]);
+
+        if( Array.isArray(objectValue) ) {
+            return compareArray(objectValue, filter[dotpropKey], [...debugPath, filter[dotpropKey]]);
+        } else {
+            return compareValue(objectValue, filter[dotpropKey]);
+        }
     }
 
     
@@ -57,6 +72,7 @@ const ValueComparisonNumericOperatorsJavascriptFunctions:ValueComparisonNumericO
 function compareValue(value: any, filterValue: ValueComparison):boolean {
     const filterValueIsPlainObject = isPlainObject(filterValue);
 
+    
     if( filterValueIsPlainObject ) {
         if( isValueComparisonContains(filterValue, true) ) {
             if( typeof value==='string' ) {
@@ -64,12 +80,14 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
             } else {
                 throw new Error("A ValueComparisonContains only works on a string");
             }
+            /*
         } else if( isValueComparisonArrayContains(filterValue, true ) ) {
             if( Array.isArray(value) ) {
                 return value.includes(filterValue.array_contains);
             } else {
                 throw new Error("A isValueComparisonArrayContains only works on an array");
             }
+            */
         } else if( isValueComparisonNumeric(filterValue, true) ) {
             if( typeof value==='number' ) {
                 return ValueComparisonNumericOperators.filter(x => x in filterValue).every(x => {
@@ -82,6 +100,8 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
             } else {
                 throw new Error("A ValueComparisonContains only works on a number");
             }
+        } else {
+            return isEqual(value, filterValue);
         }
     } else {
         if( isValueComparisonScalar(filterValue) ) {
@@ -89,4 +109,23 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
         }
     }
     return false;
+}
+
+function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:WhereFilterDefinition[]):boolean {
+    if( Array.isArray(filterValue) ) {
+        // Two arrays = straight comparison
+        return isEqual(value, filterValue);
+    } else if( isArrayValueComparisonElemMatch(filterValue) ) {
+        // In an elem_match, one item in the 'value' array must match all the criteria
+        if( isWhereFilterDefinition(filterValue.elem_match) ) {
+            return value.some(x => _matchJavascriptObject(x, filterValue.elem_match, [...debugPath, filterValue.elem_match]))
+        } else {
+            // It's a value comparison
+            return value.some(x => compareValue(x, filterValue.elem_match))
+        }
+    } else {
+        // every filter item must be satisfied by some part of the array
+        const wrappedFilter:LogicFilter<any> = isWhereFilterDefinition(filterValue) && filterValue.AND? filterValue : {AND: [filterValue]};
+        return wrappedFilter.AND!.every(subFilter => value.some(x => _matchJavascriptObject(x, subFilter, [...debugPath, subFilter])));
+    }
 }

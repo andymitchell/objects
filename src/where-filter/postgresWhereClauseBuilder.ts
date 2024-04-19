@@ -1,6 +1,6 @@
 
 import { z } from "zod";
-import { isLogicFilter, isValueComparisonArrayContains, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, ValueComparison, ValueComparisonNumericOperators, ValueComparisonNumericOperatorsTyped, WhereFilterDefinition, WhereFilterLogicOperators, WhereFilterLogicOperatorsTyped } from "./types";
+import { isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, ValueComparison, ValueComparisonNumericOperators, ValueComparisonNumericOperatorsTyped, WhereFilterDefinition, WhereFilterLogicOperators, WhereFilterLogicOperatorsTyped } from "./types";
 import { convertSchemaToDotPropPathKind } from "../dot-prop-paths/zod";
 
 export type PreparedWhereClauseStatement = {whereClauseStatement:string, statementArguments:PreparedStatementArgument[]};
@@ -102,10 +102,6 @@ function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter
         if( isValueComparisonContains(filterValue) ) {
             const placeholder = generatePlaceholder(`%${filterValue.contains}%`, statementArguments);
             return `${sqlKey} LIKE ${placeholder}`;
-        } else if( isValueComparisonArrayContains(filterValue) ) {
-            // TODO Need a way to confirm that sqlKey is a JSON object, as that's the only time this is valid. 
-            // Use the @> operator
-            throw new Error(`Issue a JSONB lookup`);
         } else if( isValueComparisonNumeric(filterValue) ) {            
             const operators = ValueComparisonNumericOperators
                 .filter((x):x is ValueComparisonNumericOperatorsTyped => x in filterValue)

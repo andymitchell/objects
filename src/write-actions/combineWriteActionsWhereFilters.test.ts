@@ -2,6 +2,7 @@ import { z } from "zod";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters"
 import { DDL } from "./applyWritesToItems";
 import { WhereFilterDefinition } from "../where-filter";
+import { assertArrayScope } from "./types";
 
 describe('combineWriteActionsWhereFilters', () => {
 
@@ -10,10 +11,11 @@ describe('combineWriteActionsWhereFilters', () => {
         text: z.string().optional(),
         children: z.array(z.object({
             cid: z.string(),
+            age: z.number(),
             children: z.array(z.object({
                 ccid: z.string()
             }))
-        }))
+        })).optional()
       }).strict();
       
     type Obj = z.infer<typeof ObjSchema>;
@@ -206,6 +208,7 @@ describe('combineWriteActionsWhereFilters', () => {
                             type: 'create',
                             data: {
                                 'cid': 'c1',
+                                age: 1,
                                 children: []
                             }
                         },
@@ -267,6 +270,7 @@ describe('combineWriteActionsWhereFilters', () => {
                             type: 'create',
                             data: {
                                 'cid': 'c1',
+                                age: 1,
                                 children: []
                             }
                         },
@@ -280,13 +284,13 @@ describe('combineWriteActionsWhereFilters', () => {
                 type: 'write',
                 ts: 0,
                 uuid: '1',
-                payload: {
+                payload: assertArrayScope<Obj, 'children'>({
                     type: 'array_scope',
                     scope: 'children',
                     action: {
                             type: 'update',
                             data: {
-                                children: [{ccid: 'ccid1'}]
+                                age: 1
                             },
                             where: {
                                 cid: 'c1'
@@ -295,7 +299,7 @@ describe('combineWriteActionsWhereFilters', () => {
                     where: {
                         id: '1'
                     }
-                },
+                }),
             },
             {
                 type: 'write',
@@ -308,6 +312,7 @@ describe('combineWriteActionsWhereFilters', () => {
                             type: 'create',
                             data: {
                                 cid: 'c2',
+                                age: 1, 
                                 children: []
                             }
                         },

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { WriteAction, WriteActionPayloadArrayScope, createWriteActionSchema } from "./types";
 
 describe('write-actions type check', () => {
-    // This is just a type file for convenience to see if typeCheck's code flags type errors
+    // This is primarily just a type file for convenience to see if typeCheck's code flags type errors
     // It has just one schema, but two types (one matching: Real; and one non-matching: Fake). Fake should fail schema tests.
     test('basic', () => {
         
@@ -44,12 +44,7 @@ describe('write-actions type check', () => {
         const actionBPayload: WriteActionPayloadArrayScope<Real, 'sub_tasks.siblings'> = {
             type: "array_scope",
             scope: 'sub_tasks.siblings',
-            actions: [
-                {
-                    type: 'write',
-                    ts: 0,
-                    uuid: '1',
-                    payload: {
+            action: {
                         type: 'update',
                         method: 'merge',
                         data: {
@@ -58,9 +53,10 @@ describe('write-actions type check', () => {
                         where: {
                             id: '1'
                         }
-                    }
+                },
+                where: {
+                    id: '1'
                 }
-            ]
         }
         const actionB: WriteAction<Real> = {
             type: 'write', 
@@ -88,23 +84,17 @@ describe('write-actions type check', () => {
         const actionFakeBPayload: WriteActionPayloadArrayScope<Fake, 'bub_sasks.riblings'> = {
             type: "array_scope",
             scope: 'bub_sasks.riblings',
-            actions: [
-                {
-                    type: 'write',
-                    ts: 0,
-                    uuid: '1',
-                    payload: {
-                        type: 'update',
-                        method: 'merge',
-                        data: {
-                            text: 'bob'
-                        },
-                        where: {
-                            id: '1'
-                        }
-                    }
+            action: {
+                type: 'update',
+                method: 'merge',
+                data: {
+                    text: 'bob'
+                },
+                where: {
+                    id: '1'
                 }
-            ]
+            },
+            where: {}
         }
 
         const actionFakeB: WriteAction<Fake> = {
@@ -119,20 +109,14 @@ describe('write-actions type check', () => {
         const actionCPayload: WriteActionPayloadArrayScope<RealOptional, 'sub_tasks.siblings'> = {
             type: "array_scope",
             scope: 'sub_tasks.siblings',
-            actions: [
-                {
-                    type: 'write',
-                    ts: 0,
-                    uuid: '1',
-                    payload: {
-                        type: 'create',
-                        data: {
-                            id: '1',
-                            text: 'bob'
-                        }
-                    }
+            action: {
+                type: 'create',
+                data: {
+                    id: '1',
+                    text: 'bob'
                 }
-            ]
+            },
+            where: {}
         }
         
 

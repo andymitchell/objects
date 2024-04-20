@@ -1,24 +1,4 @@
 
-/*
-export type PathValue<T, P> = P extends `${infer Key}.${infer Rest}`
-    ? Key extends keyof T
-    ? PathValue<T[Key], Rest>
-    : never
-    : P extends keyof T
-    ? T[P]
-    : never;
-*/
-/*
-export type PathValue<T, P> = P extends `${infer Key}.${infer Rest}`
-    ? Key extends keyof T
-        ? T[Key] extends Array<infer U>
-            ? PathValue<U, Rest>
-            : PathValue<T[Key], Rest>
-        : never
-    : P extends keyof T
-        ? T[P]
-        : never;
-*/
 
 import { EnsureRecord } from "../types";
 
@@ -48,31 +28,13 @@ export type DotPropPathsUnion<T> = { [K in Path<T>]: RemoveTrailingDot<K> }[Path
 export type DotPropPathsIncArrayUnion<T extends Record<string,any>> = DotPropPathToObjectArraySpreadingArrays<T> | DotPropPathsUnion<T>;
 
 
-type DotPropPathsRecordExplicitValues<T, EV> = {
-    [P in DotPropPathsUnion<T> as string & P]: EV
-};
 
 export type NonArrayProperty<T> = {
     [P in keyof T]: T[P] extends Array<any> ? never : P
 }[keyof T];
 
+
 /*
-export type DotPropPathToArraySpreadingArrays<T, Prefix extends string = ''> = T extends object ? { // Can handle nesting arrays as well as object keys, e.g. {arr: {arr2: {}[]}} yields 'arr' | 'arr.arr2'
-    [K in keyof T]-?: K extends string
-        ? T[K] extends Array<infer U>
-            ? U extends object
-                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, ''>}` | `${Prefix}${K}`
-                : `${Prefix}${K}`
-            : T[K] extends object
-                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<T[K], ''>}`
-                : never
-        : never;
-}[keyof T] : '';
-*/
-
-
-
-
 export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
     ? Key extends keyof T
         ? NonNullable<T[Key]> extends Array<infer U>
@@ -82,22 +44,17 @@ export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key
     : P extends keyof T
         ? T[P]
         : never;
-        
+*/
+export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
+    ? Key extends keyof T
+        ? NonNullable<T[Key]> extends Array<infer U>
+            ? PathValue<EnsureRecord<U>, Rest>
+            : PathValue<T[Key], Rest>
+        : never
+    : P extends keyof T
+        ? NonNullable<T[P]>
+        : never;
 
-/*
-export type PathValue<T extends Record<string, any>, P, Depth extends number = 8> = 
-  Depth extends 0 ? never : // Check if depth is 0, return any
-  P extends `${infer Key}.${infer Rest}` 
-    ? Key extends keyof T 
-      ? NonNullable<T[Key]> extends Array<infer U> 
-        ? PathValue<EnsureRecord<U>, Rest, Prev[Depth]> // Decrement depth for arrays
-        : PathValue<T[Key], Rest, Prev[Depth]> // Decrement depth for objects
-      : never 
-    : P extends keyof T 
-      ? T[P] 
-      : never;
-      */
-      
 
 // Helper type to decrement depth
 type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];

@@ -92,7 +92,7 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
                 results = [...results, ..._getPropertySpreadingArrays(object[i], dotPath, traversalPath + `[${i}]`)];
             }
         } else {
-            console.log("Returning ", {path: traversalPath, value: object});
+            //console.log("Returning ", {path: traversalPath, value: object});
             return [{path: traversalPath, value: object}]; // Leaf
         }
     } else if( isPlainObject(object) ) {

@@ -11,19 +11,16 @@ import { Draft } from "immer";
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
 
 
-type ArrayScopeActionData = {
-    type: "array_scope";
-    scope: string;
-    action: any;
-};
 
-function checkArrayScopeActions(schema:z.ZodTypeAny, data: ArrayScopeActionData):boolean {
+function checkArrayScopeAction(schema:z.ZodTypeAny, data: WriteActionPayloadArrayScope<any>):boolean {
     const subSchema = getZodSchemaAtSchemaDotPropPath(schema, data.scope);
     if( !(subSchema instanceof z.ZodObject) ) {
         return false;
     }
     const subActionSchema = createWriteActionSchema(subSchema);
-    return subActionSchema.writeAction.safeParse(data.action).success;
+    const result = subActionSchema.payload.safeParse(data.action).success;
+    return result;
+    
 }
 
 
@@ -47,7 +44,8 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
         action: z.record(z.any()), // This gets tighter control in the .refine below 
         where: WhereFilterSchema,
     }).refine((data) => {
-        return checkArrayScopeActions(schema, data);
+        const result = checkArrayScopeAction(schema, data as WriteActionPayloadArrayScope<any>);
+        return result;
     }, {
         message: "Value does not match the schema at the specified path",
         path: ["value"]
@@ -93,14 +91,15 @@ export type WriteActionPayloadCreate<T extends Record<string, any>> = {
 }
 export type WriteActionPayloadUpdate<T extends Record<string, any>> = {
     type: 'update',
-    data: Pick<Partial<T>, NonArrayProperty<T>>, // Updating whole arrays is forbidden, use array_scope instead. Why? This would require the whole array to be 'set', even if its likely only a tiny part needs to change, and that makes it very hard for CRDTs to reconcile what to overwrite. One solution could be enable this by allowing it to 'diff' it against the client's current cached version to see what has changed, and convert it into array_scope actions internally. The downside, other than an additional layer of uncertainty of how a bug might sneak in (e.g. if cache is somehow not as expected at point of write), is it forces the application code to start editing arrays before passing it to an 'update' rather than directly describing the change... it's more verbose. (Also related: #VALUE_TO_DELETE_KEY).
+    data: Partial<Pick<T, NonArrayProperty<T>>>, // Updating whole arrays is forbidden, use array_scope instead. Why? This would require the whole array to be 'set', even if its likely only a tiny part needs to change, and that makes it very hard for CRDTs to reconcile what to overwrite. One solution could be enable this by allowing it to 'diff' it against the client's current cached version to see what has changed, and convert it into array_scope actions internally. The downside, other than an additional layer of uncertainty of how a bug might sneak in (e.g. if cache is somehow not as expected at point of write), is it forces the application code to start editing arrays before passing it to an 'update' rather than directly describing the change... it's more verbose. (Also related: #VALUE_TO_DELETE_KEY).
     where: WhereFilterDefinition<T>,
     method?: UpdatingMethod
 }
 export type WriteActionPayloadArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>> = {
     type: 'array_scope',
     scope: P,
-    action: WriteActionPayload<DotPropPathValidArrayValue<T, P>>, // FYI If you don't explicitly state the P generic, this will fail
+    // IS IT FAILING TO SPOT TYPES? YOU MUST SPECIFY THE 'P' GENERIC IN THE TYPE, OR IT FAILS. IT CANNOT PROPERLY INFER FROM 'scope'. OR USE HELPER assertArrayScope
+    action: WriteActionPayload<DotPropPathValidArrayValue<T, P>>,
     where: WhereFilterDefinition<T>
 }
 type WriteActionPayloadDelete<T extends Record<string, any>> = {
@@ -114,6 +113,22 @@ export type WriteAction<T extends Record<string, any>> = {
     uuid: string,
     payload: WriteActionPayload<T>
 }
+
+export function assertArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T>>(action: WriteActionPayloadArrayScope<T, P>):WriteActionPayloadArrayScope<T,P> {
+    return action;
+}
+/*
+export function createWriteActionPayloadArrayScope<T extends Record<string, any>>() {
+    return function<P extends DotPropPathToObjectArraySpreadingArrays<T>>(scope: P, action: WriteActionPayload<DotPropPathValidArrayValue<T, P>>, where: WhereFilterDefinition<T>):WriteActionPayloadArrayScope<T> {
+        return {
+            type: 'array_scope',
+            scope,
+            action,
+            where
+        };
+    };
+}
+*/
 
 export function isWriteActionArrayScopePayload<T extends Record<string, any> = Record<string, any>>(x: unknown):x is WriteActionPayloadArrayScope<T> {
     return typeof x==='object' && !!x && "type" in x && x.type==='array_scope';

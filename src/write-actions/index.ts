@@ -1,13 +1,18 @@
 import { applyWritesToItems, DDL } from "./applyWritesToItems/index";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters";
-import {  AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, createWriteActionFailuresSchema, createWriteActionSchema } from "./types";
+import {  AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema } from "./types";
 
 export const WriteActions = {
     applyWritesToItems,
     combineWriteActionsWhereFilters,
     createWriteActionSchema,
     createWriteActionFailuresSchema,
-    WriteActionErrorSchema
+    WriteActionErrorSchema,
+    assertArrayScope
+}
+
+export {
+    assertArrayScope
 }
 
 export type {

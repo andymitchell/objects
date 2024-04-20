@@ -1,9 +1,9 @@
 import { z } from "zod";
 import applyWritesToItems from ".";
-import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope } from "../types";
+import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope, assertArrayScope } from "../types";
 import { ApplyWritesToItemsOptions, DDL } from "./types";
 import { produce } from "immer";
-import { isEqual } from "lodash-es";
+
 
 
 describe('applyWritesToItems test', () => {
@@ -521,7 +521,7 @@ describe('applyWritesToItems test', () => {
             ];
             const result = applyWritesToItems<Obj>(
                 [
-                    {type: 'write', ts: 0, uuid: '0', payload: {
+                    {type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
                         type: 'array_scope',
                         scope: 'children',
                         action: {
@@ -537,14 +537,14 @@ describe('applyWritesToItems test', () => {
                         where: {
                             id: '1'
                         }
-                    }},
+                    })},
                     {type: 'write', ts: 0, uuid: '1', payload: {
                         type: 'array_scope',
                         scope: 'children',
                         action: {
                             type: 'create',
-                            // @ts-ignore
                             data: {
+                                // @ts-ignore
                                 bad_key: 'expect fail'
                             }
                         },
@@ -594,7 +594,7 @@ describe('applyWritesToItems test', () => {
 
             const result = applyWritesToItems<Obj>(
                 [
-                    {type: 'write', ts: 0, uuid: '0', payload: {
+                    {type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
                         type: 'array_scope',
                         scope: 'children',
                         action: {
@@ -610,14 +610,14 @@ describe('applyWritesToItems test', () => {
                         where: {
                             id: '1'
                         }
-                    }},
+                    })},
                     {type: 'write', ts: 0, uuid: '1', payload: {
                         type: 'array_scope',
                         scope: 'children',
                         action: {
                             type: 'create',
-                            // @ts-ignore
                             data: {
+                                // @ts-ignore
                                 bad_key: 'expect fail'
                             }
                         },

@@ -13,7 +13,7 @@ const writeLww: WriteStrategy<Record<string, any>> = {
         if( Array.isArray(target) ) {
             throw new Error("Cannot update an array. Use 'array_scope' instead to create/update/delete items in it.");
         }
-        if (writeActionPayload.method === 'merge') {
+        if (!writeActionPayload.method || writeActionPayload.method === 'merge') {
             merge(target, writeActionPayload.data) // MUTATION
         } else {
             Object.assign(target, writeActionPayload.data); // MUTATION

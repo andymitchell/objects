@@ -147,10 +147,12 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                 if( failureTracker.shouldHalt() ) break;
                 const item = wipItems[i];
                 const pkValue = pk(item);
-                let mutableUpdatedItem: T | undefined;
-                let deleted = !!deletedHash[pkValue];
+                
 
-                if ( !deleted && isUpdateOrDeleteWriteActionPayload<T>(action.payload) && (WhereFilter.matchJavascriptObject(item, action.payload.where)) ) {
+                if ( !deletedHash[pkValue] && isUpdateOrDeleteWriteActionPayload<T>(action.payload) && (WhereFilter.matchJavascriptObject(item, action.payload.where)) ) {
+                    let mutableUpdatedItem: T | undefined;
+                    let deleted = !!deletedHash[pkValue];
+
                     // Check if it's a grow set (otherwise just do the action)
                     const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, item, rules);
                     
@@ -169,7 +171,6 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                     // An update is not allowed to change the primary key 
                                     if( pk(mutableUpdatedItem)===pkValue ) {
                                         mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.in_place_mutation decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
-                                        successTracker.report(action, mutableUpdatedItem);
                                     } else {
                                         failureTracker.report(action, item, {
                                             'type': 'update_altered_key',
@@ -198,7 +199,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                         scopedArray.ddl, 
                                         Object.assign({}, optionsIncDefaults, {in_place_mutation: false})
                                         );
-                                        
+
                                     if( arrayResponse.status!=='ok' ) {
                                         failureTracker.mergeUnderAction(action, arrayResponse.error.failed_actions);
                                     }
@@ -217,28 +218,30 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                                 break;
                         }
                     }
-                }
 
-
-                // Now actually commit the change
-                if( !failureTracker.shouldHalt() ) {
-                    successTracker.report(action, item);
-                    if (deleted) {
-                        deletedHash[pkValue] = item;
-                        if( addedHash[pkValue] ) delete addedHash[pkValue];
-                        if( updatedHash[pkValue] ) delete updatedHash[pkValue];
-                        wipItems.splice(i, 1);
-                        i--;
-                    } else if( mutableUpdatedItem ) {
-                        // TODO Run pretriggers
-                        if (addedHash[pkValue]) {
-                            addedHash[pkValue] = mutableUpdatedItem;
-                        } else {
-                            updatedHash[pkValue] = mutableUpdatedItem;
+                    // Now actually commit the change
+                    if( !failureTracker.shouldHalt() ) {
+                        successTracker.report(action, item);
+                        if (deleted) {
+                            deletedHash[pkValue] = item;
+                            if( addedHash[pkValue] ) delete addedHash[pkValue];
+                            if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                            wipItems.splice(i, 1);
+                            i--;
+                        } else if( mutableUpdatedItem ) {
+                            // TODO Run pretriggers
+                            if (addedHash[pkValue]) {
+                                addedHash[pkValue] = mutableUpdatedItem;
+                            } else {
+                                updatedHash[pkValue] = mutableUpdatedItem;
+                            }
+                            wipItems[i] = mutableUpdatedItem
                         }
-                        wipItems[i] = mutableUpdatedItem
                     }
                 }
+
+
+                
             }
         }
     }

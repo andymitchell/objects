@@ -1,10 +1,26 @@
+import { getProperty as ldGetProperty } from "dot-prop";
 import isPlainObject from "../isPlainObject";
 
-// 8% faster than getProperty in the dot-prop package, but lacks the flexibility of that. This can only be used for paths strings split on '.'.
 
-// Verified that it matches output of dot-prop's getProperty for getProperty({foo: null}, 'foo.bar') and getProperty({foo: null}, 'foo')
 
 export function getProperty<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean) {
+    
+    return ldGetProperty(object, dotPath);
+
+}
+export default getProperty;
+
+
+/**
+ * 8% faster than getProperty in the dot-prop package, but lacks the flexibility of that. This can only be used for paths strings split on '.'. It can't do array index notation.
+ * Verified that it matches output of dot-prop's getProperty for getProperty({foo: null}, 'foo.bar') and getProperty({foo: null}, 'foo')
+ * 
+ * @param object 
+ * @param dotPath 
+ * @param alreadyProvedIsPlainObject 
+ * @returns 
+ */
+export function getPropertyFast<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean) {
     
     if( (!alreadyProvedIsPlainObject && !isPlainObject(object)) || !dotPath ) {
         return object;
@@ -22,9 +38,6 @@ export function getProperty<T extends Record<string, any> = Record<string, any>>
     return pathArray.length===count? object : undefined;
 
 }
-
-export default getProperty;
-
 
 /**
  * Return an array of all values at a dotPath, including iterating over any arrays in the dotPath  

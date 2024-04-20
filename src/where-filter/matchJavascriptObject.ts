@@ -1,10 +1,32 @@
 import { Draft } from "immer";
-import getPropertyWithDotPropPath from "../dot-prop-paths/getPropertySimpleDot";
+import getPropertyWithDotPropPath, { getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot";
 import isPlainObject from "../isPlainObject";
 import { ArrayFilter, ArrayValueComparison, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, LogicFilter, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition, WhereFilterLogicOperators } from "./types";
 import { isEqual } from "lodash-es";
 
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
+
+/*
+
+# This is largely inspired by Mongo. 
+
+## If multiple criteria are on a filter it's an AND... 
+e.g. {name: 'Bob', age: 1}, it implicitly infers its an AND across the criteria. 
+
+## It gets a little hard to think about around arrays. 
+Use elem_match on an array search to define the characteristics that must be found under one element. Otherwise, it does a compound search that accepts multiple elements fulfilling the criteria. 
+E.g. for an array 'children' [{name: 'Bob', age: 20}, name: 'Alice', age: 1], and filter {'children': {name: 'Bob', age: 1}}, it would pass. 
+But if you used {'children': {elem_match: {name: 'Bob', age: 1}}}, then it would fail. 
+
+This is counter-intuitive partly because the normal behaviour for multiple criteria is to use AND, except in compound filters. 
+
+If you use AND/OR/NOT in your compound filters, they behave atomically on each element, equivelent to elem_match. 
+
+## Spreading arrays will use a generous OR 
+E.g. suppose you have {children: {grandchildren: {name: string}[]}[]}. I.e. arrays as elements of parent arrays. 
+A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse each leaf array (in this case, potentially multiple 'grandchildren' arrays). But the compound filter must pass within the context of one array. 
+
+*/
 
 export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
 
@@ -43,13 +65,25 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
         return passOr && passAnd && passNot;
     } else {
         // Test a single dotprop 
+
         const dotpropKey = Object.keys(filter)[0];
-        const objectValue = getPropertyWithDotPropPath(object, dotpropKey, true);
+        let objectValue = getPropertyWithDotPropPath(object, dotpropKey, true);
+        const dotpropFilter = filter[dotpropKey];
+        if( objectValue===undefined ) {
+            // It's possible that it's an array nested under an array (spreading), so needs to be broken down to test every combination
+            const spreadArrays = getPropertySpreadingArrays(object, dotpropKey);
+            if( spreadArrays && spreadArrays.length ) {
+                const orFilter:WhereFilterDefinition = {
+                    OR: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
+                }
+                return _matchJavascriptObject(object, orFilter, [...debugPath, dotpropFilter])
+            }
+        }
 
         if( Array.isArray(objectValue) ) {
-            return compareArray(objectValue, filter[dotpropKey], [...debugPath, filter[dotpropKey]]);
+            return compareArray(objectValue, dotpropFilter, [...debugPath, dotpropFilter]);
         } else {
-            return compareValue(objectValue, filter[dotpropKey]);
+            return compareValue(objectValue, dotpropFilter);
         }
     }
 
@@ -124,8 +158,29 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
             return value.some(x => compareValue(x, filterValue.elem_match))
         }
     } else {
-        // every filter item must be satisfied by some part of the array
-        const wrappedFilter:LogicFilter<any> = isWhereFilterDefinition(filterValue) && filterValue.AND? filterValue : {AND: [filterValue]};
-        return wrappedFilter.AND!.every(subFilter => value.some(x => _matchJavascriptObject(x, subFilter, [...debugPath, subFilter])));
+        // it's a compound. every filter item must be satisfied by at least one element of the array 
+        if( isPlainObject(filterValue) ) {
+            // split it apart across its keys, where each must be satisfied
+            const keys = Object.keys(filterValue) as Array<keyof typeof filterValue>;
+
+            const result = keys.every(key => {
+
+                let finalKey = key;
+                /*
+                // In a compound, AND is weird... it means one of the AND criteria must match one of the elements. It must be flattened by turning it into an OR. 
+                if( typeof finalKey==='string' && /AND/i.test(finalKey) ) {
+                    finalKey = 'OR';
+                }
+                // NOT is also weird. It must fail for any item within, so it needs turning into a NOT>OR (instead of default NOT>AND).
+                */
+
+                const subFilter:WhereFilterDefinition = {[finalKey]: filterValue[key]};
+                return value.some(x => _matchJavascriptObject(x, subFilter, [...debugPath, subFilter]))
+            });
+            return result;
+        } else {
+            const result = value.indexOf(filterValue)>-1;
+            return result;
+        }
     }
 }

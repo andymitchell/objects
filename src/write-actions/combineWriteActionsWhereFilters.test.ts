@@ -49,13 +49,11 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual({
-            OR: [
+        expect(filter).toEqual(
                 {
                     id: '1'
                 }
-            ]
-        })
+        )
     })
 
     test('combineWriteActionsWhereFilters basic update', () => {
@@ -81,11 +79,7 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual({
-            OR: [
-                where
-            ]
-        })
+        expect(filter).toEqual(where)
     })
 
 
@@ -108,11 +102,7 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual({
-            OR: [
-                where
-            ]
-        })
+        expect(filter).toEqual(where)
     });
 
 
@@ -138,10 +128,71 @@ describe('combineWriteActionsWhereFilters', () => {
         expect(filter).toBe(undefined)
     });
 
+    test('combineWriteActionsWhereFilters 2x update', () => {
+        const where1:WhereFilterDefinition<Obj> = {
+            OR: [
+                {id: '1'},
+                {id: '2'}
+            ]
+        }
+        const where2:WhereFilterDefinition<Obj> = {
+            OR: [
+                {id: '3'},
+                {id: '4'}
+            ]
+        }
+        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+            {
+                type: 'write',
+                ts: 0,
+                uuid: '0',
+                payload: {
+                    type: 'update',
+                    method: 'merge',
+                    data: {
+                        text: 'hello'
+                    },
+                    where: where1
+                }
+            },
+            {
+                type: 'write',
+                ts: 0,
+                uuid: '0',
+                payload: {
+                    type: 'update',
+                    method: 'merge',
+                    data: {
+                        text: 'hello'
+                    },
+                    where: where2
+                }
+            }
+        ]);
+
+        expect(filter).toEqual({
+            OR: [
+                where1,
+                where2
+            ]
+        })
+    })
     
-    test('combineWriteActionsWhereFilters array scope', () => {
-        console.warn("TODO combineWriteActionsWhereFilters array scope: it needs a better syntax implementing, and for ts to support array nesting")
-        
+    test('combineWriteActionsWhereFilters array scope create', () => {        
+        const shouldBe:WhereFilterDefinition<Obj> = {
+            AND: [
+                {
+                    id: '1'
+                },
+                {
+                    children: {
+                        elem_match: {
+                            'cid': 'c1'
+                        }
+                    }
+                }
+            ]
+        }
         
         const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
@@ -165,25 +216,111 @@ describe('combineWriteActionsWhereFilters', () => {
                 
             }
         ]);
-        debugger;
+        expect(filter).toEqual(shouldBe)
 
-        /*
+    });
+    
+
+    test('combineWriteActionsWhereFilters array scope update', () => {        
         const shouldBe:WhereFilterDefinition<Obj> = {
-            'OR': [
+            "OR": [
                 {
-                    'children': {
-                        contains: {
-                            cid: 'c1'
+                    "AND": [
+                        {
+                            "id": "1"
+                        },
+                        {
+                            "children": {
+                                "elem_match": {
+                                    "cid": "c1"
+                                }
+                            }
                         }
-                    },
+                    ]
+                },
+                {
+                    "AND": [
+                        {
+                            "id": "2"
+                        },
+                        {
+                            "children": {
+                                "elem_match": {
+                                    "cid": "c2"
+                                }
+                            }
+                        }
+                    ]
                 }
             ]
         }
-
+        
+        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+            {
+                type: 'write',
+                ts: 0,
+                uuid: '0',
+                payload: {
+                    type: 'array_scope',
+                    scope: 'children',
+                    action: {
+                            type: 'create',
+                            data: {
+                                'cid': 'c1',
+                                children: []
+                            }
+                        },
+                    where: {
+                        id: '1'
+                    }
+                },
+                
+            },
+            {
+                type: 'write',
+                ts: 0,
+                uuid: '1',
+                payload: {
+                    type: 'array_scope',
+                    scope: 'children',
+                    action: {
+                            type: 'update',
+                            data: {
+                                children: [{ccid: 'ccid1'}]
+                            },
+                            where: {
+                                cid: 'c1'
+                            }
+                        },
+                    where: {
+                        id: '1'
+                    }
+                },
+            },
+            {
+                type: 'write',
+                ts: 0,
+                uuid: '1',
+                payload: {
+                    type: 'array_scope',
+                    scope: 'children',
+                    action: {
+                            type: 'create',
+                            data: {
+                                cid: 'c2',
+                                children: []
+                            }
+                        },
+                    where: {
+                        id: '2'
+                    }
+                },
+            }
+        ]);
         expect(filter).toEqual(shouldBe)
-        */
+        
+
     });
-    
 
     
 

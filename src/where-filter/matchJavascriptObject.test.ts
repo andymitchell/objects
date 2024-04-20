@@ -7,7 +7,19 @@ function matchJavascriptObject<T extends Record<string, any>>(object: ObjOrDraft
     return _matchJavascriptObject(object, filter);
 }
 
+type SpreadNested = {
+    parent_name: string,
+    children: {
+        child_name: string,
+        grandchildren: {
+            grandchild_name: string,
+            age?: number
+        }[]
+    }[]
+}
+
 describe('testMatchJavascriptObject', () => {
+    
     
     test('Match name', () => {
         expect(matchJavascriptObject(
@@ -409,9 +421,9 @@ describe('testMatchJavascriptObject', () => {
             }
         )).toBe(false);
     });
+    
 
-
-    test('array element any match: passes', () => {
+    test('array element compound filter: passes', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
@@ -425,8 +437,8 @@ describe('testMatchJavascriptObject', () => {
         )).toBe(true);
     });
 
-
-    test('array element any match: fails', () => {
+    
+    test('array element compound filter: fails', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
@@ -440,7 +452,7 @@ describe('testMatchJavascriptObject', () => {
         )).toBe(false);
     });
     
-    test('array element any filter: passes', () => {
+    test('array element compound filter: passes', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
@@ -464,7 +476,7 @@ describe('testMatchJavascriptObject', () => {
     });
 
 
-    test('array element any filter: fails', () => {
+    test('array element compound filter: fails', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
@@ -486,56 +498,9 @@ describe('testMatchJavascriptObject', () => {
             }
         )).toBe(false);
     });
+    
 
-
-    test('array element any filter AND: passes', () => {
-        expect(matchJavascriptObject(
-            {
-                contact: {
-                    name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
-                }
-            },
-            {
-                'contact.locations': {
-                    AND: [
-                        {
-                            'city': 'Brisbane'
-                        },
-                        {
-                            'city': 'NYC'
-                        }
-                    ]
-                }
-            }
-        )).toBe(true);
-    });
-
-    test('array element any filter AND: fails', () => {
-        expect(matchJavascriptObject(
-            {
-                contact: {
-                    name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
-                }
-            },
-            {
-                'contact.locations': {
-                    AND: [
-                        {
-                            'city': 'Brisbane'
-                        },
-                        {
-                            'city': 'Tokyo'
-                        }
-                    ]
-                }
-            }
-        )).toBe(false);
-    });
-
-
-    test('array element any element city+country: passes', () => {
+    test('array element compound filter city+country infer OR: passes', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
@@ -545,17 +510,34 @@ describe('testMatchJavascriptObject', () => {
             },
             {
                 'contact.locations': {
-                    AND: [
-                        {city: 'London'},
-                        {country: 'US'}
-                    ]
+                    city: 'London',
+                    country: 'US'
                 }
             }
         )).toBe(true);
     });
 
 
-    test('array element any element city+country: fails', () => {
+    test('array element compound filter city+country infer OR: fails', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    city: 'Brisbane',
+                    country: 'Japan'
+                }
+            }
+        )).toBe(false);
+    });
+
+
+    
+    test('array element compound filter city+country: fails', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
@@ -573,26 +555,179 @@ describe('testMatchJavascriptObject', () => {
             }
         )).toBe(false);
     });
+       
 
 
-    test('array element any element city+country: passes', () => {
+    test('array element compound filter explicit AND behaves like elem_match: passes', () => {
         expect(matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{city: 'Brisbane', country: 'Aus'}, {city: 'NYC', country: 'US'}]
                 }
             },
             {
                 'contact.locations': {
                     AND: [
-                        {city: 'London'},
-                        {country: 'US'}
+                        {
+                            'city': 'Brisbane'
+                        },
+                        {
+                            'country': 'Aus'
+                        }
                     ]
                 }
             }
         )).toBe(true);
     });
+
+
+
+    test('array element compound filter explict AND behaves like elem_match: fails', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'Brisbane', country: 'Aus'}, {city: 'NYC', country: 'US'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    AND: [
+                        {
+                            'city': 'Brisbane'
+                        },
+                        {
+                            'country': 'US'
+                        }
+                    ]
+                }
+            }
+        )).toBe(false);
+    });
+    
+    
+    test('array element compound filter explicit OR: passes', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    OR: [
+                        {
+                            'city': 'Brisbane'
+                        },
+                        {
+                            'city': 'NYC'
+                        }
+                    ]
+                }
+            }
+        )).toBe(true);
+    });
+
+    test('array element compound filter explicit OR: fails', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    OR: [
+                        {
+                            'city': 'Tokyo'
+                        },
+                        {
+                            'city': 'London'
+                        }
+                    ]
+                }
+            }
+        )).toBe(false);
+    });
+    
+
+    test('array element compound filter NOT: passes', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    NOT: [
+                        {
+                            'city': 'London'
+                        },
+                        {
+                            'city': 'Tokyo'
+                        }
+                    ]
+                }
+            }
+        )).toBe(true);
+    });
+
+
+
+    test('array element compound filter NOT partial (allowed because NYC ok): passes', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    NOT: [
+                        {
+                            'city': 'Brisbane'
+                        }
+                    ]
+                }
+            }
+        )).toBe(true);
+    });
+
+
+    test('array element compound filter NOT: fails', () => {
+        expect(matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                }
+            },
+            {
+                'contact.locations': {
+                    NOT: [
+                        {
+                            'city': 'Brisbane'
+                        },
+                        {
+                            'city': 'NYC'
+                        }
+                    ]
+                }
+            }
+        )).toBe(false);
+    });
+
+    
+
+
+    
+
 
 
     test('array element elem_match (must be all in one element) city+country: passes', () => {
@@ -774,6 +909,268 @@ describe('testMatchJavascriptObject', () => {
             {
                 'contact.locations': {
                     'flights': 'yesterday'
+                }
+            }
+        )).toBe(false);
+    });
+    
+    
+
+    test('array spread-nesting: passes', () => {
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children.grandchildren': {
+                    grandchild_name: 'Rita'
+                }
+            }
+        )).toBe(true);
+    });
+
+    
+    test('array spread-nesting: fails', () => {
+
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita',
+                                age: 5
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita',
+                                age: 10
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children.grandchildren': {
+                    grandchild_name: 'Bob'
+                }
+            }
+        )).toBe(false);
+    });
+
+
+    test('array spread-nesting where first path is not the target: passes', () => {
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Harold'
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children.grandchildren': {
+                    grandchild_name: 'Rita'
+                }
+            }
+        )).toBe(true);
+    });
+
+
+
+    test('array spread-nesting written nested: passes', () => {
+
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children': {
+                    'grandchildren': {
+                        grandchild_name: 'Rita'
+                    }
+                }
+            }
+        )).toBe(true);
+    });
+
+
+    test('array spread-nesting written nested: fails', () => {
+
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita'
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children': {
+                    'grandchildren': {
+                        grandchild_name: 'Bob'
+                    }
+                }
+            }
+        )).toBe(false);
+    });
+
+
+    test('array spread-nesting multi criteria compound filter (within 1 array): passes', () => {
+
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Harold',
+                                age: 1
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita',
+                                age: 2
+                            },
+                            {
+                                grandchild_name: 'Bob',
+                                age: 3
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children': {
+                    'grandchildren': {
+                        grandchild_name: 'Rita',
+                        age: 3
+                    }
+                }
+            }
+        )).toBe(true);
+    });
+    
+
+    test('array spread-nesting multi criteria compound filter (within 1 array): fails', () => {
+
+
+        expect(matchJavascriptObject<SpreadNested>(
+            {
+                parent_name: 'Bob',
+                children: [
+                    {
+                        child_name: 'Sue',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Harold',
+                                age: 1
+                            }
+                        ]
+                    },
+                    {
+                        child_name: 'Alice',
+                        grandchildren: [
+                            {
+                                grandchild_name: 'Rita',
+                                age: 2
+                            },
+                            {
+                                grandchild_name: 'Bob',
+                                age: 3
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                'children': {
+                    'grandchildren': {
+                        grandchild_name: 'Rita',
+                        age: 1
+                    }
                 }
             }
         )).toBe(false);

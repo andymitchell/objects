@@ -2,7 +2,7 @@
 import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionFailures,  WriteActionFailuresErrorDetails,  WriteActionSuccess,  WriteActionSuccesses,  isUpdateOrDeleteWriteActionPayload } from "../types";
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter";
-import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "../../getKeyValue";
+import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "../../utils/getKeyValue";
 import { ApplyWritesToItemsOptions, DDL, ItemHash, ListRules, WriteStrategy } from "./types";
 import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe";
 import writeLww from "./writeStrategies/lww";

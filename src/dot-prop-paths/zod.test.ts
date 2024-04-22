@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getZodSchemaAtSchemaDotPropPath } from "./zod";
+import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath } from "./zod";
 
 describe('Zod test', () => {
 
@@ -78,6 +78,132 @@ describe('Zod test', () => {
         if( !nested.children ) throw new Error("noop");
         expect(!!childrenChildren).toBe(true);
         expect(childrenChildren?.safeParse(nested.children[0].children[0]).success).toBe(true);
+    })
+
+    test('convertSchemaToDotPropPathTree', () => {
+        const result = convertSchemaToDotPropPathTree(z.object({
+            contact: z.object({
+                name: z.string(),
+                age: z.number().optional(),
+                emailAddress: z.string().optional(),
+                locations: z.array(z.union([
+                    z.string(),
+                    z.number(),
+                    z.object({
+                        city: z.string().optional(),
+                        country: z.string().optional(),
+                        flights: z.array(z.string()).optional()
+                    })
+                ])).optional()
+            })
+            
+        }), {
+            exclude_parent_reference: true,
+            exclude_schema_reference: true
+        })
+        //debugger;
+        // This result was copied from a run I was happy with. It's here to prevent regressions.
+        expect(result.root).toEqual({
+            "name": "",
+            "dotprop_path": "",
+            "kind": "ZodObject",
+            "children": [
+                {
+                    "name": "contact",
+                    "dotprop_path": "contact",
+                    "kind": "ZodObject",
+                    "children": [
+                        {
+                            "name": "name",
+                            "dotprop_path": "contact.name",
+                            "kind": "ZodString",
+                            "children": []
+                        },
+                        {
+                            "name": "age",
+                            "dotprop_path": "contact.age",
+                            "kind": "ZodNumber",
+                            "children": [],
+                            "optional_or_nullable": true
+                        },
+                        {
+                            "name": "emailAddress",
+                            "dotprop_path": "contact.emailAddress",
+                            "kind": "ZodString",
+                            "children": [],
+                            "optional_or_nullable": true
+                        },
+                        {
+                            "name": "locations",
+                            "dotprop_path": "contact.locations",
+                            "kind": "ZodArray",
+                            "children": [
+                                {
+                                    "name": "",
+                                    "dotprop_path": "contact.locations",
+                                    "kind": "ZodString",
+                                    "children": [],
+                                    "descended_from_array": true,
+                                    "nameless_array_element": true
+                                },
+                                {
+                                    "name": "",
+                                    "dotprop_path": "contact.locations",
+                                    "kind": "ZodNumber",
+                                    "children": [],
+                                    "descended_from_array": true,
+                                    "nameless_array_element": true
+                                },
+                                {
+                                    "name": "",
+                                    "dotprop_path": "contact.locations",
+                                    "kind": "ZodObject",
+                                    "children": [
+                                        {
+                                            "name": "city",
+                                            "dotprop_path": "contact.locations.city",
+                                            "kind": "ZodString",
+                                            "children": [],
+                                            "descended_from_array": true,
+                                            "optional_or_nullable": true
+                                        },
+                                        {
+                                            "name": "country",
+                                            "dotprop_path": "contact.locations.country",
+                                            "kind": "ZodString",
+                                            "children": [],
+                                            "descended_from_array": true,
+                                            "optional_or_nullable": true
+                                        },
+                                        {
+                                            "name": "flights",
+                                            "dotprop_path": "contact.locations.flights",
+                                            "kind": "ZodArray",
+                                            "children": [
+                                                {
+                                                    "name": "",
+                                                    "dotprop_path": "contact.locations.flights",
+                                                    "kind": "ZodString",
+                                                    "children": [],
+                                                    "descended_from_array": true,
+                                                    "nameless_array_element": true
+                                                }
+                                            ],
+                                            "descended_from_array": true,
+                                            "optional_or_nullable": true
+                                        }
+                                    ],
+                                    "descended_from_array": true,
+                                    "nameless_array_element": true
+                                }
+                            ],
+                            "optional_or_nullable": true
+                        }
+                    ]
+                }
+            ]
+        })
+        
     })
 
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import safeKeyValue from "../getKeyValue";
+import safeKeyValue from "../utils/getKeyValue";
 import { WhereFilterDefinition } from "../where-filter";
 import { DDL } from "./applyWritesToItems";
 import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemAction";

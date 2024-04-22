@@ -1,7 +1,7 @@
 import { Draft } from "immer";
 import getPropertyWithDotPropPath, { getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot";
-import isPlainObject from "../isPlainObject";
-import { ArrayFilter, ArrayValueComparison, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, LogicFilter, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition, WhereFilterLogicOperators } from "./types";
+import isPlainObject from "../utils/isPlainObject";
+import { ArrayFilter, ArrayValueComparison, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, LogicFilter, MatchJavascriptObject, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition, WhereFilterLogicOperators } from "./types";
 import { isEqual } from "lodash-es";
 
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
@@ -30,7 +30,7 @@ A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse 
 
 export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
 
-export default function matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean {
+const matchJavascriptObject:MatchJavascriptObject = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean => {
     if( !isPlainObject(object) ) {
         let json: string = 'redacted';
         if( process.env.NODE_ENV==='test' ) {
@@ -46,6 +46,8 @@ export default function matchJavascriptObject<T extends Record<string, any> = Re
 
     return _matchJavascriptObject(object, filter, [filter]);
 }
+export default matchJavascriptObject;
+
 function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {
     
     // If there's more than 1 key on the filter, split it formally into an AND 
@@ -114,14 +116,6 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
             } else {
                 throw new Error("A ValueComparisonContains only works on a string");
             }
-            /*
-        } else if( isValueComparisonArrayContains(filterValue, true ) ) {
-            if( Array.isArray(value) ) {
-                return value.includes(filterValue.array_contains);
-            } else {
-                throw new Error("A isValueComparisonArrayContains only works on an array");
-            }
-            */
         } else if( isValueComparisonNumeric(filterValue, true) ) {
             if( typeof value==='number' ) {
                 return ValueComparisonNumericOperators.filter(x => x in filterValue).every(x => {
@@ -165,16 +159,8 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
 
             const result = keys.every(key => {
 
-                let finalKey = key;
-                /*
-                // In a compound, AND is weird... it means one of the AND criteria must match one of the elements. It must be flattened by turning it into an OR. 
-                if( typeof finalKey==='string' && /AND/i.test(finalKey) ) {
-                    finalKey = 'OR';
-                }
-                // NOT is also weird. It must fail for any item within, so it needs turning into a NOT>OR (instead of default NOT>AND).
-                */
-
-                const subFilter:WhereFilterDefinition = {[finalKey]: filterValue[key]};
+            
+                const subFilter:WhereFilterDefinition = {[key]: filterValue[key]};
                 return value.some(x => _matchJavascriptObject(x, subFilter, [...debugPath, subFilter]))
             });
             return result;

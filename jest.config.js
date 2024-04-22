@@ -11,7 +11,8 @@ module.exports = {
       },
       transformIgnorePatterns: [
         // Don't transform node_modules except lodash-es (or any other ES modules you use)
-        '/node_modules/(?!lodash-es|dot-prop/)',
+        '/node_modules/(?!lodash-es|dot-prop|\@electric\-sql\/pglite/)',
       ],
     
+      
 };

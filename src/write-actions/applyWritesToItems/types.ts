@@ -1,5 +1,5 @@
 import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../../dot-prop-paths/types";
-import { PrimaryKeyValue } from "../../getKeyValue";
+import { PrimaryKeyValue } from "../../utils/getKeyValue";
 import { IfAny } from "../../types";
 import { EnsureRecord } from "../../types";
 import { AppliedWritesOutput, WriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types";

@@ -1,17 +1,17 @@
 // Import the specific functions from the file
 import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascriptObject';
-import postgresWhereClauseBuilder, { PropertySqlMap, postgresCreatePropertySqlMapFromSchema } from './postgresWhereClauseBuilder';
+import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder';
 import { WhereFilterDefinition, WhereFilterSchema} from './types';
 
 export const WhereFilter = {
     matchJavascriptObject, 
     filterJavascriptObjects,
     postgresWhereClauseBuilder,
-    postgresCreatePropertySqlMapFromSchema,
+    PropertyMapSchema,
     WhereFilterSchema
 };
 
-export type {WhereFilterDefinition, PropertySqlMap};
+export type {WhereFilterDefinition};
 
 
 

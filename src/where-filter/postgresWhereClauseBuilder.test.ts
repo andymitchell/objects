@@ -1,316 +1,240 @@
-import postgresWhereClauseBuilder, {  PropertySqlMap, postgresCreatePropertySqlMapFromSchema } from "./postgresWhereClauseBuilder";
-import { z } from "zod";
-import {newDb} from 'pg-mem';
-import { WhereFilterDefinition } from "./types";
+import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
 
+import { MatchJavascriptObject, MatchJavascriptObjectInTesting, WhereFilterDefinition } from "./types";
+import { standardTests } from "./standardTests";
 
+import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
 
-const validateAndConvertDotPropKeyToSqlKey:PropertySqlMap = (key) => key;
-    
-    
-const RecordSchema = z.object({
-    contact: z.object({
-        name: z.string(),
-        age: z.number(), 
-        address: z.string(),
-        next_kin: z.object({
-            name: z.string()
-        })
-    })
-});
-type Record = z.infer<typeof RecordSchema>;
-const dotPropPathToSqlKey = postgresCreatePropertySqlMapFromSchema(RecordSchema, 'recordColumn');
 
 
 
 describe('postgres where clause builder', () => {
-    test('postgres sql basic ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    'contact.name': 'Andy'
-                },
-                validateAndConvertDotPropKeyToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `contact.name = $1`, statementArguments: ['Andy']});
-    });
 
-    test('', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    'contact.name': {
-                        'contains': 'And'
-                    }
-                },
-                validateAndConvertDotPropKeyToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `contact.name LIKE $1`, statementArguments: ['%And%']});
-    });
 
     
-    test('postgres sql OR ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    OR: [
-                        {
-                            'contact.name': 'Andy'
-                        },
-                        {
-                            'contact.name': {
-                                'contains': 'And'
-                            }
-                        }
-                    ]
-                    
-                },
-                validateAndConvertDotPropKeyToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `(contact.name = $1 OR contact.name LIKE $2)`, statementArguments: ['Andy', '%And%']});
-    });
 
-    test('postgres sql OR/AND ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    OR: [
-                        {
-                            'contact.name': 'Andy'
-                        },
-                        {
-                            AND: [
-                                {
-                                    'contact.age': 100
-                                },
-                                {
-                                    'contact.address': 'York'
-                                }
-                            ]
-                        }
-                    ]
-                    
-                },
-                validateAndConvertDotPropKeyToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `(contact.name = $1 OR (contact.age = $2 AND contact.address = $3))`, statementArguments: ['Andy', 100, 'York']});
-    });
+    const runner = new DbMultipleTestsRunner();//true, undefined, true, 1000*10);
+    
+    test("postgres cleanup", async () => {
+        await runner.isComplete();
+        expect(true).toBe(true);
+    }, 1000*60*5); 
 
+    const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
-    test('postgres sql NOT ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    NOT: [
-                        {
-                            'contact.name': 'Andy'
-                        },
-                        {
-                            'contact.name': 'Bob'
-                        }
-                    ]
-                    
-                },
-                validateAndConvertDotPropKeyToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `NOT (contact.name = $1 OR contact.name = $2)`, statementArguments: ['Andy', 'Bob']} );
-    });
+        return await runner.sequentialTest(async (runner, db, uniqueTableName) => {
+            const pm = new PropertyMapSchema(schema, 'recordColumn');
 
-    // JSONB
+            await db.exec(`CREATE TABLE IF NOT EXISTS ${uniqueTableName} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
 
-    test('postgres jsonb basic ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    'contact.name': 'Andy'
-                },
-                dotPropPathToSqlKey
-            ) 
-        ).toEqual({whereClauseStatement: `(recordColumn->'contact'->>'name')::text = $1`, statementArguments: ['Andy']});
-    });
+            await db.query(`INSERT INTO ${uniqueTableName} (recordColumn) VALUES('${JSON.stringify(object)}'::jsonb)`);
 
-    test('postgres jsonb OR/AND ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    OR: [
-                        {
-                            'contact.name': 'Andy'
-                        },
-                        {
-                            AND: [
-                                {
-                                    'contact.age': 100
-                                },
-                                {
-                                    'contact.address': 'York'
-                                }
-                            ]
-                        }
-                    ]
-                    
-                },
-                dotPropPathToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `((recordColumn->'contact'->>'name')::text = $1 OR ((recordColumn->'contact'->>'age')::numeric = $2 AND (recordColumn->'contact'->>'address')::text = $3))`, statementArguments: ['Andy', 100, 'York']});
-    });
+            let clause:PreparedWhereClauseStatement | undefined;
+            try {
+                clause = postgresWhereClauseBuilder(filter, pm);
+            } catch(e) {
+                if( !(e instanceof Error) || e.message.toLowerCase().indexOf('unsupported')===-1 ) {
+                    throw e;
+                }
+            }
+            if( !clause ) return undefined; 
 
-    test('postgres jsonb NOT ok', () => {
-        expect(
-            postgresWhereClauseBuilder(
-                {
-                    NOT: [
-                        {
-                            'contact.name': 'Andy'
-                        },
-                        {
-                            'contact.name': 'Bob'
-                        }
-                    ]
-                    
-                },
-                dotPropPathToSqlKey
-            )
-        ).toEqual({whereClauseStatement: `NOT ((recordColumn->'contact'->>'name')::text = $1 OR (recordColumn->'contact'->>'name')::text = $2)`, statementArguments: ['Andy', 'Bob']} );
-    });
+            const sql2 = `SELECT jsonb_array_elements(recordColumn->'contact'->'locations') as recordColumn1 FROM ${uniqueTableName}`;
+            const result2 = await db.query(sql2);
 
-    function setupPgMem() {
-        const instance = newDb();
+            //const sql3 = `SELECT * FROM test_0_table WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(recordColumn->'contact'->'locations') AS recordColumn1 WHERE (recordColumn1 IS NOT NULL AND recordColumn1 #>> '{}' = 'London'))`;
+            //const sql3 = `SELECT * FROM test_0_table WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(recordColumn->'contact'->'locations') AS recordColumn1 WHERE (recordColumn1 IS NOT NULL AND recordColumn1::text = 'London'))`;
+            //const sql3 = `SELECT * FROM test_0_table WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(recordColumn->'contact'->'locations') AS recordColumn1 WHERE (((recordColumn1->>'city')::text IS NOT NULL AND (recordColumn1->>'city')::text = 'London') AND ((recordColumn1->>'country')::text IS NOT NULL AND (recordColumn1->>'country')::text = 'US')))`
+            //const result3 = await db.query(sql3);
 
-
-
-        instance.public.query(`CREATE TABLE IF NOT EXISTS test_table (pk SERIAL PRIMARY KEY,recordColumn JSONB NOT NULL)`);
-        instance.public.query(`INSERT INTO test_table (recordColumn) VALUES ('{"contact": {"name": "Bob", "age": 1, "address": "London", "next_kin": {"name": "Sue"}}}')`);
-        instance.public.query(`INSERT INTO test_table (recordColumn) VALUES ('{"contact": {"name": "Sue", "age": 2, "address": "New York", "next_kin": {"name": "Bob"}}}')`);
-
-        function query(whereFilter:WhereFilterDefinition<Record>):Record[] {
-            const clause = postgresWhereClauseBuilder(whereFilter, dotPropPathToSqlKey);
-            let finalQuery = clause.whereClauseStatement;
-
-            // Iterate over the parameters
-            clause.statementArguments.forEach((param, index) => {
-                const placeholder = new RegExp(`\\$${index + 1}`, 'g');
-
-                const safeParam = typeof param === 'string' ? param.replace(/'/g, "''") : param;
-                finalQuery = finalQuery.replace(placeholder, `'${safeParam}'`);
-            });
+            const queryStr = `SELECT * FROM ${uniqueTableName} WHERE ${clause.whereClauseStatement}`;
+            console.log(queryStr, clause.statementArguments);
+            //debugger;
+            const result = await db.query(queryStr, clause.statementArguments);
             
-            const query = `SELECT * FROM test_table WHERE ${finalQuery}`;
-            return instance.public.query(query).rows;
-        }
+            
+            const rows = result.rows;
 
-        return {instance, query};
+            
+            
+            
+            return rows.length>0;
+        } )
     }
 
-    test('postgres jsonb pg-mem basic', () => {
-        
-        const db = setupPgMem();
-        expect(db.query({
-            'contact.name': 'Bob'
-        }).length).toBe(1);
+    /*
+    const schema = z.object({
+        'contact': z.object({
+            name: z.string(),
+            age: z.number().optional(),
+            children: z.array(z.object({
+                name: z.string(),
+                family: z.object({
+                    grandchildren: z.array(z.object({
+                        name: z.string()
+                    }))
+                })
+            })).optional()
+        })
+    });
+    type S1 = z.infer<typeof schema>;
 
-        expect(db.query({
-            'contact.name': 'Rita'
-        }).length).toBe(0);
-
-
-        expect(db.query({
-            'contact.next_kin.name': 'Bob'
-        }).length).toBe(1);
-    })
-
-    test('postgres jsonb pg-mem OR', () => {
-        
-        const db = setupPgMem();
-        expect(db.query({
-            OR: [
+    const object:S1 = {
+        'contact': {
+            'name': 'P1',
+            'children': [
                 {
-                    'contact.name': 'Bob'
+                    name: 'C1',
+                    family: {
+                        'grandchildren': [
+                            {
+                                name: 'G1'
+                            }
+                        ]
+                    }
                 },
                 {
-                    'contact.name': 'Rita'
+                    name: 'C2',
+                    family: {
+                        'grandchildren': [
+                            {
+                                name: 'G2'
+                            },
+                            {
+                                name: 'G3'
+                            }
+                        ]
+                    }
                 }
             ]
-        }).length).toBe(1);
-        
+        }
+    }
+    const filter:WhereFilterDefinition<S1> = {
+        'contact.children.family.grandchildren': {
+            name: 'G3'
+        }
+    }
 
-        expect(db.query({
-            OR: [
-                {
-                    'contact.name': 'Bob'
-                },
-                {
-                    'contact.name': 'Sue'
-                }
-            ]
-        }).length).toBe(2);
-    })
-
-    test('postgres jsonb pg-mem AND', () => {
-        
-        const db = setupPgMem();
-        
-        
-
-        expect(db.query({
-            AND: [
-                {
-                    'contact.name': 'Bob'
-                },
-                {
-                    'contact.name': 'Sue'
-                }
-            ]
-        }).length).toBe(0);
+    const result = matchJavascriptObjectInDb(object, filter, schema);
+    debugger;
+    */
 
 
-        expect(db.query({
-            AND: [
-                {
-                    'contact.name': 'Bob'
-                },
-                {
-                    'contact.next_kin.name': 'Sue'
-                }
-            ]
-        }).length).toBe(1);
-    })
-
-
-    test('postgres jsonb pg-mem NOT', () => {
-        
-        const db = setupPgMem();
-        
-        
-
-        expect(db.query({
-            NOT: [
-                {
-                    'contact.name': 'Bob'
-                }
-            ]
-        }).length).toBe(1);
-
-
-        expect(db.query({
-            NOT: [
-                {
-                    'contact.name': 'Rita'
-                }
-            ]
-        }).length).toBe(2);
-
-
-        expect(db.query({
-            NOT: [
-                {
-                    'contact.name': 'Bob'
-                },
-                {
-                    'contact.name': 'Sue'
-                }
-            ]
-        }).length).toBe(0);
-    })
-})
     
+
+    
+
+    standardTests({
+        test,
+        expect,
+        matchJavascriptObject:matchJavascriptObjectInDb
+    })
+    
+
+    /*RESTORE
+    test('spreadJsonbArrays 0 array', () => {
+
+        const schema = z.object({
+            'contact': z.object({
+                name: z.string(),
+                age: z.number().optional(),
+                children: z.array(z.object({
+                    name: z.string(),
+                    family: z.object({
+                        grandchildren: z.array(z.object({
+                            name: z.string()
+                        }))
+                    })
+                })).optional()
+            })
+        });
+
+        const tree = convertSchemaToDotPropPathTree(schema);
+        const path = [];
+        let target = tree.map['contact'];
+        while( target.parent ) {
+            path.unshift(target);
+            target = target.parent;
+        }
+        const sa = spreadJsonbArrays('recordColumn', path);
+        expect(sa).toBe(undefined)
+        
+
+    });
+
+    test('spreadJsonbArrays 1x array', () => {
+
+        const schema = z.object({
+            'contact': z.object({
+                name: z.string(),
+                age: z.number().optional(),
+                children: z.array(z.object({
+                    name: z.string(),
+                    family: z.object({
+                        grandchildren: z.array(z.object({
+                            name: z.string()
+                        }))
+                    })
+                })).optional()
+            })
+        });
+
+        const tree = convertSchemaToDotPropPathTree(schema);
+        const path = [];
+        let target = tree.map['contact.children'];
+        while( target.parent ) {
+            path.unshift(target);
+            target = target.parent;
+        }
+        const sa = spreadJsonbArrays('recordColumn', path);
+        expect(sa).toEqual(
+            {
+                "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1",
+                "output_column": "recordColumn1.value"
+            }
+        )
+        
+
+    });
+    
+    test('spreadJsonbArrays 2x nested', () => {
+
+        const schema = z.object({
+            'contact': z.object({
+                name: z.string(),
+                age: z.number().optional(),
+                children: z.array(z.object({
+                    name: z.string(),
+                    family: z.object({
+                        grandchildren: z.array(z.object({
+                            name: z.string()
+                        }))
+                    })
+                })).optional()
+            })
+        });
+
+        const tree = convertSchemaToDotPropPathTree(schema);
+        const path = [];
+        let target = tree.map['contact.children.family.grandchildren.name'];
+        while( target.parent ) {
+            path.unshift(target);
+            target = target.parent;
+        }
+        const sa = spreadJsonbArrays('recordColumn', path);
+        expect(sa).toEqual(
+            {
+                "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1 CROSS JOIN jsonb_array_elements(recordColumn1.value->'family'->'grandchildren') AS recordColumn2",
+                "output_column": "recordColumn2.value"
+            }
+        )
+        
+
+    });
+    */
+
+    
+    
+
+    
+})

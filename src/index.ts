@@ -1,6 +1,6 @@
 import { DotPropPaths, DotPropPathsRecord, DotPropPathsUnion } from "./dot-prop-paths";
-import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "./getKeyValue";
-import isPlainObject from "./isPlainObject";
+import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "./utils/getKeyValue";
+import isPlainObject from "./utils/isPlainObject";
 import { EnsureRecord } from "./types";
 import { PropertySqlMap, WhereFilter, WhereFilterDefinition } from "./where-filter";
 import { AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions } from "./write-actions";

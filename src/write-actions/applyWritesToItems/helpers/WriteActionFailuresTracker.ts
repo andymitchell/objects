@@ -2,7 +2,7 @@ import { z } from "zod";
 import { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../../types";
 import { ListRules } from "../types";
 import { isEqual } from "lodash-es";
-import safeKeyValue, { PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../getKeyValue";
+import safeKeyValue, { PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue";
 
 
 type FailedAction<T extends Record<string, any>> = WriteActionFailures<T>[number];

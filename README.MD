@@ -22,6 +22,12 @@
 
 # Troubleshooting
 
+## Testing code that imports ESM modules
+
+In jest.config.js
+- Add the package to transformIgnorePatterns
+- If the package uses import.meta.url (Jest will throw an error if it does and you've not set this up), make sure you've installed and set up https://github.com/javiertury/babel-plugin-transform-import-meta. FYI this package now has it installed and set up in babel.config.js. 
+
 ## "You do not have permission to publish" / "You do not have write permissions required to publish this package."
 
 If the message comes from `np`, run `npm publish` for a more detailed error message.

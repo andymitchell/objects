@@ -1,5 +1,5 @@
 import { getProperty as ldGetProperty } from "dot-prop";
-import isPlainObject from "../isPlainObject";
+import isPlainObject from "../utils/isPlainObject";
 
 
 

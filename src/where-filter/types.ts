@@ -1,8 +1,9 @@
 
 import { z, ZodNumber, ZodOptional, ZodType } from "zod";
 import { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, PathValue, RemoveTrailingDot } from '../dot-prop-paths/types';
-import isPlainObject from "../isPlainObject";
-import isTypeEqual from "../isTypeEqual";
+import isPlainObject from "../utils/isPlainObject";
+import isTypeEqual from "../utils/isTypeEqual";
+import { ObjOrDraft } from "./matchJavascriptObject";
 
 
 export const WhereFilterLogicOperators = ['AND', 'OR', 'NOT'] as const;
@@ -29,103 +30,9 @@ type PartialObjectFilter<T extends Record<string, any>> = Partial<{
 }>;
 
 
-type FFS = {id: string, uncle: {name: string}, age:number | undefined, children: {name: string}[], pets: string[], wombles: number[]};
-/*
-const ffs4:WhereFilterDefinition<FFS> = {
-    "uncle.name": 2, // should fail
-}
-const ffs4a:WhereFilterDefinition<FFS> = {
-    "uncle.name": '2', // ok
-}
-const ffs0:WhereFilterDefinition<FFS> = {
-    "age": {
-        'gt': 1
-    }, // ok
-}
-const ffs0b:WhereFilterDefinition<FFS> = {
-    "id": {
-        contains: '2'
-    }, // ok
-}
-const ffs6:WhereFilterDefinition<FFS> = {
-    "uncle.name": {contains: '2'}, // ok
-}
-const ffs6a:WhereFilterDefinition<FFS> = {
-    "uncle.name": {contains2: 1}, // should fail
-}
-const ffs1:WhereFilterDefinition<FFS> = {
-    wombles: 2 // ok
-}
-const ffs1a:WhereFilterDefinition<FFS> = {
-    wombles: [2] // ok
-}
-const ffs2:WhereFilterDefinition<FFS> = {
-    wombles: '2' // Should fail
-}
-const ffs3:WhereFilterDefinition<FFS> = {
-    wombles: [2] // ok
-}
-const ffs3a:WhereFilterDefinition<FFS> = {
-    wombles: {
-        elem_match: 2 // ok
-    } 
-}
-const ffs3b:WhereFilterDefinition<FFS> = {
-    wombles: {
-        elem_match: 'str' // should fail
-    } 
-}
-const ffs5:WhereFilterDefinition<FFS> = {
-    "uncle.name": '2', // ok
-}
-const ffs7:WhereFilterDefinition<FFS> = {
-    "children": {
-        NOT: []
-    } // ok
-}
-const ffs8:WhereFilterDefinition<FFS> = {
-    "children": {
-        elem_match: {
-            'name': ''
-        }
-    } // ok
-}
-const ffs9:WhereFilterDefinition<FFS> = {
-    "children": 'sh' // should fail
-}
-
-const a:WhereFilterDefinition<FFS> = {
-    //'pets': '1',
-    pets: {elem_match: '1'},
-    'wombles': 'a',
-    'wombles': [2],
-    'uncle.name': 2,
-    'children': {
-        'OR': [{
-            'name': 'pete'
-        }],
-        'name': 'pete'
-    },
-    AND: [
-        {
-            OR: [
-                {
-                    'age': 1
-                }
-            ],
-            NOT: [
-                {
-                    'age': {
-                        'gt': 0,
-                    }
-                }
-            ]
-        }
-    ]
-    
-}
-*/
-
+export type MatchJavascriptObject = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>) => boolean;
+//export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(object: Parameters<MatchJavascriptObject>[0], filter: Parameters<MatchJavascriptObject>[1], schema: z.AnyZodObject) => ReturnType<MatchJavascriptObject> | undefined;
+export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(obj: T, filter:WhereFilterDefinition<T>, schema: z.ZodSchema<T>) => Promise<ReturnType<MatchJavascriptObject> | undefined>;
 
 
 export type LogicFilter<T extends Record<string, any>> = {

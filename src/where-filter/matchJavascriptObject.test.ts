@@ -1,11 +1,12 @@
 import { createDraft, produce } from "immer";
-import _matchJavascriptObject, { ObjOrDraft } from "./matchJavascriptObject";
+import matchJavascriptObjectReal, { ObjOrDraft } from "./matchJavascriptObject";
 import { WhereFilterDefinition, isWhereFilterDefinition } from "./types";
 import { standardTests } from "./standardTests";
 
-async function matchJavascriptObject<T extends Record<string, any>>(object: ObjOrDraft<T>, filter: WhereFilterDefinition<T>):Promise<ReturnType<typeof _matchJavascriptObject>> {
+async function matchJavascriptObject<T extends Record<string, any>>(object: ObjOrDraft<T>, filter: WhereFilterDefinition<T>):Promise<ReturnType<typeof matchJavascriptObjectReal>> {
     expect(isWhereFilterDefinition(filter)).toBe(true);
-    return _matchJavascriptObject(object, filter);
+    const result = matchJavascriptObjectReal(object, filter);
+    return result;
 }
 
 
@@ -34,6 +35,7 @@ describe('testMatchJavascriptObject', () => {
                 'contact.name': 'Andy'
             }
         )
+
         expect(result).toBe(true);
     });
     

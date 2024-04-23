@@ -41,8 +41,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@andyrmitchell/pg-testable": "^0.1.3",
-    "@andyrmitchell/trowser": "^0.1.25",
+    "@andyrmitchell/pg-testable": "^0.1.10",
+    "@andyrmitchell/trowser": "^0.2.1",
     "@babel/core": "^7.23.9",
     "@babel/preset-env": "^7.23.9",
     "@babel/preset-typescript": "^7.23.3",

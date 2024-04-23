@@ -45,6 +45,7 @@ const matchJavascriptObject:MatchJavascriptObject = <T extends Record<string, an
     }
 
     return _matchJavascriptObject(object, filter, [filter]);
+    
 }
 export default matchJavascriptObject;
 

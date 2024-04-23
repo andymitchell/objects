@@ -3,26 +3,34 @@ import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapS
 import { MatchJavascriptObject, MatchJavascriptObjectInTesting, WhereFilterDefinition } from "./types";
 import { standardTests } from "./standardTests";
 
-import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
+import { DbMultipleTestsRunner, PgTestable } from "@andyrmitchell/pg-testable";
+import { z } from "zod";
+import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod";
 
 
 
 
 describe('postgres where clause builder', () => {
 
+    let runner:DbMultipleTestsRunner;
+    beforeAll((done) => {
+        runner = new DbMultipleTestsRunner();
+        runner.sequentialTest(async (runner, db) => {
+            await db.query("select 'Hello world' as message;");
+            done();
+        })
+    })
+    afterAll(async () => {
+        await runner.dispose();
+        console.log("Db shutdown OK");
+    })
 
     
-
-    const runner = new DbMultipleTestsRunner();//true, undefined, true, 1000*10);
-    
-    test("postgres cleanup", async () => {
-        await runner.isComplete();
-        expect(true).toBe(true);
-    }, 1000*60*5); 
 
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
         return await runner.sequentialTest(async (runner, db, uniqueTableName) => {
+            
             const pm = new PropertyMapSchema(schema, 'recordColumn');
 
             await db.exec(`CREATE TABLE IF NOT EXISTS ${uniqueTableName} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
@@ -39,27 +47,14 @@ describe('postgres where clause builder', () => {
             }
             if( !clause ) return undefined; 
 
-            const sql2 = `SELECT jsonb_array_elements(recordColumn->'contact'->'locations') as recordColumn1 FROM ${uniqueTableName}`;
-            const result2 = await db.query(sql2);
-
-            //const sql3 = `SELECT * FROM test_0_table WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(recordColumn->'contact'->'locations') AS recordColumn1 WHERE (recordColumn1 IS NOT NULL AND recordColumn1 #>> '{}' = 'London'))`;
-            //const sql3 = `SELECT * FROM test_0_table WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(recordColumn->'contact'->'locations') AS recordColumn1 WHERE (recordColumn1 IS NOT NULL AND recordColumn1::text = 'London'))`;
-            //const sql3 = `SELECT * FROM test_0_table WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(recordColumn->'contact'->'locations') AS recordColumn1 WHERE (((recordColumn1->>'city')::text IS NOT NULL AND (recordColumn1->>'city')::text = 'London') AND ((recordColumn1->>'country')::text IS NOT NULL AND (recordColumn1->>'country')::text = 'US')))`
-            //const result3 = await db.query(sql3);
-
             const queryStr = `SELECT * FROM ${uniqueTableName} WHERE ${clause.whereClauseStatement}`;
-            console.log(queryStr, clause.statementArguments);
-            //debugger;
             const result = await db.query(queryStr, clause.statementArguments);
             
-            
             const rows = result.rows;
-
-            
-            
-            
+        
             return rows.length>0;
         } )
+        
     }
 
     /*
@@ -123,15 +118,16 @@ describe('postgres where clause builder', () => {
     
 
     
-
+    
     standardTests({
         test,
         expect,
         matchJavascriptObject:matchJavascriptObjectInDb
     })
     
+    
 
-    /*RESTORE
+    
     test('spreadJsonbArrays 0 array', () => {
 
         const schema = z.object({
@@ -187,10 +183,12 @@ describe('postgres where clause builder', () => {
             target = target.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
+        
         expect(sa).toEqual(
             {
                 "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1",
-                "output_column": "recordColumn1.value"
+                "output_column": "recordColumn1",
+                "output_identifier": "recordColumn1 #>> '{}'"
             }
         )
         
@@ -222,19 +220,19 @@ describe('postgres where clause builder', () => {
             target = target.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
+        
         expect(sa).toEqual(
             {
-                "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1 CROSS JOIN jsonb_array_elements(recordColumn1.value->'family'->'grandchildren') AS recordColumn2",
-                "output_column": "recordColumn2.value"
+                "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1 CROSS JOIN jsonb_array_elements(recordColumn1->'family'->'grandchildren') AS recordColumn2",
+                "output_column": "recordColumn2",
+                "output_identifier": "recordColumn2 #>> '{}'"
             }
         )
         
 
     });
-    */
-
-    
     
 
+    
     
 })

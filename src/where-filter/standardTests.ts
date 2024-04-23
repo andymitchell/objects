@@ -93,6 +93,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     });
     
     
+    
     test('Match name and emailAddress', async () => {
         const result = await matchJavascriptObject(
             {
@@ -142,6 +143,8 @@ export function standardTests(testConfig:StandardTestConfig) {
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(false);
     });
+
+    
 
     test('Match emailAddress (name irrelevant)', async () => {
         const result = await matchJavascriptObject(
@@ -274,6 +277,7 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(true);
     });
 
+    
     test('compares object: fails', async () => {
 
         const result = await matchJavascriptObject(
@@ -298,7 +302,7 @@ export function standardTests(testConfig:StandardTestConfig) {
 
 
     test('Match a typical Formz View', async () => {
-        const result = matchJavascriptObject<{
+        const result = await matchJavascriptObject<{
             emailCvID: {
                 threadIDG2: string,
                 threadIDG3: string
@@ -337,12 +341,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             FormzSchema
         );
+        
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(true);
     });
     
-
-
 
     test('string contains', async () => {
         const result = await matchJavascriptObject(
@@ -638,7 +641,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     });
 
     
-    return;/*RESTORE*/
+    
     test('array element compound filter2: fails', async () => {
         const result = await matchJavascriptObject(
             {
@@ -738,6 +741,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     });
     
 
+    
 
     test('array element compound filter explicit AND behaves like elem_match: passes', async () => {
         const result = await matchJavascriptObject(
@@ -851,7 +855,8 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(false);
     });
     
-
+    
+    
     test('array element compound filter NOT: passes', async () => {
         const result = await matchJavascriptObject(
             {
@@ -934,7 +939,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     
 
     
-
+    
 
 
     test('array element elem_match (must be all in one element) city+country: passes', async () => {
@@ -960,6 +965,8 @@ export function standardTests(testConfig:StandardTestConfig) {
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(true);
     });
+
+    
 
     
 
@@ -1057,6 +1064,9 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(true);
     });
 
+    
+    
+
     test('array element elem_match (must be all in one element) city+country infer AND and contains: fails', async () => {
         const result = await matchJavascriptObject(
             {
@@ -1119,8 +1129,8 @@ export function standardTests(testConfig:StandardTestConfig) {
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(false);
     });
-    
 
+    
     test('array nesting: passes', async () => {
         const result = await matchJavascriptObject(
             {
@@ -1140,7 +1150,9 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(true);
     });
 
-    return;/*RESTORE*/
+    
+
+    
 
     test('array nesting: fails', async () => {
         const result = await matchJavascriptObject(
@@ -1165,7 +1177,7 @@ export function standardTests(testConfig:StandardTestConfig) {
 
     test('array spread-nesting: passes', async () => {
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [
@@ -1202,7 +1214,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     test('array spread-nesting: fails', async () => {
 
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [
@@ -1237,10 +1249,11 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(false);
     });
 
+    
 
     test('array spread-nesting where first path is not the target: passes', async () => {
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [
@@ -1278,7 +1291,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     test('array spread-nesting written nested: passes', async () => {
 
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [
@@ -1317,7 +1330,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     test('array spread-nesting written nested: fails', async () => {
 
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [
@@ -1356,7 +1369,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     test('array spread-nesting multi criteria compound filter (within 1 array): passes', async () => {
 
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [
@@ -1402,7 +1415,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     test('array spread-nesting multi criteria compound filter (within 1 array): fails', async () => {
 
 
-        const result = matchJavascriptObject<SpreadNested>(
+        const result = await matchJavascriptObject<SpreadNested>(
             {
                 parent_name: 'Bob',
                 children: [

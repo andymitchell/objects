@@ -80,7 +80,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
    
     }
 
-    protected generatePlaceholder(value:PreparedStatementArgument, statementArguments:PreparedStatementArgument[]):string {
+    protected generatePlaceholder(value:PreparedStatementArgumentOrObject, statementArguments:PreparedStatementArgument[]):string {
 
         if( isPlainObject(value) || Array.isArray(value) ) value = JSON.stringify(value);
         if( !isPreparedStatementArgument(value) ) {
@@ -383,7 +383,8 @@ export function spreadJsonbArrays(column:string, nodesDesc:TreeNode[]):SpreadedJ
 }
 
 export type PreparedWhereClauseStatement = {whereClauseStatement:string, statementArguments:PreparedStatementArgument[]};
-export type PreparedStatementArgument = string | number | boolean | object;
+export type PreparedStatementArgument = string | number | boolean | null;
+type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
 function isPreparedStatementArgument(x: any): x is PreparedStatementArgument {
     return ['string', 'number', 'boolean'].includes(typeof x);
 }

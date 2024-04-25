@@ -13,7 +13,7 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
 */
 
 
-export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:PropertyMap<T>):PreparedWhereClauseStatement {
+export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseStatement {
     const statementArguments:PreparedStatementArgument[] = [];
 
     const whereClauseStatement = _postgresWhereClauseBuilder<T>(filter, statementArguments, propertySqlMap);
@@ -253,7 +253,7 @@ export class PropertyMap<T extends Record<string, any> = Record<string, any>> ex
     }
 }
 
-function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:PropertyMap<T>):string {
+function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:IPropertyMap<T>):string {
     
     // If there's more than 1 key on the filter, split it formally into an AND 
     const keys = Object.keys(filter) as Array<keyof typeof filter>;

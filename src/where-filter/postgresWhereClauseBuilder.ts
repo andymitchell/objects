@@ -20,7 +20,11 @@ export default function postgresWhereClauseBuilder<T extends Record<string, any>
     return {whereClauseStatement, statementArguments};
 }
 
-class BasePropertyMap<T extends Record<string, any> = Record<string, any>> {
+export interface IPropertyMap<T extends Record<string, any>> {
+    generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]):string;
+}
+
+class BasePropertyMap<T extends Record<string, any> = Record<string, any>> implements IPropertyMap<T> {
     protected nodeMap:TreeNodeMap;
     protected sqlColumnName:string;
     protected evaluateAsNonArray:boolean;
@@ -236,13 +240,13 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> {
     }
 }
 
-export class PropertyMapSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> {
+export class PropertyMapSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> implements IPropertyMap<T> {
     constructor(schema:z.ZodSchema<T>, sqlColumnName: string, evaluateAsNonArray?:boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, evaluateAsNonArray);
     }
 }
-export class PropertyMap<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> {
+export class PropertyMap<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> implements IPropertyMap<T> {
     
     constructor(nodeMap:TreeNodeMap, sqlColumnName: string, evaluateAsNonArray?:boolean) {
         super(nodeMap, sqlColumnName, evaluateAsNonArray);

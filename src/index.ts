@@ -2,14 +2,17 @@ import { DotPropPaths, DotPropPathsRecord, DotPropPathsUnion } from "./dot-prop-
 import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "./utils/getKeyValue";
 import isPlainObject from "./utils/isPlainObject";
 import { EnsureRecord } from "./types";
-import { WhereFilter, WhereFilterDefinition } from "./where-filter";
+import { IPropertyMap, WhereFilter, WhereFilterDefinition } from "./where-filter";
 import { AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions } from "./write-actions";
 
 export {isPlainObject, safeKeyValue, makePrimaryKeyGetter};
 export type {PrimaryKeyValue, PrimaryKeyGetter}
 
 export {WhereFilter};
-export type {WhereFilterDefinition};
+export type {
+    WhereFilterDefinition,
+    IPropertyMap
+};
 
 export { DotPropPaths };
 export type {DotPropPathsUnion, DotPropPathsRecord};

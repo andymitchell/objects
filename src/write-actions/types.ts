@@ -138,6 +138,13 @@ export function isUpdateOrDeleteWriteActionPayload<T extends Record<string, any>
     return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete');
 }
 
+export type WriteActionAffectedItem = {
+    item_pk:PrimaryKeyValue
+}
+export type WriteActionFailureAffectedItem<T extends Record<string, any> = Record<string, any>> = WriteActionAffectedItem & {
+    item: T,
+    error_details: WriteActionFailuresErrorDetails[]
+}
 
 export function createWriteActionFailuresSchema<T extends Record<string, any> = Record<string, any>>() {
     return z.array(z.object({
@@ -193,11 +200,7 @@ export type WriteActionFailures<T extends Record<string, any> = Record<string, a
     unrecoverable?: boolean,
     back_off_until_ts?: number,
     blocked_by_action_uuid?: string,
-    affected_items: {
-        item_pk: PrimaryKeyValue,
-        item: T,
-        error_details: WriteActionFailuresErrorDetails[]
-    }[]
+    affected_items: WriteActionFailureAffectedItem<T>[]
 
 }[];
 isTypeEqual<z.infer<typeof WriteActionFailuresSchema>, WriteActionFailures<any>>(true);
@@ -219,9 +222,7 @@ export function createWriteActionSuccessesSchema<T extends Record<string, any> =
 }
 export type WriteActionSuccess<T extends Record<string, any>> = {
     action: WriteAction<T>,
-    affected_items: {
-        item_pk: PrimaryKeyValue
-    }[]
+    affected_items: WriteActionAffectedItem[]
 }
 export type WriteActionSuccesses<T extends Record<string, any> = Record<string, any>> = WriteActionSuccess<T>[];
 const WriteActionSuccessesSchema = createWriteActionSuccessesSchema();

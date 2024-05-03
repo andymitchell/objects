@@ -3,7 +3,7 @@ import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter }
 import isPlainObject from "./utils/isPlainObject";
 import { EnsureRecord } from "./types";
 import { IPropertyMap, WhereFilter, WhereFilterDefinition } from "./where-filter";
-import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails } from "./write-actions";
+import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails, WriteActionSuccesses } from "./write-actions";
 
 
 export {isPlainObject, safeKeyValue, makePrimaryKeyGetter};
@@ -19,6 +19,6 @@ export { DotPropPaths };
 export type {DotPropPathsUnion, DotPropPathsRecord};
 
 export {WriteActions};
-export type {WriteAction, WriteActionPayload, DDL, WriteActionFailures, WriteActionError, AppliedWritesOutput, WriteActionAffectedItem, WriteActionFailureAffectedItem, WriteActionFailuresErrorDetails};
+export type {WriteAction, WriteActionPayload, DDL, WriteActionSuccesses, WriteActionFailures, WriteActionError, AppliedWritesOutput, WriteActionAffectedItem, WriteActionFailureAffectedItem, WriteActionFailuresErrorDetails};
 
 export type {EnsureRecord}

@@ -1,6 +1,6 @@
 import { applyWritesToItems, DDL } from "./applyWritesToItems/index";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters";
-import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema } from "./types";
+import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, WriteActionFailuresErrorDetails } from "./types";
 
 export const WriteActions = {
     applyWritesToItems,
@@ -23,5 +23,6 @@ export type {
     WriteActionError,
     AppliedWritesOutput,
     WriteActionAffectedItem,
-    WriteActionFailureAffectedItem
+    WriteActionFailureAffectedItem,
+    WriteActionFailuresErrorDetails
 }

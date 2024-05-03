@@ -241,6 +241,7 @@ export type WriteActionError<T extends Record<string, any> = Record<string, any>
 }
 isTypeEqual<z.infer<typeof WriteActionErrorSchema>, WriteActionError<any>>(true);
 
+export type CombineWriteActionsWhereFiltersResponse<T extends Record<string, any>> = {status: 'ok', filter: WhereFilterDefinition<T> | undefined} | {status: 'error', error: {message: string, details: WriteActionFailuresErrorDetails}};
 
 export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] | Draft<T>[] }
 

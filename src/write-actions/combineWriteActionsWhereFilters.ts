@@ -3,8 +3,8 @@ import safeKeyValue from "../utils/getKeyValue";
 import { WhereFilterDefinition } from "../where-filter";
 import { DDL } from "./applyWritesToItems";
 import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemAction";
-import { WriteAction } from "./types";
-import { WhereFilterLogicOperators } from "../where-filter/types";
+import { CombineWriteActionsWhereFiltersResponse, WriteAction } from "./types";
+
 
 /**
  * For write actions, generate a WhereFilter that would match any existing object that might be affected
@@ -16,22 +16,30 @@ import { WhereFilterLogicOperators } from "../where-filter/types";
  * @param writeActions 
  * @returns 
  */
-export default function combineWriteActionsWhereFilters<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, writeActions:WriteAction<T>[], includeDelete = true, scope:string = ''):WhereFilterDefinition<T> | undefined {
+export default function combineWriteActionsWhereFilters<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, writeActions:WriteAction<T>[], includeDelete = true, scope:string = ''):CombineWriteActionsWhereFiltersResponse<T> {
+    let errorResponse:CombineWriteActionsWhereFiltersResponse<T> | undefined;
     let filtersForExisting:WhereFilterDefinition<T>[] = writeActions.map(x => {
         if( x.payload.type==='create' ) {
             const key = ddl['.'].primary_key;
+            const pkValue = safeKeyValue(x.payload.data[key], true);
+            if( !pkValue ) {
+                errorResponse = {status: 'error', error: {message: "Unknown key", details: {type: 'missing_key', primary_key: key}}}
+                return;
+            }
             const existingKeyValue:WhereFilterDefinition<T> = {
-                [key]: safeKeyValue(x.payload.data[key])
+                [key]: pkValue
             }
             return scope? {[scope]: {elem_match: existingKeyValue}} : existingKeyValue;
         } else if( x.payload.type==='array_scope' ) {
             const scoped = getArrayScopeSchemaAndDDL<T>(x, schema, ddl);
-            const filter = combineWriteActionsWhereFilters(scoped.schema, scoped.ddl, [scoped.writeAction], includeDelete, (scope? scope+'.' : '')+x.payload.scope);
-            return {AND: [x.payload.where, filter]};
+            const subResult = combineWriteActionsWhereFilters(scoped.schema, scoped.ddl, [scoped.writeAction], includeDelete, (scope? scope+'.' : '')+x.payload.scope);
+            if( subResult.status!=='ok' ) return subResult;
+            return {AND: [x.payload.where, subResult.filter]};
         } else if( x.payload.type==='update' || (x.payload.type==='delete') && includeDelete) {
             return scope? {[scope]: {elem_match: x.payload.where}} : x.payload.where;
         }
     }).filter((x):x is WhereFilterDefinition<T> => !!x);
+    if( errorResponse ) return errorResponse;
 
     // Strip duplicates
     const seen:Record<string, boolean> = {};
@@ -52,5 +60,5 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
 
     
 
-    return filtersForExisting.length? whereFilterForExisting : undefined;
+    return {status: 'ok', filter: filtersForExisting.length? whereFilterForExisting : undefined};
 }

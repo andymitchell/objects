@@ -36,7 +36,7 @@ describe('combineWriteActionsWhereFilters', () => {
     }
 
     test('combineWriteActionsWhereFilters basic create', () => {
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -51,7 +51,8 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual(
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toEqual(
                 {
                     id: '1'
                 }
@@ -65,7 +66,7 @@ describe('combineWriteActionsWhereFilters', () => {
                 {id: '2'}
             ]
         }
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -81,7 +82,8 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual(where)
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toEqual(where)
     })
 
 
@@ -92,7 +94,7 @@ describe('combineWriteActionsWhereFilters', () => {
                 {id: '2'}
             ]
         }
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -104,7 +106,8 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual(where)
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toEqual(where)
     });
 
 
@@ -115,7 +118,7 @@ describe('combineWriteActionsWhereFilters', () => {
                 {id: '2'}
             ]
         }
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -127,7 +130,8 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ], false);
 
-        expect(filter).toBe(undefined)
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toBe(undefined)
     });
 
     test('combineWriteActionsWhereFilters 2x update', () => {
@@ -143,7 +147,7 @@ describe('combineWriteActionsWhereFilters', () => {
                 {id: '4'}
             ]
         }
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -172,7 +176,8 @@ describe('combineWriteActionsWhereFilters', () => {
             }
         ]);
 
-        expect(filter).toEqual({
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toEqual({
             OR: [
                 where1,
                 where2
@@ -196,7 +201,7 @@ describe('combineWriteActionsWhereFilters', () => {
             ]
         }
         
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -219,7 +224,8 @@ describe('combineWriteActionsWhereFilters', () => {
                 
             }
         ]);
-        expect(filter).toEqual(shouldBe)
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toEqual(shouldBe)
 
     });
     
@@ -258,7 +264,7 @@ describe('combineWriteActionsWhereFilters', () => {
             ]
         }
         
-        const filter = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
             {
                 type: 'write',
                 ts: 0,
@@ -322,11 +328,31 @@ describe('combineWriteActionsWhereFilters', () => {
                 },
             }
         ]);
-        expect(filter).toEqual(shouldBe)
+        expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
+        expect(result.filter).toEqual(shouldBe)
         
 
     });
 
-    
+    test('combineWriteActionsWhereFilters fails bad key', () => {
+        const result = combineWriteActionsWhereFilters(ObjSchema, ddl, [
+            {
+                type: 'write',
+                ts: 0,
+                uuid: '0',
+                payload: {
+                    type: 'create',
+                    data: {
+                        // @ts-ignore
+                        unknown_key: '1',
+                        children: []
+                    }
+                }
+            }
+        ]);
+
+        expect(result.status).toBe('error');if(result.status!=='error') throw new Error('noop');
+        expect(result.error.details.type).toBe('missing_key');
+    })
 
 })

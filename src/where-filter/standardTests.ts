@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { MatchJavascriptObject, MatchJavascriptObjectInTesting } from "./types"
+import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test"
 
 
 type StandardTestConfig = {
@@ -54,7 +55,27 @@ type SpreadNested = z.infer<typeof SpreadNestedSchema>;
 export function standardTests(testConfig:StandardTestConfig) {
     const {test, expect, matchJavascriptObject} = testConfig;
 
-    
+    for( const dotPath of DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED ) {
+        test(`Attack: ${dotPath}`, async () => {
+        
+            const result = await matchJavascriptObject(
+                {
+                    contact: {
+                        name: 'Andy',
+                        emailAddress: 'andy@andy.com'
+                    }
+                },
+                {
+                    [dotPath]: 'Anything'
+                },
+                ContactSchema
+            );
+            
+            if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+            expect(result).toBe(false);
+        
+        });
+    }
     
     test('Match name', async () => {
         const result = await matchJavascriptObject(

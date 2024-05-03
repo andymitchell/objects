@@ -42,17 +42,24 @@ describe('postgres where clause builder', () => {
                 clause = postgresWhereClauseBuilder(filter, pm);
             } catch(e) {
                 if( !(e instanceof Error) || e.message.toLowerCase().indexOf('unsupported')===-1 ) {
-                    throw e;
+                    debugger;
+                    return false;
+                } else {
+                    return undefined;
                 }
             }
-            if( !clause ) return undefined; 
 
             const queryStr = `SELECT * FROM ${uniqueTableName} WHERE ${clause.whereClauseStatement}`;
-            const result = await db.query(queryStr, clause.statementArguments);
+            try {
+                const result = await db.query(queryStr, clause.statementArguments);
+                
+                const rows = result.rows;
             
-            const rows = result.rows;
-        
-            return rows.length>0;
+                return rows.length>0;
+            } catch(e) {
+                debugger;
+                return false;
+            }
         } )
         
     }

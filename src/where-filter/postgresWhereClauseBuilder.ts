@@ -51,7 +51,6 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
     private getSqlIdentifier(dotPropPath:string, errorIfNotAsExpected?:ZodKind[], customColumnName?: string):string {
         if( !this.nodeMap[dotPropPath] ) {
-            debugger;
             throw new Error("Unknown dotPropPath. It's unsafe to generate a SQL identifier for this.");
         }
 
@@ -69,6 +68,9 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         let jsonbPath:string = '';
         while(jsonbParts.length) {
             const part = jsonbParts.shift();
+            if( !part ) {
+                throw new Error("Unknown part in dotPropPath. It's unsafe to generate a SQL identifier for this.");
+            }
             jsonbPath += `${jsonbParts.length? '->' : '->>'}'${part}'`;
         }
 
@@ -287,53 +289,6 @@ function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter
 
         return propertySqlMap.generateSql(keys[0], filter[keys[0]] as WhereFilterDefinition, statementArguments);
 
-        if('ZodArray' ) {
-            throw new Error("Unsupported. It's going to be very hard to do this right, and even then it'll probably generate expensive queries. It's probably easier to SQL read many rows with a simpler criteria, and then run matchJavascriptObject over them in memory.")
-            /*
-            if( propSql.sql_data_type!=='jsonb' ) throw new Error("Unsupported. It's unclear what form arrays would take in columns. It would probably be mapped out to tables, which means PropertySqlMap might need bespoke functions adding for things like 'spreadArrays'.")
-
-
-            // TODO If it has arrays in the parent tree (i.e. it's a spread array), does it need special handling? Probably want to combine jsonb_array_elements with CROSS JOIN for each 
-
-            if( Array.isArray(filterValue) ) {
-                // Two arrays = straight comparison
-                return `${propSql.sql_identifier} = ${JSON.stringify(filterValue)}::jsonb`;
-            } else if( isArrayValueComparisonElemMatch(filterValue) ) {
-                // In an elem_match, one item in the 'value' array must match all the criteria
-                if( isWhereFilterDefinition(filterValue.elem_match) ) {
-                    // TODO It's going to need to run a query like EXISTS(SELECT 1 FROM jsonb_array_elements(COLUMN) as elem WHERE [_postgresWhereClauseBuilder for 'elem' column in converted propertySqlMap])
-                    return value.some(x => _matchJavascriptObject(x, filterValue.elem_match, [...debugPath, filterValue.elem_match]))
-                } else {
-                    // It's a value comparison
-                    // Same as above, using EXISTS, but much easier now 
-                    // TODO Split out value comparison 
-                    return value.some(x => compareValue(x, filterValue.elem_match))
-                }
-            } else {
-                // it's a compound. every filter item must be satisfied by at least one element of the array 
-                if( isPlainObject(filterValue) ) {
-                    // TODO Convert into an OR search where any keyed filter can match, but each one must match.
-                    // split it apart across its keys, where each must be satisfied
-                    const keys = Object.keys(filterValue) as Array<keyof typeof filterValue>;
-        
-                    const result = keys.every(key => {
-        
-                    
-                        const subFilter:WhereFilterDefinition = {[key]: filterValue[key]};
-                        return value.some(x => _matchJavascriptObject(x, subFilter, [...debugPath, subFilter]))
-                    });
-                    return result;
-                } else {
-                    // It's scalar - just see if it the array contains it 
-                    const result = value.indexOf(filterValue)>-1;
-                    return result;
-                }
-            }
-            */
-
-
-
-        }
 
     }
 }

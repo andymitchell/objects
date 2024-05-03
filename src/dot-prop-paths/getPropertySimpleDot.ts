@@ -3,12 +3,12 @@ import isPlainObject from "../utils/isPlainObject";
 
 
 
-export function getProperty<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean) {
+export function getProperty<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean):ReturnType<typeof ldGetProperty> {
     
     return ldGetProperty(object, dotPath);
 
 }
-export default getProperty;
+
 
 
 /**
@@ -20,7 +20,9 @@ export default getProperty;
  * @param alreadyProvedIsPlainObject 
  * @returns 
  */
+/*
 export function getPropertyFast<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean) {
+    throw new Error("FAILING THE ATTACK TESTS");
     
     if( (!alreadyProvedIsPlainObject && !isPlainObject(object)) || !dotPath ) {
         return object;
@@ -38,6 +40,7 @@ export function getPropertyFast<T extends Record<string, any> = Record<string, a
     return pathArray.length===count? object : undefined;
 
 }
+*/
 
 /**
  * Return an array of all values at a dotPath, including iterating over any arrays in the dotPath  
@@ -47,8 +50,9 @@ export function getPropertyFast<T extends Record<string, any> = Record<string, a
  * @param dotPath 
  * @returns 
  */
+/*
 export function getPropertySpreadingArraysFlat<T extends Record<string, any> | Record<string, any>[] = Record<string, any>>(object: T, dotPath:string):unknown[] {
-
+    throw new Error("FAILING THE ATTACK TESTS");
     
     if( !(isPlainObject(object) || Array.isArray(object)) ) {
         // TODO This matches the logic of getProperty, but is it right? It returns the object no matter what the path is. Feels like undefined is better, but this matches dot-prop's getProperty
@@ -64,6 +68,7 @@ export function getPropertySpreadingArraysFlat<T extends Record<string, any> | R
     const result = getPropertySpreadingArrays(object, dotPath);
     return result.flatMap(x => x.value);
 }
+*/
 
 /**
  * Return an array of all specific-paths and values at dotPath, including iterating over any arrays in the dotPath. 
@@ -75,15 +80,24 @@ export function getPropertySpreadingArraysFlat<T extends Record<string, any> | R
 export function getPropertySpreadingArrays<T extends Record<string, any> | Record<string, any>[] = Record<string, any>>(object: T, dotPath:string):{path: string, value: unknown}[] {
 
     
-    if( !(isPlainObject(object) || Array.isArray(object)) || !dotPath ) {
+    if( !(isPlainObject(object) || Array.isArray(object)) || typeof dotPath!=='string' ) {
         // TODO This matches the logic of getProperty, but is it right? It returns the object no matter what the path is. Feels like undefined is better, but this matches dot-prop's getProperty
         return [{path: '', value: object}];
+    }
+    if( !dotPath ) {
+        // Matches dot-prop
+        return [{path: '', value: undefined}];
     }
     const result = _getPropertySpreadingArrays(object, dotPath, '');
     return result;
 }
 function _getPropertySpreadingArrays<T extends Record<string, any> | Record<string, any>[] = Record<string, any>>(object: T, dotPath:string, traversalPath:string):{path: string, value: unknown}[] {
     
+    const disallowedKeys = new Set([
+        '__proto__',
+        'prototype',
+        'constructor',
+    ]);
 
     let results:{path: string, value: unknown}[] = [];
     if( Array.isArray(object) ) {
@@ -92,7 +106,7 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
                 results = [...results, ..._getPropertySpreadingArrays(object[i], dotPath, traversalPath + `[${i}]`)];
             }
         } else {
-            //console.log("Returning ", {path: traversalPath, value: object});
+            
             return [{path: traversalPath, value: object}]; // Leaf
         }
     } else if( isPlainObject(object) ) {
@@ -103,6 +117,7 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
             count++;
             const key = pathArray.shift();
             if( !key ) break;
+            if( disallowedKeys.has(key) ) return [{path: '', value: undefined}];
             if( traversalPath ) traversalPath += '.';
             traversalPath += key;
 
@@ -120,6 +135,10 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
         }
     }
 
+    if( results.length===0 ) {
+        // Match dot-prop
+        results = [{path: '', value: undefined}];
+    }
     return results;
 
 }

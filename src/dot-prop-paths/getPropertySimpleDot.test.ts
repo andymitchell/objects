@@ -1,5 +1,5 @@
-import { getProperty, setProperty } from "dot-prop";
-import { getPropertySpreadingArraysFlat, getProperty as getPropertyMine, getPropertySpreadingArrays } from "./getPropertySimpleDot";
+import { setProperty } from "dot-prop";
+import {  getProperty as getPropertySimpleDot, getPropertySpreadingArrays } from "./getPropertySimpleDot";
 
 describe('getPropertySpreadingArrays test', () => {
 
@@ -47,6 +47,7 @@ describe('getPropertySpreadingArrays test', () => {
     
 });
 
+/*
 describe('getPropertySpreadingArraysFlat test', () => {
 
     test('regular object (no arrays)', () => {
@@ -214,4 +215,35 @@ describe('getPropertySpreadingArraysFlat test', () => {
         ).toEqual([{name: 'Bob'}, {name: 'Alice'}]);
     });
 
+
 });
+*/
+
+
+export const DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED = ['', '.', '.id', '*', '__proto__', '__proto__.polluted', 'prototype', 'constructor'];
+describe('attacks', () => {
+
+    function expectUndefined(path:string):boolean {
+        const obj = {
+            id: '1'
+        }
+
+        const result1 = getPropertySimpleDot(obj, path);
+        //const result2 = getPropertyFast(obj, path);
+        const result2 = getPropertySpreadingArrays(obj, path);
+        if( result1===undefined && result2.length===1 && result2[0].value===undefined ) {
+            return true;
+        } else {
+            path;
+            debugger;
+            return false;
+        }
+    }
+
+    for( const dotPath of DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED ) {
+        test(`attack: ${dotPath}`, () => {
+            expect(expectUndefined(dotPath)).toBe(true);
+        })
+    }
+
+})

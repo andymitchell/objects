@@ -12,6 +12,8 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
 
 */
 
+export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
+
 
 export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseStatement {
     const statementArguments:PreparedStatementArgument[] = [];
@@ -51,7 +53,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
     private getSqlIdentifier(dotPropPath:string, errorIfNotAsExpected?:ZodKind[], customColumnName?: string):string {
         if( !this.nodeMap[dotPropPath] ) {
-            throw new Error("Unknown dotPropPath. It's unsafe to generate a SQL identifier for this.");
+            throw new Error(`Unknown dotPropPath. ${UNSAFE_WARNING}`);
         }
 
         const jsonbParts = dotPropPath.split(".");
@@ -69,13 +71,13 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         while(jsonbParts.length) {
             const part = jsonbParts.shift();
             if( !part ) {
-                throw new Error("Unknown part in dotPropPath. It's unsafe to generate a SQL identifier for this.");
+                throw new Error(`Unknown part in dotPropPath. ${UNSAFE_WARNING}`);
             }
             jsonbPath += `${jsonbParts.length? '->' : '->>'}'${part}'`;
         }
 
         const zodKind = this.nodeMap[dotPropPath].kind;
-        if( !castingMap[zodKind] ) throw new Error("Unknown ZodKind Postgres cast: "+zodKind);
+        if( !castingMap[zodKind] ) throw new Error(`Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}`);
 
         return `(${customColumnName ?? this.sqlColumnName}${jsonbPath})${castingMap[zodKind] ?? ''}`
         

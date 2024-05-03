@@ -1,4 +1,4 @@
-import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
+import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, UNSAFE_WARNING, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
 
 import { MatchJavascriptObject, MatchJavascriptObjectInTesting, WhereFilterDefinition } from "./types";
 import { standardTests } from "./standardTests";
@@ -41,12 +41,15 @@ describe('postgres where clause builder', () => {
             try {
                 clause = postgresWhereClauseBuilder(filter, pm);
             } catch(e) {
-                if( !(e instanceof Error) || e.message.toLowerCase().indexOf('unsupported')===-1 ) {
-                    debugger;
-                    return false;
-                } else {
-                    return undefined;
+                if( e instanceof Error ) {
+                    if( e.message.toLowerCase().indexOf('unsupported')>-1 ) {
+                        return undefined;
+                    } else if( e.message.indexOf(UNSAFE_WARNING)>-1 ) {
+                        return false;
+                    }
                 }
+                debugger;
+                throw e;
             }
 
             const queryStr = `SELECT * FROM ${uniqueTableName} WHERE ${clause.whereClauseStatement}`;
@@ -58,7 +61,7 @@ describe('postgres where clause builder', () => {
                 return rows.length>0;
             } catch(e) {
                 debugger;
-                return false;
+                throw e;
             }
         } )
         

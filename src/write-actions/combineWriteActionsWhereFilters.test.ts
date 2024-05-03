@@ -352,7 +352,7 @@ describe('combineWriteActionsWhereFilters', () => {
         ]);
 
         expect(result.status).toBe('error');if(result.status!=='error') throw new Error('noop');
-        expect(result.error.details.type).toBe('missing_key');
+        expect(result.error.failed_actions[0].error_details[0].type).toBe('missing_key');
     })
 
 })

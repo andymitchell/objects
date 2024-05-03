@@ -327,6 +327,7 @@ describe('applyWritesToItems test', () => {
             // @ts-ignore wilfully breaking schema here 
             expect(firstFailedAction.affected_items[0].item.none_key).toBe('T1');
             expect(firstFailedAction.affected_items[0].error_details[0].type).toBe('missing_key');
+            expect(firstFailedAction.error_details[0].type).toBe('missing_key');
             expect(firstFailedAction.unrecoverable).toBe(true);
 
 

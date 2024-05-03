@@ -147,33 +147,35 @@ export type WriteActionFailureAffectedItem<T extends Record<string, any> = Recor
 }
 
 export function createWriteActionFailuresSchema<T extends Record<string, any> = Record<string, any>>() {
+    const error_details = z.array(z.union([
+        z.record(z.any()).and(z.object({type: z.literal('custom')})),
+        z.object({
+            type: z.literal('schema'),
+            issues: (z.array(z.any()) as z.ZodType<z.ZodIssue[]>)
+        }),
+        z.object({
+            type: z.literal('missing_key'),
+            primary_key: z.union([z.string(), z.number(), z.symbol()])
+        }),
+        z.object({
+            type: z.literal('create_duplicated_key'),
+            primary_key: z.union([z.string(), z.number(), z.symbol()])
+        }),
+        z.object({
+            type: z.literal('update_altered_key'),
+            primary_key: z.union([z.string(), z.number(), z.symbol()])
+        })
+    ]));
     return z.array(z.object({
         action: (createWriteActionSchema().writeAction as z.ZodType<WriteAction<T>>),
+        error_details,
         unrecoverable: z.boolean().optional(),
         back_off_until_ts: z.number().optional(),
         blocked_by_action_uuid: z.string().optional(),
         affected_items: z.array(z.object({
             item_pk: PrimaryKeyValueSchema,
             item: (z.record(z.any()) as z.ZodType<T>),
-            error_details: z.array(z.union([
-                z.record(z.any()).and(z.object({type: z.literal('custom')})),
-                z.object({
-                    type: z.literal('schema'),
-                    issues: (z.array(z.any()) as z.ZodType<z.ZodIssue[]>)
-                }),
-                z.object({
-                    type: z.literal('missing_key'),
-                    primary_key: z.union([z.string(), z.number(), z.symbol()])
-                }),
-                z.object({
-                    type: z.literal('create_duplicated_key'),
-                    primary_key: z.union([z.string(), z.number(), z.symbol()])
-                }),
-                z.object({
-                    type: z.literal('update_altered_key'),
-                    primary_key: z.union([z.string(), z.number(), z.symbol()])
-                })
-            ]))
+            error_details
         }))
     }));
 }
@@ -197,6 +199,7 @@ export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'cust
     }
 export type WriteActionFailures<T extends Record<string, any> = Record<string, any>> = {
     action: WriteAction<T>,
+    error_details: WriteActionFailuresErrorDetails[],
     unrecoverable?: boolean,
     back_off_until_ts?: number,
     blocked_by_action_uuid?: string,
@@ -241,7 +244,7 @@ export type WriteActionError<T extends Record<string, any> = Record<string, any>
 }
 isTypeEqual<z.infer<typeof WriteActionErrorSchema>, WriteActionError<any>>(true);
 
-export type CombineWriteActionsWhereFiltersResponse<T extends Record<string, any>> = {status: 'ok', filter: WhereFilterDefinition<T> | undefined} | {status: 'error', error: {message: string, details: WriteActionFailuresErrorDetails}};
+export type CombineWriteActionsWhereFiltersResponse<T extends Record<string, any>> = {status: 'ok', filter: WhereFilterDefinition<T> | undefined} | {status: 'error', error: {message: string, failed_actions: WriteActionFailures<T>}};
 
 export type AppliedWritesOutput<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] | Draft<T>[] }
 

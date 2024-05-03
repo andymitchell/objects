@@ -27,7 +27,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
     private findAction<IMA extends boolean = false>(action:WriteAction<T>, ifMissingAdd?: IMA): IMA extends true? FailedAction<T> : FailedAction<T>  | undefined {
         let failedAction = this.failures.find(x => isEqual(x.action, action));
         if( ifMissingAdd && !failedAction ) {
-            failedAction = {action, affected_items: []};
+            failedAction = {action, error_details: [], affected_items: []};
             this.failures.push(failedAction);
         }
         return failedAction as IMA extends true? FailedAction<T> : FailedAction<T>  | undefined;
@@ -53,6 +53,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
         if( item.error_details.some(x => isEqual(x, errorDetails)) ) {
             return;
         }
+        action.error_details.push(errorDetails);
         switch(errorDetails.type) {
             case 'schema': {
                 // TODO Should it merge issues instead? Otherwise the list of issues might involve lots of duplication. 

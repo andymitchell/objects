@@ -23,7 +23,22 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
             const key = ddl['.'].primary_key;
             const pkValue = safeKeyValue(x.payload.data[key], true);
             if( !pkValue ) {
-                errorResponse = {status: 'error', error: {message: "Unknown key", details: {type: 'missing_key', primary_key: key}}}
+                errorResponse = {
+                    status: 'error', 
+                    error: {
+                        message: "Unknown key", 
+                        failed_actions: [
+                            {
+                                action: x, 
+                                affected_items: [], 
+                                error_details: [
+                                    {type: 'missing_key', primary_key: key}
+                                ],
+                                unrecoverable: true
+                            }
+                        ]
+                    }
+                }
                 return;
             }
             const existingKeyValue:WhereFilterDefinition<T> = {

@@ -6,22 +6,26 @@ import { WriteAction,  WriteActionPayload, WriteActionPayloadArrayScope, isWrite
 import { DDL } from "../types";
 
 
+type ArrayScopeSchemaAndDDL<ScopedType extends Record<string, any>> = {writeAction:WriteAction<ScopedType>, schema: z.ZodType<ScopedType, any, any>, ddl: DDL<ScopedType>};
+type Scoped<ScopedType extends Record<string, any>> = ArrayScopeSchemaAndDDL<ScopedType> & {items: ScopedType[], path: string};
 export function getArrayScopeSchemaAndDDL<T extends Record<string, any>>(writeAction:Readonly<WriteAction<T>>, schema: z.ZodType<T, any, any>, rules:DDL<T>) {
     const payload = writeAction.payload;
     if( !isWriteActionArrayScopePayload(payload) ) throw new Error("Expects Array Scope Write Action");
     
     type ScopedType = DotPropPathValidArrayValue<T, typeof payload.scope>; // Note that because of generics, this type is meaningless to the type checker. Helpful to read though. 
 
-    type ScopedRules = Partial<DDL<ScopedType>>;
-    const scopedRules:ScopedRules = {};
-    for( let ruleKey in rules ) {
+    type ScopedListRules = Partial<DDL<ScopedType>['lists']>;
+    const scopedListRules:ScopedListRules = {};
+    let ruleKey: keyof typeof rules.lists;
+    for( ruleKey in rules.lists ) {
         if( ruleKey.indexOf(payload.scope)===0 ) {
-            // @ts-ignore
-            const scopedRuleKey = ruleKey===payload.scope? '.' : ruleKey.replace(payload.scope, '') as keyof ScopedRules;
-            // @ts-ignore It's a classic TS problem of trying to clone an object. It's solvable, I'm just tight for time. 
-            scopedRules[scopedRuleKey] = rules[ruleKey];
+            const scopedRuleKey = ruleKey===payload.scope? '.' : ruleKey.replace(payload.scope, '') as keyof DDL<ScopedType>['lists'];
+            
+            // @ts-ignore this is solvable, it's just being a pain 
+            scopedListRules[scopedRuleKey] = rules.lists[ruleKey];
         }
     }
+    if( Object.keys(scopedListRules).length===0 ) debugger;
 
     const scopedSchema = getZodSchemaAtSchemaDotPropPath(schema, payload.scope);
     if( !scopedSchema ) throw new Error("Could not scope the schema. Suggests the schema and the dot-prop-path don't align.");
@@ -34,11 +38,12 @@ export function getArrayScopeSchemaAndDDL<T extends Record<string, any>>(writeAc
         payload: payload.action
     }
 
-    return {
+    const output: ArrayScopeSchemaAndDDL<ScopedType> = {
         writeAction: scopedWriteAction,
         schema: scopedSchema,
-        ddl: scopedRules as DDL<ScopedType>
-    }
+        ddl: {version: rules.version, lists: scopedListRules} as DDL<ScopedType>
+    };
+    return output;
 }
 
 export default function getArrayScopeItemAction<T extends Record<string, any>>(item:T, writeAction:Readonly<WriteAction<T>>, schema: z.ZodType<T, any, any>, rules:DDL<T>) {
@@ -60,5 +65,5 @@ export default function getArrayScopeItemAction<T extends Record<string, any>>(i
             path: scopedItems.path,
             ...scopedSchemaAndDDL
         }
-    });
+    }) as Scoped<ScopedType>[];
 }

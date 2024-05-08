@@ -3,6 +3,7 @@ import applyWritesToItems from ".";
 import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope, assertArrayScope } from "../types";
 import { ApplyWritesToItemsOptions, DDL } from "./types";
 import { produce } from "immer";
+import { IUser } from "../auth/types";
 
 
 
@@ -12,6 +13,7 @@ describe('applyWritesToItems test', () => {
     const ObjSchema = z.object({
         id: z.string(),
         text: z.string().optional(),
+        owner: z.string().optional(),
         children: z.array(
           z.object({
             cid: z.string(),
@@ -28,17 +30,17 @@ describe('applyWritesToItems test', () => {
     type Obj = z.infer<typeof ObjSchema>;
 
     const ddl:DDL<Obj> = {
-        '.': {
-            version: 1,
-            primary_key: 'id'
-        },
-        'children': {
-            version: 1,
-            primary_key: 'cid',
-        },
-        'children.children': {
-            version: 1,
-            primary_key: 'ccid'
+        version: 1,
+        lists: {
+            '.': {
+                primary_key: 'id'
+            },
+            'children': {
+                primary_key: 'cid',
+            },
+            'children.children': {
+                primary_key: 'ccid'
+            }
         }
     }
 
@@ -78,6 +80,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
 
@@ -120,6 +123,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
 
@@ -150,6 +154,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
 
@@ -208,6 +213,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
             
@@ -246,6 +252,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
 
@@ -312,6 +319,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign({
                     allow_partial_success: true
                 }, options)
@@ -389,6 +397,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign({
                     allow_partial_success: false
                 }, options)
@@ -436,6 +445,7 @@ describe('applyWritesToItems test', () => {
                 originalItems, 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign({
                     allow_partial_success: false
                 }, options)
@@ -493,6 +503,7 @@ describe('applyWritesToItems test', () => {
                 originalItems, 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
             
@@ -630,6 +641,7 @@ describe('applyWritesToItems test', () => {
                 originalItems, 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign({
                     allow_partial_success: false
                 }, options)
@@ -685,6 +697,7 @@ describe('applyWritesToItems test', () => {
                 originalItems, 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
             
@@ -720,6 +733,7 @@ describe('applyWritesToItems test', () => {
                 originalItems, 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
             
@@ -761,6 +775,7 @@ describe('applyWritesToItems test', () => {
             originalItemsNonImmer, 
             ObjSchema,
             ddl,
+            undefined,
             {in_place_mutation: false}
         );
 
@@ -769,6 +784,7 @@ describe('applyWritesToItems test', () => {
             originalItemsImmer, 
             ObjSchema,
             ddl,
+            undefined,
             {in_place_mutation: true}
         );
         
@@ -811,6 +827,7 @@ describe('applyWritesToItems test', () => {
                 ], 
                 ObjSchema,
                 ddl,
+                undefined,
                 options
             );
             
@@ -845,6 +862,7 @@ describe('applyWritesToItems test', () => {
                 originalItems, 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign(options, {allow_partial_success: true})
             );
             
@@ -892,6 +910,7 @@ describe('applyWritesToItems test', () => {
                 [existing], 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign(
                     {
                         attempt_recover_duplicate_create: true
@@ -945,6 +964,7 @@ describe('applyWritesToItems test', () => {
                 [existing2], 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign(
                     {
                         attempt_recover_duplicate_create: true
@@ -961,6 +981,7 @@ describe('applyWritesToItems test', () => {
                 [existing], 
                 ObjSchema,
                 ddl,
+                undefined,
                 Object.assign(
                     {
                         attempt_recover_duplicate_create: false
@@ -974,9 +995,352 @@ describe('applyWritesToItems test', () => {
         })
     });
 
-    
-    
+    testImmutableAndnplaceModes((name, options) => {
+        test(`permissions create succeed [${name}]`, () => {
 
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '1',
+                            owner: 'user1',
+                            'text': 'Wrong'
+                        }
+                    }
+                }
+            ]
+
+
+            const ddlP = structuredClone(ddl);
+            ddlP.permissions = {
+                type: 'owner_id_property',
+                path: 'owner',
+                format: 'uuid'
+            }
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [], 
+                ObjSchema,
+                ddlP,
+                user1
+            );
+
+            expect(result.status).toBe('ok');
+
+
+        })
+    });
+
+
+    testImmutableAndnplaceModes((name, options) => {
+        test(`permissions create fail [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '1',
+                            owner: 'user2',
+                            'text': 'Wrong'
+                        }
+                    }
+                }
+            ]
+
+
+            const ddlP = structuredClone(ddl);
+            ddlP.permissions = {
+                type: 'owner_id_property',
+                path: 'owner',
+                format: 'uuid'
+            }
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [], 
+                ObjSchema,
+                ddlP,
+                user1
+            );
+
+            expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
+            expect(result.error.failed_actions[0].error_details[0].type).toBe('permission_denied');
+
+
+        })
+    });
+
+
+    testImmutableAndnplaceModes((name, options) => {
+        test(`permissions update succeed [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'update',
+                        data: {
+                            'text': 'Wrong'
+                        },
+                        where: {
+                            id: '1'
+                        }
+                    }
+                }
+            ]
+
+            const existing:Obj = {
+                'id': '1',
+                'owner': 'user1',
+                'text': 'Right'
+            }
+
+            const ddlP = structuredClone(ddl);
+            ddlP.permissions = {
+                type: 'owner_id_property',
+                path: 'owner',
+                format: 'uuid'
+            }
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [existing], 
+                ObjSchema,
+                ddlP,
+                user1
+            );
+
+            expect(result.status).toBe('ok');
+
+
+        })
+    });
+    
+    testImmutableAndnplaceModes((name, options) => {
+        test(`permissions update failed [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'update',
+                        data: {
+                            'text': 'Wrong'
+                        },
+                        where: {
+                            id: '1'
+                        }
+                    }
+                }
+            ]
+
+            const existing:Obj = {
+                'id': '1',
+                'owner': 'user2',
+                'text': 'Right'
+            }
+
+            const ddlP = structuredClone(ddl);
+            ddlP.permissions = {
+                type: 'owner_id_property',
+                path: 'owner',
+                format: 'uuid'
+            }
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [existing], 
+                ObjSchema,
+                ddlP,
+                user1
+            );
+
+            expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
+            expect(result.error.failed_actions[0].error_details[0].type).toBe('permission_denied');
+            
+
+
+        })
+    });
+    
+    testImmutableAndnplaceModes((name, options) => {
+        test(`permissions allow_partial_success=true [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'update',
+                        data: {
+                            'text': 'Wrong'
+                        },
+                        where: {
+                            id: '1'
+                        }
+                    }
+                },
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '1',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '1',
+                            owner: 'user2',
+                            'text': 'Wrong'
+                        }
+                    }
+                }
+            ]
+
+            const existing:Obj = {
+                'id': '1',
+                'owner': 'user1',
+                'text': 'Right'
+            }
+
+            const ddlP = structuredClone(ddl);
+            ddlP.permissions = {
+                type: 'owner_id_property',
+                path: 'owner',
+                format: 'uuid'
+            }
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [existing], 
+                ObjSchema,
+                ddlP,
+                user1,
+                {
+                    allow_partial_success: true
+                }
+            );
+
+            expect(result.status).toBe('error');
+            expect(result.successful_actions.length).toBe(1);
+            expect(result.successful_actions[0].action.uuid).toBe('0');
+
+
+
+        })
+    });
+
+    testImmutableAndnplaceModes((name, options) => {
+        test(`permissions allow_partial_success=false [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'update',
+                        data: {
+                            'text': 'Wrong'
+                        },
+                        where: {
+                            id: '1'
+                        }
+                    }
+                },
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '1',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '1',
+                            owner: 'user2',
+                            'text': 'Wrong'
+                        }
+                    }
+                }
+            ]
+
+            const existing:Obj = {
+                'id': '1',
+                'owner': 'user1',
+                'text': 'Right'
+            }
+
+            const ddlP = structuredClone(ddl);
+            ddlP.permissions = {
+                type: 'owner_id_property',
+                path: 'owner',
+                format: 'uuid'
+            }
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [existing], 
+                ObjSchema,
+                ddlP,
+                user1,
+                {
+                    allow_partial_success: false
+                }
+            );
+
+            expect(result.status).toBe('error');
+            expect(result.successful_actions.length).toBe(0);            
+
+
+        })
+    });
     
     
     test('Immer compatible - change', async () => {
@@ -1008,6 +1372,7 @@ describe('applyWritesToItems test', () => {
                 draft, 
                 ObjSchema,
                 ddl,
+                undefined,
                 {in_place_mutation: true}
             );
         });
@@ -1041,6 +1406,7 @@ describe('applyWritesToItems test', () => {
                 draft, 
                 ObjSchema,
                 ddl,
+                undefined,
                 {in_place_mutation: true}
             );
         });

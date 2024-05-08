@@ -18,21 +18,20 @@ function typeCheck() {
     }
 
     const ddl:DDL<Obj> = {
-        '.': {
-            version: 1,
-            primary_key: 'id'
-        },
-        'children': {
-            version: 1,
-            primary_key: 'cid',
-        },
-        'children.children': {
-            version: 1,
-            primary_key: 'ccid'
-        },
-        'children.children.children': {
-            version: 1,
-            primary_key: 'cccid'
+        version: 1, 
+        lists: {
+            '.': {
+                primary_key: 'id'
+            },
+            'children': {
+                primary_key: 'cid',
+            },
+            'children.children': {
+                primary_key: 'ccid'
+            },
+            'children.children.children': {
+                primary_key: 'cccid'
+            }
         }
     }
 
@@ -43,16 +42,21 @@ function typeCheck() {
 
 
     const typeCheck1:DDL<any> = {
-        '.': {
-            version: 1,
-            primary_key: 'whatever'
+        version: 1,
+        lists: {
+            '.': {
+                primary_key: 'whatever'
+            }
         }
     }
 
     const typeCheck2:DDL<{id: string/*, friends: {fid: string}[]*/}> = {
-        '.': {
-            version: 1,
-            primary_key: 'id'
+        version: 1,
+        lists: {
+            '.': {
+                
+                primary_key: 'id'
+            }
         }
     }   
 }

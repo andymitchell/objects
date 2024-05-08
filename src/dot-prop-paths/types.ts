@@ -29,6 +29,60 @@ export type DotPropPathsIncArrayUnion<T extends Record<string,any>> = DotPropPat
 
 
 
+type Scalar = string | number | boolean | null | undefined;
+export type ScalarProperties<T> = { // Helper type to pick only scalar properties of an object
+    [P in keyof T]: T[P] extends Scalar ? P : never
+}[keyof T];
+type ObjectProperties<T> = { // Helper type to pick only non-scalar, non-array object properties
+    [P in keyof T]: T[P] extends object ? (T[P] extends Array<any> ? never : P) : never
+}[keyof T];
+type ScalarPath<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
+    {
+        [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${string & P}` :
+            P extends ObjectProperties<T>
+            ? `${Prefix}${string & P}.${ScalarPath<T[P]>}`
+            : never;
+    }[keyof T];
+type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
+    T extends Array<infer U>
+    ? U extends object
+        ? `${Prefix}${ScalarPathSpreadingObjectArrays<U>}`
+        : never
+    : {
+        [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${string & P}` :
+            P extends ObjectProperties<T>
+            ? `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<T[P]>}`
+            : P extends keyof T ? (T[P] extends Array<any> ? (T[P][number] extends object ?
+                `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<T[P][number]>}` : never) : never)
+            : never;
+    }[keyof T];
+type ArrayOfScalarProperties<T> = {
+    [P in keyof T]: T[P] extends Array<infer U> ? U extends Scalar ? P : never : never
+}[keyof T];
+type ScalarPathToScalarArraySpreadingObjectArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
+    T extends Array<infer U>
+    ? U extends object
+        ? `${Prefix}${ScalarPathToScalarArraySpreadingObjectArrays<U>}`
+        : never
+    : {
+        [P in keyof T]-?: P extends ScalarProperties<T> ? never :
+            P extends ObjectProperties<T>
+            ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<T[P]>}`
+            : P extends ArrayOfScalarProperties<T> ? `${Prefix}${string & P}`
+            : (T[P] extends Array<any> 
+                ? (T[P][number] extends object 
+                    ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<T[P][number]>}` 
+                    : (T[P][number] extends Scalar 
+                        ? `${Prefix}${string & P}` 
+                        : never))
+                : never);
+                
+    }[keyof T];
+
+export type DotPropPathsUnionScalar<T  extends Record<string, any>> = { [K in ScalarPath<T>]: RemoveTrailingDot<K> }[ScalarPath<T>];
+export type DotPropPathsUnionScalarSpreadingObjectArrays<T  extends Record<string, any>> = { [K in ScalarPathSpreadingObjectArrays<T>]: RemoveTrailingDot<K> }[ScalarPathSpreadingObjectArrays<T>];
+export type DotPropPathsUnionScalarArraySpreadingObjectArrays<T  extends Record<string, any>> = { [K in ScalarPathToScalarArraySpreadingObjectArrays<T>]: RemoveTrailingDot<K> }[ScalarPathToScalarArraySpreadingObjectArrays<T>];
+
 export type NonArrayProperty<T> = {
     [P in keyof T]: T[P] extends Array<any> ? never : P
 }[keyof T];
@@ -82,7 +136,6 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
                 : never
         : never;
 }[keyof T] : '';
-
 
 
 

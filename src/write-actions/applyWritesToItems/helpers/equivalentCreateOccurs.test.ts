@@ -13,9 +13,11 @@ describe('equivalentCreateOccurs', () => {
     type Obj = z.infer<typeof ObjSchema>;
 
     const ddl:DDL<Obj> = {
-        '.': {
-            version: 1,
-            primary_key: 'id'
+        version: 1,
+        lists: {
+            '.': {
+                primary_key: 'id'
+            }
         }
     }
 

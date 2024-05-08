@@ -105,7 +105,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
         failedAction.blocked_by_action_uuid = blocked_by_action_uuid;
     }
 
-    mergeUnderAction(action:WriteAction<T>, failedActions:WriteActionFailures<T>):void {
+    mergeUnderAction(action:WriteAction<T>, failedActions:WriteActionFailures<any>):void {
 
         for( const subAction of failedActions ) {
             for( const subItem of subAction.affected_items ) {

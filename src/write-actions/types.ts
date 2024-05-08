@@ -164,6 +164,10 @@ export function createWriteActionFailuresSchema<T extends Record<string, any> = 
         z.object({
             type: z.literal('update_altered_key'),
             primary_key: z.union([z.string(), z.number(), z.symbol()])
+        }),
+        z.object({
+            type: z.literal('permission_denied'),
+            reason: z.union([z.literal('no-owner-id'), z.literal('not-owner'), z.literal('unknown-permission'), z.literal('invalid-permissions'), z.literal('expected-owner-email')])
         })
     ]));
     return z.array(z.object({
@@ -196,6 +200,10 @@ export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'cust
     {
         type: 'create_duplicated_key',
         primary_key: string | number | symbol
+    } | 
+    {
+        type: 'permission_denied',
+        reason: 'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email'
     }
 export type WriteActionFailures<T extends Record<string, any> = Record<string, any>> = {
     action: WriteAction<T>,

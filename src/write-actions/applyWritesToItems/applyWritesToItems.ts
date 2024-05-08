@@ -11,6 +11,8 @@ import { z } from "zod";
 import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker";
 import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs";
 import { Draft, current, isDraft } from "immer";
+import { IUser } from "../auth/types";
+import { checkPermission } from "./helpers/checkPermission";
 
 
 function getMutableItem<T extends Record<string, any>>(item:T):T {
@@ -56,7 +58,10 @@ class WriteActionSuccessesTracker<T extends Record<string, any>> {
     }
 }
 
-export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: ApplyWritesToItemsOptions<T>): AppliedWritesOutputResponse<T> {
+export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): AppliedWritesOutputResponse<T> {
+    return _applyWritesToItems(writeActions, items, schema, ddl, user, options);
+}
+function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): AppliedWritesOutputResponse<T> {
 
     if( writeActions.length===0 ) {
         return {
@@ -73,14 +78,13 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     }
     
     // Load the rules
-    const rules:ListRules<T> | undefined = ddl['.'];
+    const rules:ListRules<T> | undefined = ddl.lists['.'];
     const pk = makePrimaryKeyGetter<T>(rules.primary_key);
 
     const addedHash: ItemHash<T> = {};
     const updatedHash: ItemHash<T> = {};
     const deletedHash: ItemHash<T> = {};
     let wipItems = [...items] as T[];
-    
     
     
     
@@ -91,6 +95,7 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     // #fail_continues: the higher up ideally wants to know every action that fails (so a it can mark them as unrecoverable in one hit), and every item that'll fail as a consequence (because if it applied optimistic updates, it needs to roll them back)
     const failureTracker = new WriteActionFailuresTracker<T>(schema, rules);
 
+    
     // Choose the strategy
     let writeStrategy: WriteStrategy<T>;
     switch(rules.write_strategy?.type ) {
@@ -106,6 +111,8 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
     // Now go through the actions 
     for( const action of writeActions ) {
         if( failureTracker.shouldHalt() ) break;
+
+        
 
         if (action.payload.type === 'create') {
             const pkValue = pk(action.payload.data, true);
@@ -123,21 +130,24 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                         failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                     }
                 } else {
-                    // TODO Check permissions
-                    const newItem = writeStrategy.create_handler(action.payload);
-                
-                    // TODO Run pretriggers
+                    const permissionFailure = scoped? undefined : checkPermission(action.payload.data, ddl, user);
+                    if( permissionFailure ) {
+                        failureTracker.report(action, action.payload.data, permissionFailure);
+                    } else {
+                        const newItem = writeStrategy.create_handler(action.payload);
+                    
+                        // TODO Run pretriggers
 
-                    const schemaOk = failureTracker.testSchema(action, newItem);
-                    if( schemaOk ) {
-                        existingIds.add(pkValue);
-                        addedHash[pkValue] = newItem;
-                        if( deletedHash[pkValue] ) delete deletedHash[pkValue];
-                        successTracker.report(action, newItem);
-                        //failureTracker.undoable()?.add(wipItems.length);
-                        wipItems.push(newItem);
-                    } // #fail_continues
-                
+                        const schemaOk = failureTracker.testSchema(action, newItem);
+                        if( schemaOk ) {
+                            existingIds.add(pkValue);
+                            addedHash[pkValue] = newItem;
+                            if( deletedHash[pkValue] ) delete deletedHash[pkValue];
+                            successTracker.report(action, newItem);
+                            //failureTracker.undoable()?.add(wipItems.length);
+                            wipItems.push(newItem);
+                        } // #fail_continues
+                    }
                 }
             } else {
                 failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
@@ -150,92 +160,101 @@ export default function applyWritesToItems<T extends Record<string, any>>(writeA
                 
 
                 if ( !deletedHash[pkValue] && isUpdateOrDeleteWriteActionPayload<T>(action.payload) && (WhereFilter.matchJavascriptObject(item, action.payload.where)) ) {
-                    let mutableUpdatedItem: T | undefined;
-                    let deleted = !!deletedHash[pkValue];
+                    const permissionFailure = scoped? undefined : checkPermission(item, ddl, user);
+                    if( permissionFailure ) {
+                        failureTracker.report(action, item, permissionFailure);
+                    } else {
+                        let mutableUpdatedItem: T | undefined;
+                        let deleted = !!deletedHash[pkValue];
 
-                    // Check if it's a grow set (otherwise just do the action)
-                    const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, item, rules);
-                    
-                    for (const action of maybeExpandedWriteActions) {
-                        if( failureTracker.shouldHalt() ) break;
-                        switch (action.payload.type) {
-                            case 'update':
-                                if (!mutableUpdatedItem) {
-                                    mutableUpdatedItem = getMutableItem(item);
-                                }
+                        // Check if it's a grow set (otherwise just do the action)
+                        const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, item, rules);
+                        
+                        for (const action of maybeExpandedWriteActions) {
 
-                                const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
-                                const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
-                                if( schemaOk ) {
-
-                                    // An update is not allowed to change the primary key 
-                                    if( pk(mutableUpdatedItem)===pkValue ) {
-                                        mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.in_place_mutation decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
-                                    } else {
-                                        failureTracker.report(action, item, {
-                                            'type': 'update_altered_key',
-                                            primary_key: rules.primary_key
-                                        })
-                                    }
-                                    
-
-                                    
-                                } // #fail_continues
-
-
-                                break;
-                            case 'array_scope':
-                                if (!mutableUpdatedItem) {
-                                    mutableUpdatedItem = getMutableItem(item);
-                                }
-                                // Get all arrays that match the scope, then recurse into applyWritesToItems for them
-                                const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
-
-                                for( const scopedArray of scopedArrays ) {
-                                    const arrayResponse = applyWritesToItems(
-                                        [scopedArray.writeAction], 
-                                        scopedArray.items, 
-                                        scopedArray.schema, 
-                                        scopedArray.ddl, 
-                                        Object.assign({}, optionsIncDefaults, {in_place_mutation: false})
-                                        );
-
-                                    if( arrayResponse.status!=='ok' ) {
-                                        failureTracker.mergeUnderAction(action, arrayResponse.error.failed_actions);
+                            if( failureTracker.shouldHalt() ) break;
+                            switch (action.payload.type) {
+                                case 'update':
+                                    if (!mutableUpdatedItem) {
+                                        mutableUpdatedItem = getMutableItem(item);
                                     }
 
-                                    setProperty(
-                                        mutableUpdatedItem,
-                                        scopedArray.path,
-                                        arrayResponse.changes.final_items
-                                    )
-                                
-                                }
+                                    const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
+                                    const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
+                                    if( schemaOk ) {
 
-                                break;
-                            case 'delete':
-                                deleted = true;
-                                break;
-                        }
-                    }
+                                        // An update is not allowed to change the primary key 
+                                        if( pk(mutableUpdatedItem)===pkValue ) {
+                                            mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.in_place_mutation decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
+                                        } else {
+                                            failureTracker.report(action, item, {
+                                                'type': 'update_altered_key',
+                                                primary_key: rules.primary_key
+                                            })
+                                        }
+                                        
 
-                    // Now actually commit the change
-                    if( !failureTracker.shouldHalt() ) {
-                        successTracker.report(action, item);
-                        if (deleted) {
-                            deletedHash[pkValue] = item;
-                            if( addedHash[pkValue] ) delete addedHash[pkValue];
-                            if( updatedHash[pkValue] ) delete updatedHash[pkValue];
-                            wipItems.splice(i, 1);
-                            i--;
-                        } else if( mutableUpdatedItem ) {
-                            // TODO Run pretriggers
-                            if (addedHash[pkValue]) {
-                                addedHash[pkValue] = mutableUpdatedItem;
-                            } else {
-                                updatedHash[pkValue] = mutableUpdatedItem;
+                                        
+                                    } // #fail_continues
+
+
+                                    break;
+                                case 'array_scope':
+                                    if (!mutableUpdatedItem) {
+                                        mutableUpdatedItem = getMutableItem(item);
+                                    }
+                                    // Get all arrays that match the scope, then recurse into applyWritesToItems for them
+                                    const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
+
+                                    for( const scopedArray of scopedArrays ) {
+                                        const arrayResponse = _applyWritesToItems(
+                                            [scopedArray.writeAction], 
+                                            scopedArray.items, 
+                                            scopedArray.schema, 
+                                            scopedArray.ddl, 
+                                            user,
+                                            Object.assign({}, optionsIncDefaults, {in_place_mutation: false}),
+                                            true
+                                            );
+
+                                        if( arrayResponse.status!=='ok' ) {
+                                            arrayResponse.error.failed_actions;
+                                            failureTracker.mergeUnderAction(action, arrayResponse.error.failed_actions);
+                                        }
+
+                                        setProperty(
+                                            mutableUpdatedItem,
+                                            scopedArray.path,
+                                            arrayResponse.changes.final_items
+                                        )
+                                    
+                                    }
+
+                                    break;
+                                case 'delete':
+                                    deleted = true;
+                                    break;
                             }
-                            wipItems[i] = mutableUpdatedItem
+                        }
+
+                        // Now actually commit the change
+                        if( !failureTracker.shouldHalt() ) {
+                            successTracker.report(action, item);
+                            if (deleted) {
+                                deletedHash[pkValue] = item;
+                                if( addedHash[pkValue] ) delete addedHash[pkValue];
+                                if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                                wipItems.splice(i, 1);
+                                i--;
+                            } else if( mutableUpdatedItem ) {
+                                // TODO Run pretriggers
+                                if (addedHash[pkValue]) {
+                                    addedHash[pkValue] = mutableUpdatedItem;
+                                } else {
+                                    updatedHash[pkValue] = mutableUpdatedItem;
+                                }
+                                wipItems[i] = mutableUpdatedItem
+                            }
                         }
                     }
                 }

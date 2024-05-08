@@ -20,7 +20,7 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
     let errorResponse:CombineWriteActionsWhereFiltersResponse<T> | undefined;
     let filtersForExisting:WhereFilterDefinition<T>[] = writeActions.map(x => {
         if( x.payload.type==='create' ) {
-            const key = ddl['.'].primary_key;
+            const key = ddl.lists['.'].primary_key;
             const pkValue = safeKeyValue(x.payload.data[key], true);
             if( !pkValue ) {
                 errorResponse = {

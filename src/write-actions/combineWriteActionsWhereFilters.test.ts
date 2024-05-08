@@ -21,17 +21,17 @@ describe('combineWriteActionsWhereFilters', () => {
     type Obj = z.infer<typeof ObjSchema>;
 
     const ddl:DDL<Obj> = {
-        '.': {
-            version: 1,
-            primary_key: 'id'
-        },
-        'children': {
-            version: 1,
-            primary_key: 'cid'
-        },
-        'children.children': {
-            version: 1,
-            primary_key: 'ccid'
+        version: 1, 
+        lists: {
+            '.': {
+                primary_key: 'id'
+            },
+            'children': {
+                primary_key: 'cid'
+            },
+            'children.children': {
+                primary_key: 'ccid'
+            }
         }
     }
 

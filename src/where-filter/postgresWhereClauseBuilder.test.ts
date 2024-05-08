@@ -1,4 +1,4 @@
-import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, UNSAFE_WARNING, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
+import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
 
 import { MatchJavascriptObject, MatchJavascriptObjectInTesting, WhereFilterDefinition } from "./types";
 import { standardTests } from "./standardTests";
@@ -6,6 +6,7 @@ import { standardTests } from "./standardTests";
 import { DbMultipleTestsRunner, PgTestable } from "@andyrmitchell/pg-testable";
 import { z } from "zod";
 import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod";
+import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath";
 
 
 

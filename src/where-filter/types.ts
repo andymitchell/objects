@@ -68,7 +68,8 @@ class Bob<T> {
     
 
 // Recursive definition of WhereFilter
-export const WhereFilterSchema: ZodType<WhereFilterDefinition<any>, any> = z.lazy(() =>
+// The 3rd 'any' is to stop TypeScript panicking "Type instantiation is excessively deep and possibly infinite.": https://github.com/colinhacks/zod/issues/577
+export const WhereFilterSchema: ZodType<WhereFilterDefinition<any>, any, any> = z.lazy(() =>
     z.union([
         z.record(z.union([
             ValueComparisonSchema,

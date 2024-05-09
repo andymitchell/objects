@@ -1,5 +1,5 @@
 
-import { z, ZodNumber, ZodOptional, ZodType } from "zod";
+import { z, ZodNumber, ZodOptional, ZodSchema, ZodType, ZodTypeDef } from "zod";
 import { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, PathValue, RemoveTrailingDot } from '../dot-prop-paths/types';
 import isPlainObject from "../utils/isPlainObject";
 import isTypeEqual from "../utils/isTypeEqual";
@@ -69,7 +69,7 @@ class Bob<T> {
 
 // Recursive definition of WhereFilter
 // The 3rd 'any' is to stop TypeScript panicking "Type instantiation is excessively deep and possibly infinite.": https://github.com/colinhacks/zod/issues/577
-export const WhereFilterSchema: ZodType<WhereFilterDefinition<any>, any, any> = z.lazy(() =>
+export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef, any> = z.lazy(() =>
     z.union([
         z.record(z.union([
             ValueComparisonSchema,

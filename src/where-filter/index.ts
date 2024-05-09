@@ -2,7 +2,7 @@
 import { convertDotPropPathToPostgresJsonPath } from './convertDotPropPathToPostgresJsonPath';
 import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascriptObject';
 import postgresWhereClauseBuilder, { IPropertyMap, PropertyMapSchema } from './postgresWhereClauseBuilder';
-import { WhereFilterDefinition, WhereFilterSchema} from './types';
+import { WhereFilterDefinition, WhereFilterSchema, isWhereFilterDefinition} from './types';
 
 export const WhereFilter = {
     matchJavascriptObject, 
@@ -10,6 +10,7 @@ export const WhereFilter = {
     postgresWhereClauseBuilder,
     PropertyMapSchema,
     WhereFilterSchema,
+    isWhereFilterDefinition,
     convertDotPropPathToPostgresJsonPath
 };
 

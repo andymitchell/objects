@@ -1,7 +1,7 @@
 import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
 
 import { MatchJavascriptObject, MatchJavascriptObjectInTesting, WhereFilterDefinition } from "./types";
-import { standardTests } from "./standardTests";
+import { ContactSchema, standardTests } from "./standardTests";
 
 import { DbMultipleTestsRunner, PgTestable } from "@andyrmitchell/pg-testable";
 import { z } from "zod";
@@ -26,7 +26,7 @@ describe('postgres where clause builder', () => {
         console.log("Db shutdown OK");
     })
 
-    
+
 
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
@@ -41,6 +41,7 @@ describe('postgres where clause builder', () => {
             let clause:PreparedWhereClauseStatement | undefined;
             try {
                 clause = postgresWhereClauseBuilder(filter, pm);
+
             } catch(e) {
                 if( e instanceof Error ) {
                     if( e.message.toLowerCase().indexOf('unsupported')>-1 ) {

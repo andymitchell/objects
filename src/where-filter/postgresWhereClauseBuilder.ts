@@ -32,12 +32,12 @@ export interface IPropertyMap<T extends Record<string, any>> {
 class BasePropertyMap<T extends Record<string, any> = Record<string, any>> implements IPropertyMap<T> {
     protected nodeMap:TreeNodeMap;
     protected sqlColumnName:string;
-    protected evaluateAsNonArray:boolean;
+    protected doNotSpreadArray:boolean;
 
-    constructor(nodeMap:TreeNodeMap, sqlColumnName: string, evaluateAsNonArray?:boolean) {
+    constructor(nodeMap:TreeNodeMap, sqlColumnName: string, doNotSpreadArray?:boolean) {
         this.nodeMap = nodeMap;
         this.sqlColumnName = sqlColumnName;
-        this.evaluateAsNonArray = evaluateAsNonArray ?? false;
+        this.doNotSpreadArray = doNotSpreadArray ?? false;
     }
 
     private countArraysInPath(dotpropPath:string):number {
@@ -71,7 +71,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
     generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]):string {
         // TODO Probably provide a version of this for JSONB that others can reference 
         const countArraysInPath = this.countArraysInPath(dotpropPath);
-        if( countArraysInPath>0  ) { // && !this.evaluateAsNonArray
+        if( countArraysInPath>0  ) { // && !this.doNotSpreadArray
             
             //throw new Error("Unsupported");
             // Almost all will involve the format EXISTS(SELECT 1 FROM jsonb_array_elements [CROSS JOIN...] WHERE <<as_column> run on _postgresWhereClauseBuilder>)
@@ -101,15 +101,14 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                     subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_column);
                 }
                 
-            } else if( this.evaluateAsNonArray && countArraysInPath===1 ) {
-                // this.nodeMap[''].kind==='ZodArray' && !this.nodeMap[''].name && 
+            } else if( this.doNotSpreadArray && countArraysInPath===1 ) {
                 // With just 1 array, we don't want to do the spread. In fact we're arriving from a spread (that's what column name is). So we need the identifier on it. 
-                // The problem is that 
                 // It is probably spreading an array, and has recursed into this 
                 
                 const identifier = this.getSqlIdentifier(dotpropPath, undefined, this.sqlColumnName);
                 return this.generateComparison(dotpropPath, filter, statementArguments, `${identifier}`);
             } else {
+                
                 sa = spreadJsonbArrays(this.sqlColumnName, path);
                 if( !sa ) throw new Error("Could not locate array in path: "+dotpropPath);
                 if( isArrayValueComparisonElemMatch(filter) ) {
@@ -122,7 +121,12 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
                         //throw new Error("Not figured out. Presume need to pass the identifier to override this.sqlColumnName, but what about dotPropPath scoping?");
                     } else {
-                        subClause = this.generateComparison(dotpropPath, filter.elem_match, statementArguments, sa.output_column);
+                        const testArrayContainsString = typeof filter.elem_match==='string';
+                        if( testArrayContainsString ) {
+                            return this.generateComparison(dotpropPath, filter.elem_match, statementArguments, undefined, testArrayContainsString);
+                        } else {
+                            subClause = this.generateComparison(dotpropPath, filter.elem_match, statementArguments, sa.output_column);
+                        }
                     }
                 } else {
                     // Compound filter: break it apart and each one must match something
@@ -173,7 +177,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         }
     }
 
-    protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string):string {
+    protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
         const optionalWrapper = (sqlIdentifier:string, query:string) => {
             if( this.nodeMap[dotpropPath].optional_or_nullable ) {
                 return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
@@ -198,10 +202,16 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
             return optionalWrapper(sqlIdentifier, operators.length>1? `(${operators.join(' AND ')})` : operators[0]);
         
         } else if( isValueComparisonScalar(filter) ) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            
 
             const placeholder = this.generatePlaceholder(filter, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
+            if( testArrayContainsString ) {
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodArray']);
+                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ? ${placeholder}`);
+            } else {
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
+            }
         } else if( isPlainObject(filter) ) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodObject']);
             const placeholder = this.generatePlaceholder(filter, statementArguments);
@@ -221,15 +231,15 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
 
 export class PropertyMapSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> implements IPropertyMap<T> {
-    constructor(schema:z.ZodSchema<T>, sqlColumnName: string, evaluateAsNonArray?:boolean) {
+    constructor(schema:z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?:boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
-        super(result.map, sqlColumnName, evaluateAsNonArray);
+        super(result.map, sqlColumnName, doNotSpreadArray);
     }
 }
 export class PropertyMap<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> implements IPropertyMap<T> {
     
-    constructor(nodeMap:TreeNodeMap, sqlColumnName: string, evaluateAsNonArray?:boolean) {
-        super(nodeMap, sqlColumnName, evaluateAsNonArray);
+    constructor(nodeMap:TreeNodeMap, sqlColumnName: string, doNotSpreadArray?:boolean) {
+        super(nodeMap, sqlColumnName, doNotSpreadArray);
     }
 }
 

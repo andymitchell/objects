@@ -9,7 +9,7 @@ type StandardTestConfig = {
     matchJavascriptObject: MatchJavascriptObjectInTesting
 }
 
-const ContactSchema = z.object({
+export const ContactSchema = z.object({
     contact: z.object({
         name: z.string(),
         age: z.number().optional(),
@@ -1151,6 +1151,44 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(false);
     });
 
+
+    test('array element elem_match (must be all in one element) string: passes', async () => {
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: ['NYC','London','Tokyo']
+                }
+            },
+            {
+                'contact.locations': {
+                    elem_match: 'NYC'
+                }
+            },
+            ContactSchema
+        );
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(true);
+    });
+
+    test('array element elem_match (must be all in one element) string: fails', async () => {
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    locations: ['NYC','London','Tokyo']
+                }
+            },
+            {
+                'contact.locations': {
+                    elem_match: 'Paris'
+                }
+            },
+            ContactSchema
+        );
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(false);
+    });
     
     test('array nesting: passes', async () => {
         const result = await matchJavascriptObject(

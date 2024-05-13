@@ -35,16 +35,18 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         'ZodNull': '',
     }
     
+    const zodKind = nodeMap[dotPropPath].kind;
+
     let jsonbPath:string = '';
     while(jsonbParts.length) {
         const part = jsonbParts.shift();
         if( !part ) {
             throw new Error(`Unknown part in dotPropPath. ${UNSAFE_WARNING}`);
         }
-        jsonbPath += `${jsonbParts.length? '->' : '->>'}'${part}'`;
+        jsonbPath += `${jsonbParts.length>0 || (jsonbParts.length===0 && ['ZodArray', 'ZodObject'].includes(zodKind))? '->' : '->>'}'${part}'`;
     }
 
-    const zodKind = nodeMap[dotPropPath].kind;
+    
     if( !castingMap[zodKind] ) throw new Error(`Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}`);
     if( errorIfNotAsExpected && !errorIfNotAsExpected.includes(zodKind) ) throw new Error(`ZodKind Postgres cast was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${UNSAFE_WARNING}`);
 

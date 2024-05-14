@@ -4,9 +4,9 @@ import { isZodSchema } from "../utils/isZodSchema";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
 
-export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMap: TreeNodeMap, errorIfNotAsExpected?:ZodKind[]):string;
-export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, schema:z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[]):string;
-export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMapOrSchema: TreeNodeMap | z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[]):string {
+export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMap: TreeNodeMap, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string;
+export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, schema:z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string;
+export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMapOrSchema: TreeNodeMap | z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string {
     let nodeMap: TreeNodeMap | undefined;
     let schema: z.ZodSchema<T> | undefined;
     if( isZodSchema(nodeMapOrSchema) ) {
@@ -50,5 +50,6 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
     if( !castingMap[zodKind] ) throw new Error(`Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}`);
     if( errorIfNotAsExpected && !errorIfNotAsExpected.includes(zodKind) ) throw new Error(`ZodKind Postgres cast was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${UNSAFE_WARNING}`);
 
-    return `(${columnName}${jsonbPath})${castingMap[zodKind] ?? ''}`
+    const cast = noCasting? '' : (castingMap[zodKind] ?? '');
+    return `(${columnName}${jsonbPath})${cast}`
 }

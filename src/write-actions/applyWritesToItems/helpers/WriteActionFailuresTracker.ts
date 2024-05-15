@@ -76,6 +76,11 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
                 item.error_details.push(errorDetails);
                 break;
             }
+            case 'permission_denied': {
+                action.unrecoverable = true;
+                item.error_details.push(errorDetails);
+                break;
+            }
             case 'custom': {
                 item.error_details.push(errorDetails);
             }

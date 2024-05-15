@@ -57,7 +57,7 @@ type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix exten
             : never;
     }[keyof T];
 type ArrayOfScalarProperties<T> = {
-    [P in keyof T]: T[P] extends Array<infer U> ? U extends Scalar ? P : never : never
+    [P in keyof T]: NonNullable<T[P]> extends Array<infer U> ? U extends Scalar ? P : never : never
 }[keyof T];
 type ScalarPathToScalarArraySpreadingObjectArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
     T extends Array<infer U>
@@ -153,7 +153,9 @@ function test() {
         friends?: string,
         pets: Record<string, number>;
         family: { relation: 'aunt' | 'uncle' }[],
-        homes: { name: 'grey' | 'farm' }[]
+        homes: { name: 'grey' | 'farm' }[],
+        hobbies: string[],
+        parttime_hobbies?: string[],
     };
 
     type ExamplePaths = DotPropPathsUnion<Example>;
@@ -234,6 +236,8 @@ function test() {
         data: { address: { city: 'London' } }
     };
 
+    const p1:DotPropPathsUnionScalarArraySpreadingObjectArrays<Example> = 'hobbies';
+    const p2:DotPropPathsUnionScalarArraySpreadingObjectArrays<Example> = 'parttime_hobbies';
     
     /*
     const ab: Update<Example> = {

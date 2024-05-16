@@ -35,8 +35,10 @@ export function createWriteActionSchema(objectSchema?: z.AnyZodObject) {
         type: z.literal('update'),
         data: objectSchema? objectSchema.partial().strict() : schema,
         where: WhereFilterSchema,
-        method: UpdatingMethodSchema,
+        method: UpdatingMethodSchema.optional(),
     });
+    isTypeEqual<z.infer<typeof WriteActionPayloadUpdateSchema>['where'], WriteActionPayloadUpdate<any>['where']>(true);
+    isTypeEqual<z.infer<typeof WriteActionPayloadUpdateSchema>['method'], WriteActionPayloadUpdate<any>['method']>(true);
 
     const WriteActionPayloadArrayCreateSchema = z.object({
         type: z.literal('array_scope'),

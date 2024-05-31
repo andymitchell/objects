@@ -15,7 +15,7 @@ describe('postgres where clause builder', () => {
 
     let runner:DbMultipleTestsRunner;
     beforeAll((done) => {
-        runner = new DbMultipleTestsRunner('pglite');
+        runner = new DbMultipleTestsRunner({type:'pglite'});
         runner.sequentialTest(async (runner, db) => {
             await db.query("select 'Hello world' as message;");
             done();

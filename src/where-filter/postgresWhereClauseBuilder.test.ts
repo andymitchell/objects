@@ -1,7 +1,7 @@
 import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
 
-import { MatchJavascriptObject, MatchJavascriptObjectInTesting, WhereFilterDefinition } from "./types";
-import { ContactSchema, standardTests } from "./standardTests";
+import {  MatchJavascriptObjectInTesting } from "./types";
+import {  standardTests } from "./standardTests";
 
 import { DbMultipleTestsRunner, PgTestable } from "@andyrmitchell/pg-testable";
 import { z } from "zod";
@@ -15,7 +15,7 @@ describe('postgres where clause builder', () => {
 
     let runner:DbMultipleTestsRunner;
     beforeAll((done) => {
-        runner = new DbMultipleTestsRunner();
+        runner = new DbMultipleTestsRunner('pglite');
         runner.sequentialTest(async (runner, db) => {
             await db.query("select 'Hello world' as message;");
             done();
@@ -30,13 +30,13 @@ describe('postgres where clause builder', () => {
 
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
-        return await runner.sequentialTest(async (runner, db, uniqueTableName) => {
+        return await runner.sequentialTest(async (runner, db, schemaName, schemaScope) => {
             
             const pm = new PropertyMapSchema(schema, 'recordColumn');
 
-            await db.exec(`CREATE TABLE IF NOT EXISTS ${uniqueTableName} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
+            await db.exec(`CREATE TABLE IF NOT EXISTS ${schemaScope('test_table_123')} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
 
-            await db.query(`INSERT INTO ${uniqueTableName} (recordColumn) VALUES('${JSON.stringify(object)}'::jsonb)`);
+            await db.query(`INSERT INTO ${schemaScope('test_table_123')} (recordColumn) VALUES('${JSON.stringify(object)}'::jsonb)`);
 
             let clause:PreparedWhereClauseStatement | undefined;
             try {
@@ -54,7 +54,7 @@ describe('postgres where clause builder', () => {
                 throw e;
             }
 
-            const queryStr = `SELECT * FROM ${uniqueTableName} WHERE ${clause.whereClauseStatement}`;
+            const queryStr = `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.whereClauseStatement}`;
             try {
                 const result = await db.query(queryStr, clause.statementArguments);
                 

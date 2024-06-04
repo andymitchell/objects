@@ -1,4 +1,4 @@
-import { DotPropPaths, DotPropPathsRecord, DotPropPathsUnion } from "./dot-prop-paths";
+import { DotPropPaths, DotPropPathsRecord, DotPropPathsUnion, PathValue } from "./dot-prop-paths";
 import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "./utils/getKeyValue";
 import isPlainObject from "./utils/isPlainObject";
 import { EnsureRecord } from "./types";
@@ -17,7 +17,11 @@ export type {
 };
 
 export { DotPropPaths };
-export type {DotPropPathsUnion, DotPropPathsRecord};
+export type {
+    DotPropPathsUnion, 
+    DotPropPathsRecord,
+    PathValue
+};
 
 export {WriteActions};
 export type {

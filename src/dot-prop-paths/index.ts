@@ -1,7 +1,7 @@
 import {getProperty} from "./getPropertySimpleDot";
-import { DotPropPathsUnion, DotPropPathsRecord } from "./types";
+import { DotPropPathsUnion, DotPropPathsRecord, PathValue } from "./types";
 
 export const DotPropPaths = {
     getProperty
 }
-export type {DotPropPathsUnion, DotPropPathsRecord};
+export type {DotPropPathsUnion, DotPropPathsRecord, PathValue};

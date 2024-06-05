@@ -1,5 +1,6 @@
 
 
+import { z } from "zod";
 import { EnsureRecord } from "../types";
 
 export type DotPropPathsRecord<T extends Record<string, any>> = {
@@ -103,7 +104,7 @@ export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key
     ? Key extends keyof T
         ? NonNullable<T[Key]> extends Array<infer U>
             ? PathValue<EnsureRecord<U>, Rest>
-            : PathValue<T[Key], Rest>
+            : PathValue<NonNullable<T[Key]>, Rest>
         : never
     : P extends keyof T
         ? NonNullable<T[P]>
@@ -245,6 +246,30 @@ function test() {
         data: { family: [] } // Expect Fail
     };
     */
+
+    const configSchema = z.object({
+        name: z.string(),
+        age: z.number().optional(),
+        location: z.object({
+            street: z.string().optional(), 
+            city: z.string().optional()
+        }).optional(), 
+        pets: z.array(z.string()).optional()
+    });
+    
+    class Config<T extends Record<string, any>> {
+        constructor(schema?: z.Schema<T>) {
+        }
+        get<P extends DotPropPathsUnion<T>>(path:P):PathValue<T, P> | undefined {
+            return undefined;
+        }
+        set<P extends DotPropPathsUnion<T>>(path:P, value:PathValue<T, P>):void {
+
+        }
+    }
+    const conf1 = new Config(configSchema);
+    conf1.set('location.city', 'London');
+    const val = conf1.get('location.city');
 }
 
 /*

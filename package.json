@@ -4,22 +4,13 @@
   "description": "",
   "exports": {
     ".": {
-      "module": "./dist/index.mjs",
-      "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "import": {
-        "types": "./dist/index.d.mts",
-        "default": "./dist/index.mjs"
-      },
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "type": "commonjs",
+  "type": "module",
   "files": [
     "dist",
     "README.MD",
@@ -30,13 +21,12 @@
   },
   "scripts": {
     "build_release": "npm run build_prepare && np",
-    "build": "tsup ./src/index.ts --format cjs,esm --dts --clean",
+    "build": "tsup",
     "pkglint": "./build/publint_pipeable.sh",
     "build_prepare": "npm run build && npm run pkglint",
     "prepublishOnly": "npm run build_prepare",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "trowser": "echo 'To run test in browser, call this like so... npm run trowser -- path/to/file.test.ts [--watch] (note the extra --)' && npx trowser --file"
+    "test": "vitest",
+    "test:watch": "vitest --watch"
   },
   "author": "",
   "license": "MIT",
@@ -56,7 +46,8 @@
     "pg-mem": "^2.8.1",
     "ts-jest": "^29.1.2",
     "tsup": "^8.0.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.0"
   },
   "dependencies": {
     "dot-prop": "^8.0.2",

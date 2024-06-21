@@ -4,6 +4,7 @@ import isPlainObject from "./utils/isPlainObject";
 import { EnsureRecord } from "./types";
 import { IPropertyMap, PreparedWhereClauseStatement, WhereFilter, WhereFilterDefinition } from "./where-filter";
 import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser } from "./write-actions";
+import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop";
 
 
 export {isPlainObject, safeKeyValue, makePrimaryKeyGetter};
@@ -22,6 +23,10 @@ export type {
     DotPropPathsRecord,
     PathValue
 };
+export {
+    getTypedProperty,
+    setTypedProperty
+}
 
 export {WriteActions};
 export type {

@@ -35,7 +35,9 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         'ZodNull': '',
     }
     
-    const zodKind = nodeMap[dotPropPath].kind;
+    const nodeMapForPath = nodeMap[dotPropPath];
+    if( !nodeMapForPath ) throw new Error(`No details at nodeMap[dotPropPath] for ${dotPropPath}`);
+    const zodKind = nodeMapForPath.kind;
 
     let jsonbPath:string = '';
     while(jsonbParts.length) {

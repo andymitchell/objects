@@ -42,7 +42,7 @@ describe('Zod test', () => {
         expect(childrenSchema?.safeParse(obj.children).success).toBe(false);
 
         const petsSchema = getZodSchemaAtSchemaDotPropPath(schema, 'children.pets');
-        expect(petsSchema?.safeParse(obj.children[0].pets[0]).success).toBe(true);
+        expect(petsSchema?.safeParse(obj.children[0]!.pets[0]).success).toBe(true);
 
         const childrenTypeSchema = getZodSchemaAtSchemaDotPropPath(schema, 'children');
         expect(childrenTypeSchema?.safeParse(obj.children[0]).success).toBe(true);
@@ -77,7 +77,7 @@ describe('Zod test', () => {
         const childrenChildren = getZodSchemaAtSchemaDotPropPath(Nested, 'children.children');
         if( !nested.children ) throw new Error("noop");
         expect(!!childrenChildren).toBe(true);
-        expect(childrenChildren?.safeParse(nested.children[0].children[0]).success).toBe(true);
+        expect(childrenChildren?.safeParse(nested.children[0]!.children[0]).success).toBe(true);
     })
 
     test('convertSchemaToDotPropPathTree', () => {

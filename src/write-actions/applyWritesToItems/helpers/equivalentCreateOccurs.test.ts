@@ -43,7 +43,7 @@ describe('equivalentCreateOccurs', () => {
             'text': 'Right'
         }
 
-        expect(equivalentCreateOccurs(ObjSchema, ddl, existing, actions[0], actions)).toBe(false);
+        expect(equivalentCreateOccurs(ObjSchema, ddl, existing, actions[0]!, actions)).toBe(false);
 
         // This action creates parity with the existing, allowing the create to work
         actions.push({
@@ -63,7 +63,7 @@ describe('equivalentCreateOccurs', () => {
         })
 
         
-        expect(equivalentCreateOccurs(ObjSchema, ddl, existing, actions[0], actions)).toBe(true);
+        expect(equivalentCreateOccurs(ObjSchema, ddl, existing, actions[0]!, actions)).toBe(true);
 
     })
 })

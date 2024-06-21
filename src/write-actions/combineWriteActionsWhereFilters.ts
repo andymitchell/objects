@@ -69,7 +69,7 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
     })
 
     
-    const whereFilterForExisting:WhereFilterDefinition<T> = filtersForExisting.length>1 ? {
+    const whereFilterForExisting:WhereFilterDefinition<T> | undefined = filtersForExisting.length>1 ? {
         OR: filtersForExisting
     } : filtersForExisting[0]
 

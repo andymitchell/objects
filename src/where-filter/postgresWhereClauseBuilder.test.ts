@@ -159,9 +159,9 @@ describe('postgres where clause builder', () => {
         const tree = convertSchemaToDotPropPathTree(schema);
         const path = [];
         let target = tree.map['contact'];
-        while( target.parent ) {
-            path.unshift(target);
-            target = target.parent;
+        while( target!.parent ) {
+            path.unshift(target!);
+            target = target!.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
         expect(sa).toBe(undefined)
@@ -189,9 +189,9 @@ describe('postgres where clause builder', () => {
         const tree = convertSchemaToDotPropPathTree(schema);
         const path = [];
         let target = tree.map['contact.children'];
-        while( target.parent ) {
-            path.unshift(target);
-            target = target.parent;
+        while( target!.parent ) {
+            path.unshift(target!);
+            target = target!.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
         
@@ -226,9 +226,9 @@ describe('postgres where clause builder', () => {
         const tree = convertSchemaToDotPropPathTree(schema);
         const path = [];
         let target = tree.map['contact.children.family.grandchildren.name'];
-        while( target.parent ) {
-            path.unshift(target);
-            target = target.parent;
+        while( target!.parent ) {
+            path.unshift(target!);
+            target = target!.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
         

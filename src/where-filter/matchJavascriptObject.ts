@@ -70,12 +70,13 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
         // Test a single dotprop 
 
         const dotpropKey = Object.keys(filter)[0];
+        if( !dotpropKey ) return false;
         let objectValue = getProperty(object, dotpropKey, true);
         const dotpropFilter = filter[dotpropKey];
         if( objectValue===undefined ) {
             // It's possible that it's an array nested under an array (spreading), so needs to be broken down to test every combination
             const spreadArrays = getPropertySpreadingArrays(object, dotpropKey);
-            if( spreadArrays && spreadArrays.length && !(spreadArrays.length===1 && spreadArrays[0].value===undefined) ) {
+            if( spreadArrays && spreadArrays.length && !(spreadArrays.length===1 && spreadArrays[0]!.value===undefined) ) {
                 const orFilter:WhereFilterDefinition = {
                     OR: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
                 }

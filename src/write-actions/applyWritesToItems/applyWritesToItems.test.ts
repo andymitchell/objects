@@ -7,100 +7,101 @@ import { IUser } from "../auth/types";
 
 
 
+const ObjSchema = z.object({
+    id: z.string(),
+    text: z.string().optional(),
+    owner: z.string().optional(),
+    children: z.array(
+      z.object({
+        cid: z.string(),
+        name: z.string().optional(),
+        children: z.array(
+          z.object({
+            ccid: z.string(),
+          }).strict()
+        ),
+      }).strict()
+    ).optional(),
+  }).strict();
+  
+type Obj = z.infer<typeof ObjSchema>;
+
+const ddl:DDL<Obj> = {
+    version: 1,
+    lists: {
+        '.': {
+            primary_key: 'id'
+        },
+        'children': {
+            primary_key: 'cid',
+        },
+        'children.children': {
+            primary_key: 'ccid'
+        }
+    }
+}
+
+const obj1:Obj = {
+    id: '1'
+};
+const obj2:Obj = {
+    id: '2'
+};
+
+function testImmutableAndnplaceModes<T extends Record<string, any> = Obj>(callback:(name: 'immutable' | 'inplace', options:ApplyWritesToItemsOptions<T>) => void) {
+    callback("immutable", {});
+    callback("inplace", {in_place_mutation: true});
+}
+
+
+testImmutableAndnplaceModes((name, options) => {
+    test(`create [${name}]`, () => {
+
+        const data2 = JSON.parse(JSON.stringify(obj2)); //structuredClone(obj2);
+
+        const result = applyWritesToItems<Obj>(
+            [
+                {
+                    type: 'write', 
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: data2
+                    }
+                }
+            ]
+            ,
+            [
+                obj1
+            ], 
+            ObjSchema,
+            ddl,
+            undefined,
+            options
+        );
+
+        
+        expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
+        expect(
+            result.changes.added[0]!
+        ).toEqual(obj2);
+
+        
+        expect(
+            result.changes.final_items[1]
+        ).toEqual(obj2);
+
+        expect(
+            result.changes.final_items.length
+        ).toEqual(2);
+        
+    });
+})
+
 describe('applyWritesToItems test', () => {
     
     
-    const ObjSchema = z.object({
-        id: z.string(),
-        text: z.string().optional(),
-        owner: z.string().optional(),
-        children: z.array(
-          z.object({
-            cid: z.string(),
-            name: z.string().optional(),
-            children: z.array(
-              z.object({
-                ccid: z.string(),
-              }).strict()
-            ),
-          }).strict()
-        ).optional(),
-      }).strict();
-      
-    type Obj = z.infer<typeof ObjSchema>;
-
-    const ddl:DDL<Obj> = {
-        version: 1,
-        lists: {
-            '.': {
-                primary_key: 'id'
-            },
-            'children': {
-                primary_key: 'cid',
-            },
-            'children.children': {
-                primary_key: 'ccid'
-            }
-        }
-    }
-
-    const obj1:Obj = {
-        id: '1'
-    };
-    const obj2:Obj = {
-        id: '2'
-    };
-
-    function testImmutableAndnplaceModes<T extends Record<string, any> = Obj>(callback:(name: 'immutable' | 'inplace', options:ApplyWritesToItemsOptions<T>) => void) {
-        callback("immutable", {});
-        callback("inplace", {in_place_mutation: true});
-    }
-    
-    
-    testImmutableAndnplaceModes((name, options) => {
-        test(`create [${name}]`, () => {
-
-            const data2 = JSON.parse(JSON.stringify(obj2)); //structuredClone(obj2);
-
-            const result = applyWritesToItems<Obj>(
-                [
-                    {
-                        type: 'write', 
-                        ts: 0,
-                        uuid: '0',
-                        payload: {
-                            type: 'create',
-                            data: data2
-                        }
-                    }
-                ]
-                ,
-                [
-                    obj1
-                ], 
-                ObjSchema,
-                ddl,
-                undefined,
-                options
-            );
-
-            
-            expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
-            expect(
-                result.changes.added[0]!
-            ).toEqual(obj2);
-
-            
-            expect(
-                result.changes.final_items[1]
-            ).toEqual(obj2);
-
-            expect(
-                result.changes.final_items.length
-            ).toEqual(2);
-            
-        });
-    })
     
     testImmutableAndnplaceModes((name, options) => {
         test(`update [${name}]`, () => {
@@ -1415,7 +1416,65 @@ describe('applyWritesToItems test', () => {
         expect(finalItems[0]===originalItems[0]!).toBe(true);
         expect(finalItems[1]===originalItems[1]).toBe(true);
     })
-    
+});
+
+describe('Regression Tests', () => {
+    testImmutableAndnplaceModes((name, options) => {
+        test(`delete/create/delete/create works [${name}]`, () => {
+
+            const RegressSchema1 = z.object({id: z.string(), name: z.string()})
+            type Regress = z.infer<typeof RegressSchema1>;
+            const actions:WriteAction<Regress>[] = [
+                { "type": "write", "ts": 1721124239158, "uuid": "9de5231b-f5db-480a-8ede-9294d989fe47", "payload": { "type": "delete", "where": { "id": "1" } } }, 
+                { "type": "write", "ts": 1721124239175, "uuid": "f087dc19-438e-4f52-875f-1e6c6e4e8e37", "payload": { "type": "create", "data": { "id": "1", "name": "Bob" } } }, 
+                { "type": "write", "ts": 1721124239180, "uuid": "9e54e923-d0ed-4339-a910-f192eb5a8a2b", "payload": { "type": "delete", "where": { "id": "1" } } }, 
+                { "type": "write", "ts": 1721124239183, "uuid": "ba90fbc0-5712-4e5d-98c6-ccb293a5cc89", "payload": { "type": "create", "data": { "id": "1", "name": "Alice" } } }
+            ]
+
+
+            const user1:IUser = {
+                getUuid: () => 'user1',
+                getEmail: () => 'user1@gmail.com',
+                getID: () => 'user1'
+            }
+            const ddl:DDL<Regress> = {
+                version: 1, 
+                lists: {
+                    '.': {
+                        primary_key: 'id'
+                    }
+                }
+            }
+
+            const result = applyWritesToItems<Regress>(
+                actions, 
+                [], 
+                RegressSchema1,
+                ddl,
+                user1,
+                Object.assign(options, {
+                    attempt_recover_duplicate_create: false
+                })
+            );
+            expect(result.status).toBe('ok');
+
+
+            const result2 = applyWritesToItems<Regress>(
+                actions, 
+                [], 
+                RegressSchema1,
+                ddl,
+                user1,
+                Object.assign(options, {
+                    attempt_recover_duplicate_create: true
+                })
+            );
+            expect(result2.status).toBe('ok');
+            
+
+
+        })
+    });
 
 });
 

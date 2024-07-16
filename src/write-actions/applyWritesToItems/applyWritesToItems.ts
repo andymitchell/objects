@@ -15,6 +15,7 @@ import { IUser } from "../auth/types";
 import { checkPermission } from "./helpers/checkPermission";
 
 
+
 function getMutableItem<T extends Record<string, any>>(item:T):T {
     // If immer draft it must be restored before cloned:
     if( isDraft(item) ) item = current(item);
@@ -233,6 +234,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                     break;
                                 case 'delete':
                                     deleted = true;
+                                    existingIds.delete(pkValue);
                                     break;
                             }
                         }
@@ -268,8 +270,6 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
 
     
     if( failureTracker.length()>0 ) {
-
-
         // Mark every subsequent action after the failure as blocked 
         const failedActionUUID = failureTracker.get()[0].action.uuid;
         const index = writeActions.findIndex(x => x.uuid===failedActionUUID);

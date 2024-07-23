@@ -5,10 +5,12 @@ import { WriteActionFailuresErrorDetails } from "../../types";
 import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot";
 
 
-export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser):WriteActionFailuresErrorDetails | undefined {
+export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteActionFailuresErrorDetails | undefined {
     if( !ddl.permissions ) return undefined;
-    if( !DDLPermissionsSchema.safeParse(ddl.permissions).success ) {
-        return {type: 'permission_denied', reason: 'invalid-permissions'};
+    if( !verifiedPermissionsSchema ) {
+        if( !DDLPermissionsSchema.safeParse(ddl.permissions).success ) {
+            return {type: 'permission_denied', reason: 'invalid-permissions'};
+        }
     }
 
     if( user ) {

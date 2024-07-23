@@ -1,7 +1,7 @@
 {
     "compilerOptions": {
         "moduleResolution": "node",
-        "module": "ES2020",
+        "module": "ESNext",
         "strict": true,
         "noUncheckedIndexedAccess": true, // TODO Add this for safer code
         "noImplicitOverride": true, // TODO Add this for safer code

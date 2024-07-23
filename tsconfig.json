@@ -3,7 +3,7 @@
         "moduleResolution": "node",
         "module": "ES2020",
         "strict": true,
-        //"noUncheckedIndexedAccess": true, // TODO Add this for safer code
+        "noUncheckedIndexedAccess": true, // TODO Add this for safer code
         "noImplicitOverride": true, // TODO Add this for safer code
         "lib": [
             "ESNext"

@@ -85,8 +85,10 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
             let sa:SpreadedJsonbArrays | undefined;
 
             let subClause:string = '';
+            const treeNode = this.nodeMap[dotpropPath];
+            if( !treeNode ) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
             if( Array.isArray(filter) ) {
-                if( this.nodeMap[dotpropPath].kind!=='ZodArray' ) throw new Error("Cannot compare an array to a non-array");
+                if( treeNode.kind!=='ZodArray' ) throw new Error("Cannot compare an array to a non-array");
                 if( countArraysInPath===1 ) {
                     // Just do a direct comparison
                     return this.generateComparison(dotpropPath, filter, statementArguments);
@@ -97,7 +99,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                     sa = spreadJsonbArrays(this.sqlColumnName, path);
                     if( !sa ) throw new Error("Could not locate array in path: "+dotpropPath);
 
-                    if( this.nodeMap[dotpropPath].kind!=='ZodArray' ) throw new Error("Cannot compare an array to a non-array");
+                    if( treeNode.kind!=='ZodArray' ) throw new Error("Cannot compare an array to a non-array");
                     subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_column);
                 }
                 
@@ -114,7 +116,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                 if( isArrayValueComparisonElemMatch(filter) ) {
                     if( isWhereFilterDefinition(filter.elem_match) ) {
                         // Recurse
-                        const subPropertyMap = new PropertyMapSchema(this.nodeMap[dotpropPath].schema!, sa.output_column, true);
+                        const subPropertyMap = new PropertyMapSchema(treeNode.schema!, sa.output_column, true);
                         const result = _postgresWhereClauseBuilder(filter.elem_match, statementArguments, subPropertyMap);
                         //return result;
                         subClause = result;
@@ -134,7 +136,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                         const keys = Object.keys(filter) as Array<keyof typeof filter>;
                         let andClauses:string[] = [];
 
-                        const subPropertyMap = new PropertyMapSchema(this.nodeMap[dotpropPath].schema!, sa.output_column, true);
+                        const subPropertyMap = new PropertyMapSchema(treeNode.schema!, sa.output_column, true);
 
                         keys.forEach(key => {
                             const subFilter:WhereFilterDefinition = {[key]: filter[key]};
@@ -178,8 +180,10 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
     }
 
     protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
+        
         const optionalWrapper = (sqlIdentifier:string, query:string) => {
-            if( this.nodeMap[dotpropPath].optional_or_nullable ) {
+            if( !this.nodeMap[dotpropPath] ) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if( this.nodeMap[dotpropPath]!.optional_or_nullable ) {
                 return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
             }
             return query;
@@ -194,12 +198,12 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodNumber']);
 
             const operators = ValueComparisonNumericOperators
-                .filter((x):x is ValueComparisonNumericOperatorsTyped => x in filter)
+                .filter((x):x is ValueComparisonNumericOperatorsTyped => x in filter && filter[x]!==undefined && filter[x]!==null)
                 .map(x => {
                     const placeholder = this.generatePlaceholder(filter[x]!, statementArguments);
                     return ValueComparisonNumericOperatorsSqlFunctions[x](sqlIdentifier, placeholder);
                 });
-            return optionalWrapper(sqlIdentifier, operators.length>1? `(${operators.join(' AND ')})` : operators[0]);
+            return optionalWrapper(sqlIdentifier, operators.length>1? `(${operators.join(' AND ')})` : operators[0]!);
         
         } else if( isValueComparisonScalar(filter) ) {
             
@@ -264,18 +268,20 @@ function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter
                 if( type==='NOT' ) {
                     subClauseString =`NOT (${subClauses.join(' OR ')})`;
                 } else {
+                    if( typeof subClauses[0]!=='string' ) throw new Error("subClauses[0] was empty");
                     subClauseString = subClauses.length===1? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
                 }
                 andClauses = [...andClauses, subClauseString];
             }
         }
         
-        return andClauses.length===1? andClauses[0] : `(${andClauses.join(' AND ')})`;
+        return andClauses.length===1? andClauses[0]! : `(${andClauses.join(' AND ')})`;
 
     } else {
-        if( keys.length!==1 ) throw new Error("Bad number of keys - should have gone to logic filter.");
+        const key = keys[0];
+        if( typeof key!=='string' ) throw new Error("Bad number of keys - should have gone to logic filter.");
 
-        return propertySqlMap.generateSql(keys[0], filter[keys[0]] as WhereFilterDefinition, statementArguments);
+        return propertySqlMap.generateSql(key, filter[key] as WhereFilterDefinition, statementArguments);
 
 
     }
@@ -296,6 +302,7 @@ export function spreadJsonbArrays(column:string, nodesDesc:TreeNode[]):SpreadedJ
     let jsonbParts:string[] = [column];
     for( let i = 0; i < nodesDesc.length; i++ ) {
         const node = nodesDesc[i];
+        if( !node ) throw new Error("node was empty in spreadJsonbArrays");
         if( node.name ) {
             jsonbParts.push(`'${node.name}'`);
             if( node.kind==='ZodArray' ) {
@@ -317,7 +324,7 @@ export function spreadJsonbArrays(column:string, nodesDesc:TreeNode[]):SpreadedJ
 
     if( jsonbbArrayElementsParts.length===0 ) return undefined;
 
-    const output_column = jsonbbArrayElementsParts[jsonbbArrayElementsParts.length-1].output_column;
+    const output_column = jsonbbArrayElementsParts[jsonbbArrayElementsParts.length-1]!.output_column;
     return {
         sql: jsonbbArrayElementsParts.map(x => x.sql).join(` CROSS JOIN `),
         output_column,

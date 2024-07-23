@@ -43,7 +43,7 @@ class WriteActionSuccessesTracker<T extends Record<string, any>> {
 
     private findWriteActionSuccess(action:WriteAction<T>, createIfMissing?: boolean) {
         if( !this.actionsMap[action.uuid] && createIfMissing ) this.actionsMap[action.uuid] = {action, affected_items: []};
-        return this.actionsMap[action.uuid];
+        return this.actionsMap[action.uuid]!;
     }
 
     report(action:WriteAction<T>, item: T) {
@@ -157,6 +157,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
             for( let i = 0; i < wipItems.length; i++) {
                 if( failureTracker.shouldHalt() ) break;
                 const item = wipItems[i];
+                if( !item ) throw new Error(`Could not find item, suggesting wipItems has mutated such that i can't find it. Either it's a null entry, or the length has been shortened and i now extends it. Suggests bad logic in code. i: ${i}, length: ${wipItems.length}.`);
                 const pkValue = pk(item);
                 
 
@@ -271,7 +272,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
     
     if( failureTracker.length()>0 ) {
         // Mark every subsequent action after the failure as blocked 
-        const failedActionUUID = failureTracker.get()[0].action.uuid;
+        const failedActionUUID = failureTracker.get()[0]!.action.uuid;
         const index = writeActions.findIndex(x => x.uuid===failedActionUUID);
         if( index===-1 ) throw new Error("noop: the failed action should be known to the writeActions.");
         
@@ -316,9 +317,10 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
 function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>) {
     let finalItems = optionsIncDefaults.in_place_mutation? originalItems as T[] : [...originalItems] as T[];
     for( let i = 0; i < finalItems.length; i++ ) {
-        const pkValue = pk(finalItems[i]);
+        if( !finalItems[i] ) throw new Error(`finalItems[i] was empty, suggesting either an item has been nullified, or splicing has shortened the length such that i is beyond the end. i: ${i}, length: ${finalItems.length}`);
+        const pkValue = pk(finalItems[i]!);
         if( updatedHash[pkValue] ) {
-            finalItems[i] = updatedHash[pkValue];
+            finalItems[i] = updatedHash[pkValue]!;
         } else if( deletedHash[pkValue] ) {
             finalItems.splice(i, 1);
             i--;

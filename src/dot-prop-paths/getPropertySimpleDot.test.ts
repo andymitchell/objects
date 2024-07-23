@@ -29,8 +29,8 @@ describe('getPropertySpreadingArrays test', () => {
         ).toEqual([{"path":"log[0].affected_people","value":[{"name":"Bob"},{"name":"Alice"}]},{"path":"log[1].affected_people","value":[{"name":"Rita"}]},{"path":"log[2].affected_people","value":[]}]);
 
         // Test the path resolves in popular packages like dot-prop
-        setProperty(src, result[1].path, [{name: 'Too'}]);
-        expect(src.log[1].affected_people[0].name).toBe('Too');
+        setProperty(src, result[1]!.path, [{name: 'Too'}]);
+        expect(src.log[1]!.affected_people[0]!.name).toBe('Too');
     });
 
     test('non-array items are indexed', () => {
@@ -231,7 +231,7 @@ describe('attacks', () => {
         const result1 = getPropertySimpleDot(obj, path);
         //const result2 = getPropertyFast(obj, path);
         const result2 = getPropertySpreadingArrays(obj, path);
-        if( result1===undefined && result2.length===1 && result2[0].value===undefined ) {
+        if( result1===undefined && result2.length===1 && result2[0]!.value===undefined ) {
             return true;
         } else {
             path;

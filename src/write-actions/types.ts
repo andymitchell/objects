@@ -2,9 +2,10 @@ import { ZodIssueCode, z } from "zod";
 import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, PathValue } from "../dot-prop-paths/types";
 import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod";
-import isTypeEqual from "../utils/isTypeEqual";
+
 import { PrimaryKeyValue, PrimaryKeyValueSchema } from "../utils/getKeyValue";
 import { Draft } from "immer";
+import { isTypeEqual } from "@andyrmitchell/utils";
 
 
 

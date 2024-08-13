@@ -1,5 +1,6 @@
+import { isTypeEqual } from "@andyrmitchell/utils";
 import { z } from "zod";
-import isTypeEqual from "./isTypeEqual";
+
 
 export const PrimaryKeyValueSchema = z.union([z.string(), z.number()]);
 export type PrimaryKeyValue = string | number;

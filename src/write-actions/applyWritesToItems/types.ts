@@ -4,7 +4,8 @@ import { IfAny } from "../../types";
 import { EnsureRecord } from "../../types";
 import { AppliedWritesOutput, WriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types";
 import { z } from "zod";
-import isTypeEqual from "../../utils/isTypeEqual";
+import { isTypeEqual } from "@andyrmitchell/utils";
+
 
 export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 

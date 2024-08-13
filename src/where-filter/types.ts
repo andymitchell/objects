@@ -2,7 +2,7 @@
 import { z, ZodNumber, ZodOptional, ZodSchema, ZodType, ZodTypeDef } from "zod";
 import { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, PathValue, RemoveTrailingDot } from '../dot-prop-paths/types';
 import isPlainObject from "../utils/isPlainObject";
-import isTypeEqual from "../utils/isTypeEqual";
+
 import { ObjOrDraft } from "./matchJavascriptObject";
 
 

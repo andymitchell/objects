@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { EnsureRecord } from "../types";
+import { PrimaryKeyValue } from "../utils/getKeyValue";
 
 export type DotPropPathsRecord<T extends Record<string, any>> = {
     [P in DotPropPathsUnion<T> as string & P]: PathValue<T, P>
@@ -31,8 +32,12 @@ export type DotPropPathsIncArrayUnion<T extends Record<string,any>> = DotPropPat
 
 
 type Scalar = string | number | boolean | null | undefined;
+
 export type ScalarProperties<T> = { // Helper type to pick only scalar properties of an object
     [P in keyof T]: T[P] extends Scalar ? P : never
+}[keyof T];
+export type PrimaryKeyProperties<T> = { // Helper type to pick only scalar properties of an object
+    [P in keyof T]: T[P] extends PrimaryKeyValue ? P : never
 }[keyof T];
 type ObjectProperties<T> = { // Helper type to pick only non-scalar, non-array object properties
     [P in keyof T]: T[P] extends object ? (T[P] extends Array<any> ? never : P) : never

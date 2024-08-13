@@ -1,4 +1,4 @@
-import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsRecord, DotPropPathsUnion, DotPropPathsUnionScalar, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, ScalarProperties } from "../../dot-prop-paths/types";
+import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsRecord, DotPropPathsUnion, DotPropPathsUnionScalar, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, PrimaryKeyProperties, ScalarProperties } from "../../dot-prop-paths/types";
 import { PrimaryKeyValue } from "../../utils/getKeyValue";
 import { IfAny } from "../../types";
 import { EnsureRecord } from "../../types";
@@ -25,7 +25,7 @@ export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
 
 
 type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
-    primary_key: IfAny<T, string, ScalarProperties<T>>,// keyof T>,
+    primary_key: IfAny<T, string, PrimaryKeyProperties<T>>,// keyof T>,
     pre_triggers?: {
         trigger: (replacement: T, existing?: T) => T // Throws an error if expect halt
     }[],
@@ -94,4 +94,3 @@ export type DDL<T extends Record<string, any>> =
     
 
 //const b:DotPropPathsUnionScalar<{id: string, name: string, pet: {name: string}, children: {age: number, friends: {name: string}[]}[]}> = ''
-

@@ -94,3 +94,16 @@ export type DDL<T extends Record<string, any>> =
     
 
 //const b:DotPropPathsUnionScalar<{id: string, name: string, pet: {name: string}, children: {age: number, friends: {name: string}[]}[]}> = ''
+
+/*
+//const a:DDL<{id: string, name: string, pet: {name: string}}> = {
+const a:DDL<any> = {
+    version: 1,
+    lists: {
+        '.': {
+            'primary_key': 'name'
+        }
+    }
+}
+const c:PrimaryKeyValue = a.lists['.'].primary_key
+*/

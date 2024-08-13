@@ -36,7 +36,7 @@ type Scalar = string | number | boolean | null | undefined;
 export type ScalarProperties<T> = { // Helper type to pick only scalar properties of an object
     [P in keyof T]: T[P] extends Scalar ? P : never
 }[keyof T];
-export type PrimaryKeyProperties<T> = { // Helper type to pick only scalar properties of an object
+export type PrimaryKeyProperties<T> = { // Helper type to pick only string/number properties of an object
     [P in keyof T]: T[P] extends PrimaryKeyValue ? P : never
 }[keyof T];
 type ObjectProperties<T> = { // Helper type to pick only non-scalar, non-array object properties

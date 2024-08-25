@@ -1,5 +1,5 @@
 import { applyWritesToItems, checkPermission, DDL } from "./applyWritesToItems/index";
-import { IUser } from "./auth";
+import { isIUser, IUser } from "./auth";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters";
 import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, WriteActionFailuresErrorDetails, WriteActionSuccesses, createWriteActionSuccessesSchema } from "./types";
 
@@ -15,7 +15,8 @@ export const WriteActions = {
 }
 
 export {
-    assertArrayScope
+    assertArrayScope,
+    isIUser
 }
 
 export type {

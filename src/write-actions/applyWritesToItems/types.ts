@@ -26,7 +26,21 @@ export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
 
 
 type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
+    /**
+     * The main identifier
+     */
     primary_key: IfAny<T, string, PrimaryKeyProperties<T>>,// keyof T>,
+
+    /**
+     * Give guidance to what it can sort by. 
+     * 
+     * If this represents an API, you probably want to match the default ordering it uses.
+     */
+    default_order?: {
+        order_by_key: IfAny<T, string, PrimaryKeyProperties<T>>,
+        direction: 'asc' | 'desc'
+    },
+    
     pre_triggers?: {
         trigger: (replacement: T, existing?: T) => T // Throws an error if expect halt
     }[],

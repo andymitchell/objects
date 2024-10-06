@@ -23,7 +23,10 @@ export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
 }
 
 
-
+export type ListOrdering<T extends Record<string, any> = Record<string, any>> = {
+    order_by_key: IfAny<T, string, PrimaryKeyProperties<T>>,
+    direction: 'asc' | 'desc'
+}
 
 type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
     /**
@@ -36,11 +39,8 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
      * 
      * If this represents an API, you probably want to match the default ordering it uses.
      */
-    default_order?: {
-        order_by_key: IfAny<T, string, PrimaryKeyProperties<T>>,
-        direction: 'asc' | 'desc'
-    },
-    
+    default_order?: ListOrdering<T>,
+
     pre_triggers?: {
         trigger: (replacement: T, existing?: T) => T // Throws an error if expect halt
     }[],

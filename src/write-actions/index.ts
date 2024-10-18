@@ -1,7 +1,7 @@
 import { applyWritesToItems, checkPermission, DDL, ListOrdering } from "./applyWritesToItems/index";
 import { isIUser, IUser } from "./auth";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters";
-import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, WriteActionFailuresErrorDetails, WriteActionSuccesses, createWriteActionSuccessesSchema } from "./types";
+import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, WriteActionFailuresErrorDetails, WriteActionSuccesses, createWriteActionSuccessesSchema, AppliedWritesOutputResponse } from "./types";
 
 export const WriteActions = {
     applyWritesToItems,
@@ -28,6 +28,7 @@ export type {
     WriteActionFailures,
     WriteActionError,
     AppliedWritesOutput,
+    AppliedWritesOutputResponse,
     WriteActionAffectedItem,
     WriteActionFailureAffectedItem,
     WriteActionFailuresErrorDetails,

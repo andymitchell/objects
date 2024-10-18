@@ -3,7 +3,7 @@ import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, PrimaryKeyValueSchema,
 import isPlainObject from "./utils/isPlainObject";
 import { EnsureRecord } from "./types";
 import { IPropertyMap, PreparedWhereClauseStatement, WhereFilter, WhereFilterDefinition } from "./where-filter";
-import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser, isIUser, ListOrdering } from "./write-actions";
+import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser, isIUser, ListOrdering, AppliedWritesOutputResponse } from "./write-actions";
 import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop";
 
 
@@ -41,6 +41,7 @@ export type {
     WriteActionFailures, 
     WriteActionError, 
     AppliedWritesOutput, 
+    AppliedWritesOutputResponse,
     WriteActionAffectedItem, 
     WriteActionFailureAffectedItem, 
     WriteActionFailuresErrorDetails,

@@ -1018,9 +1018,11 @@ describe('applyWritesToItems test', () => {
 
             const ddlP = structuredClone(ddl);
             ddlP.permissions = {
-                type: 'owner_id_property',
-                path: 'owner',
-                format: 'uuid'
+                type: 'basic_ownership_property',
+                    property_type: 'id',
+                    path: 'owner',
+                    format: 'uuid'
+                
             }
 
             const user1:IUser = {
@@ -1066,9 +1068,11 @@ describe('applyWritesToItems test', () => {
 
             const ddlP = structuredClone(ddl);
             ddlP.permissions = {
-                type: 'owner_id_property',
-                path: 'owner',
-                format: 'uuid'
+                type: 'basic_ownership_property',
+                    property_type: 'id',
+                    path: 'owner',
+                    format: 'uuid'
+                
             }
 
             const user1:IUser = {
@@ -1121,9 +1125,11 @@ describe('applyWritesToItems test', () => {
 
             const ddlP = structuredClone(ddl);
             ddlP.permissions = {
-                type: 'owner_id_property',
-                path: 'owner',
-                format: 'uuid'
+                type: 'basic_ownership_property',
+                    property_type: 'id',
+                    path: 'owner',
+                    format: 'uuid'
+                
             }
 
             const user1:IUser = {
@@ -1174,9 +1180,11 @@ describe('applyWritesToItems test', () => {
 
             const ddlP = structuredClone(ddl);
             ddlP.permissions = {
-                type: 'owner_id_property',
-                path: 'owner',
-                format: 'uuid'
+                type: 'basic_ownership_property',
+                    property_type: 'id',
+                    path: 'owner',
+                    format: 'uuid'
+                
             }
 
             const user1:IUser = {
@@ -1242,9 +1250,11 @@ describe('applyWritesToItems test', () => {
 
             const ddlP = structuredClone(ddl);
             ddlP.permissions = {
-                type: 'owner_id_property',
-                path: 'owner',
-                format: 'uuid'
+                type: 'basic_ownership_property',
+                    property_type: 'id',
+                    path: 'owner',
+                    format: 'uuid'
+                
             }
 
             const user1:IUser = {
@@ -1314,9 +1324,11 @@ describe('applyWritesToItems test', () => {
 
             const ddlP = structuredClone(ddl);
             ddlP.permissions = {
-                type: 'owner_id_property',
-                path: 'owner',
-                format: 'uuid'
+                type: 'basic_ownership_property',
+                    property_type: 'id',
+                    path: 'owner',
+                    format: 'uuid'
+                
             }
 
             const user1:IUser = {

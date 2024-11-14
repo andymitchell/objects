@@ -34,19 +34,19 @@ export type DotPropPathsIncArrayUnion<T extends Record<string,any>> = DotPropPat
 type Scalar = string | number | boolean | null | undefined;
 
 export type ScalarProperties<T> = { // Helper type to pick only scalar properties of an object
-    [P in keyof T]: T[P] extends Scalar ? P : never
+    [P in keyof T]: NonNullable<T[P]> extends Scalar ? P : never
 }[keyof T];
 export type PrimaryKeyProperties<T> = { // Helper type to pick only string/number properties of an object
     [P in keyof T]: T[P] extends PrimaryKeyValue ? P : never
 }[keyof T];
 type ObjectProperties<T> = { // Helper type to pick only non-scalar, non-array object properties
-    [P in keyof T]: T[P] extends object ? (T[P] extends Array<any> ? never : P) : never
+    [P in keyof T]: NonNullable<T[P]> extends object ? (NonNullable<T[P]> extends Array<any> ? never : P) : never
 }[keyof T];
 type ScalarPath<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
     {
         [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${string & P}` :
             P extends ObjectProperties<T>
-            ? `${Prefix}${string & P}.${ScalarPath<T[P]>}`
+            ? `${Prefix}${string & P}.${ScalarPath<NonNullable<T[P]>>}`
             : never;
     }[keyof T];
 type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
@@ -57,9 +57,9 @@ type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix exten
     : {
         [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${string & P}` :
             P extends ObjectProperties<T>
-            ? `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<T[P]>}`
-            : P extends keyof T ? (T[P] extends Array<any> ? (T[P][number] extends object ?
-                `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<T[P][number]>}` : never) : never)
+            ? `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<NonNullable<T[P]>>}`
+            : P extends keyof T ? (NonNullable<T[P]> extends Array<any> ? (NonNullable<T[P]>[number] extends object ?
+                `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<NonNullable<T[P]>[number]>}` : never) : never)
             : never;
     }[keyof T];
 type ArrayOfScalarProperties<T> = {
@@ -73,12 +73,12 @@ type ScalarPathToScalarArraySpreadingObjectArrays<T extends Record<string, any>,
     : {
         [P in keyof T]-?: P extends ScalarProperties<T> ? never :
             P extends ObjectProperties<T>
-            ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<T[P]>}`
+            ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<NonNullable<T[P]>>}`
             : P extends ArrayOfScalarProperties<T> ? `${Prefix}${string & P}`
-            : (T[P] extends Array<any> 
-                ? (T[P][number] extends object 
-                    ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<T[P][number]>}` 
-                    : (T[P][number] extends Scalar 
+            : (NonNullable<T[P]> extends Array<any> 
+                ? (NonNullable<T[P]>[number] extends object 
+                    ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<NonNullable<T[P]>[number]>}` 
+                    : (NonNullable<T[P]>[number] extends Scalar 
                         ? `${Prefix}${string & P}` 
                         : never))
                 : never);

@@ -54,34 +54,61 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
 }
 
 const PermissionIdFormatSchema = z.union([z.literal('uuid'), z.literal('email')]);
-export const DDLPermissionsSchema = z.union([
+export const DDLPermissionPropertySchema = z.union([
     z.object({
-        type: z.literal('owner_id_property'),
+        property_type: z.literal('id'),
         path: z.string(),
         format: PermissionIdFormatSchema
     }),
     z.object({
-        type: z.literal('owner_id_in_scalar_array'),
+        property_type: z.literal('id_in_scalar_array'),
         path: z.string(),
         format: PermissionIdFormatSchema
     })
 ])
+export const DDLPermissionsSchema = z.union([
+    z.object({
+        type: z.literal('basic_ownership_property')
+    }).and(DDLPermissionPropertySchema),
+    z.object({
+        type: z.literal('opa') // TODO
+    })
+])
 
 type PermissionIdFormat = 'uuid' | 'email';
-export type DDLPermissions<T extends Record<string, any> = Record<string, any>> = {
-    type: 'owner_id_property',
-    path: DotPropPathsUnionScalarSpreadingObjectArrays<T>,
-    format: PermissionIdFormat
-} | {
-    type: 'owner_id_in_scalar_array',
-    path: DotPropPathsUnionScalarArraySpreadingObjectArrays<T>, 
-    format: PermissionIdFormat
-}/* | {
+export type DDLPermissionProperty<T extends Record<string, any> = Record<string, any>> = 
+    {
+        property_type: 'id',
+        path: DotPropPathsUnionScalarSpreadingObjectArrays<T>,
+        format: PermissionIdFormat,
+        /**
+         * The person who will become the new owner, if they accept it. 
+         * 
+         * Beware this currently gives complete editing power to this person (as well as the existing owner). You'll need to manually add additional controls to limit the changes they can make, or limit the duration.
+         */
+        transferring_to_path?: DotPropPathsUnionScalarSpreadingObjectArrays<T>,
+    } | {
+        property_type: 'id_in_scalar_array',
+        path: DotPropPathsUnionScalarArraySpreadingObjectArrays<T>, 
+        format: PermissionIdFormat
+    }
+export type DDLPermissions<T extends Record<string, any> = Record<string, any>> = 
+    {
+        /**
+         * Only an owner can make changes to the object. 
+         * 
+         * This is a very basic implementation with no granularity. 
+         * 
+         * For more granularity, consider using/implementing OPA. Or provide a manual solution outside the scope of this package (e.g. if the item is stored in Postgres, handle it like normal DB permissions)
+         */
+        type: 'basic_ownership_property',
+    } & DDLPermissionProperty<T>
+    /* | {
         type: 'opa',
         wasm_path: string, // https://stackoverflow.com/questions/49611290/using-webassembly-in-chrome-extension https://groups.google.com/a/chromium.org/g/chromium-extensions/c/zVaQo3jpSpw/m/932YZv2UAgAJ 
         on_error: (item: T, writeAction: WriteAction<T>) => T | void
     },*/
-isTypeEqual<z.infer<typeof DDLPermissionsSchema>['type'], DDLPermissions<any>['type']>(true);
+isTypeEqual<z.infer<typeof DDLPermissionPropertySchema>['property_type'], DDLPermissionProperty<any>['property_type']>(true);
 isTypeEqual<z.infer<typeof PermissionIdFormatSchema>, PermissionIdFormat>(true);
 
 type DDLRoot<T extends Record<string, any> = Record<string, any>> = {

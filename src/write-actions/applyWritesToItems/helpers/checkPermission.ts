@@ -14,38 +14,50 @@ export function checkPermission<T extends Record<string, any>>(item:Readonly<T> 
     }
 
     if( user ) {
-        if( ddl.permissions.type==='owner_id_property' || ddl.permissions.type==='owner_id_in_scalar_array' ) {
-            let id: string | undefined;
-            if( ddl.permissions.format==='uuid' ) {
-                id = user.getUuid();
-            } else if( ddl.permissions.format==='email' ) {
-                id = user.getEmail();
-            }
-            if( id ) {
-                if( ddl.permissions.format==='email' && !/.+\@.+\..+/.test(id) ) {
-                    return {type: 'permission_denied', reason: 'expected-owner-email'};
-                } else {
-                
-                    const arrayValues = getPropertySpreadingArrays(item, ddl.permissions.path);
+        if( ddl.permissions.type==='basic_ownership_property' ) {
+            if( ddl.permissions.property_type==='id' || ddl.permissions.property_type==='id_in_scalar_array' ) {
+                let id: string | undefined;
+                if( ddl.permissions.format==='uuid' ) {
+                    id = user.getUuid();
+                } else if( ddl.permissions.format==='email' ) {
+                    id = user.getEmail();
+                }
+                if( id ) {
+                    if( ddl.permissions.format==='email' && !/.+\@.+\..+/.test(id) ) {
+                        return {type: 'permission_denied', reason: 'expected-owner-email'};
+                    } else {
                     
-                    const passed = arrayValues.some(arrayValue => {
-                        if( ddl.permissions!.type==='owner_id_in_scalar_array' && Array.isArray(arrayValue.value) ) {
-                            return arrayValue.value.includes(id);
-                        } else if( ddl.permissions!.type==='owner_id_property' ) {
-                            return arrayValue.value===id
+                        const arrayValues = getPropertySpreadingArrays(item, ddl.permissions.path);
+                        
+                        const passed = arrayValues.some(arrayValue => {
+                            if( ddl.permissions!.property_type==='id_in_scalar_array' && Array.isArray(arrayValue.value) ) {
+                                return arrayValue.value.includes(id);
+                            } else if( ddl.permissions!.property_type==='id' ) {
+                                return arrayValue.value===id
+                            }
+                        })
+
+                        let secondaryPassed = false;
+                        if( ddl.permissions!.property_type==='id' && ddl.permissions!.transferring_to_path ) {
+                            const secondaryArrayValues = getPropertySpreadingArrays(item, ddl.permissions.transferring_to_path);
+                            console.log({secondaryArrayValues})
+                            secondaryPassed = secondaryArrayValues.some(arrayValue => {
+                                return arrayValue.value===id
+                            })
+    
                         }
-                    })
-                    
-                    if( !passed ) {
-                        return {'type': 'permission_denied', reason: 'not-owner'};
+                        
+                        if( !passed && !secondaryPassed ) {
+                            return {'type': 'permission_denied', reason: 'not-owner'};
+                        }
+                        
                     }
-                    
+                } else {
+                    return {type: 'permission_denied', reason: 'no-owner-id'};
                 }
             } else {
-                return {type: 'permission_denied', reason: 'no-owner-id'};
+                return {type: 'permission_denied', reason: 'unknown-permission'};
             }
-        } else {
-            return {type: 'permission_denied', reason: 'unknown-permission'};
         }
     } else {
         return {type: 'permission_denied', reason: 'no-owner-id'};

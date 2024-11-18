@@ -71,6 +71,9 @@ export const DDLPermissionsSchema = z.union([
         type: z.literal('basic_ownership_property')
     }).and(DDLPermissionPropertySchema),
     z.object({
+        type: z.literal('none') 
+    }),
+    z.object({
         type: z.literal('opa') // TODO
     })
 ])
@@ -103,6 +106,12 @@ export type DDLPermissions<T extends Record<string, any> = Record<string, any>> 
          */
         type: 'basic_ownership_property',
     } & DDLPermissionProperty<T>
+    | {
+        /**
+         * Anyone can make changes 
+         */
+        type: 'none'
+    }
     /* | {
         type: 'opa',
         wasm_path: string, // https://stackoverflow.com/questions/49611290/using-webassembly-in-chrome-extension https://groups.google.com/a/chromium.org/g/chromium-extensions/c/zVaQo3jpSpw/m/932YZv2UAgAJ 
@@ -113,7 +122,7 @@ isTypeEqual<z.infer<typeof PermissionIdFormatSchema>, PermissionIdFormat>(true);
 
 type DDLRoot<T extends Record<string, any> = Record<string, any>> = {
     version: number,
-    permissions?: DDLPermissions<T>
+    permissions: DDLPermissions<T>
 }
 export type ListRules<T extends Record<string, any> = Record<string, any>> = ListRulesCore<T>
 

@@ -6,7 +6,7 @@ import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertyS
 
 
 export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteActionFailuresErrorDetails | undefined {
-    if( !ddl.permissions ) return undefined;
+    if( !ddl.permissions || ddl.permissions.type==='none' ) return undefined;
     if( !verifiedPermissionsSchema ) {
         if( !DDLPermissionsSchema.safeParse(ddl.permissions).success ) {
             return {type: 'permission_denied', reason: 'invalid-permissions'};
@@ -30,10 +30,14 @@ export function checkPermission<T extends Record<string, any>>(item:Readonly<T> 
                         const arrayValues = getPropertySpreadingArrays(item, ddl.permissions.path);
                         
                         const passed = arrayValues.some(arrayValue => {
-                            if( ddl.permissions!.property_type==='id_in_scalar_array' && Array.isArray(arrayValue.value) ) {
-                                return arrayValue.value.includes(id);
-                            } else if( ddl.permissions!.property_type==='id' ) {
-                                return arrayValue.value===id
+                            if( ddl.permissions.type==='basic_ownership_property' ) {
+                                if( ddl.permissions!.property_type==='id_in_scalar_array' && Array.isArray(arrayValue.value) ) {
+                                    return arrayValue.value.includes(id);
+                                } else if( ddl.permissions!.property_type==='id' ) {
+                                    return arrayValue.value===id
+                                }
+                            } else {
+                                throw new Error("typeguard noop");
                             }
                         })
 

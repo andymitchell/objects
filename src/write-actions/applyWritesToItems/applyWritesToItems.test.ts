@@ -7,6 +7,8 @@ import { IUser } from "../auth/types";
 
 
 
+
+
 const ObjSchema = z.object({
     id: z.string(),
     text: z.string().optional(),
@@ -38,6 +40,9 @@ const ddl:DDL<Obj> = {
         'children.children': {
             primary_key: 'ccid'
         }
+    },
+    permissions: {
+        type: 'none'
     }
 }
 
@@ -81,6 +86,7 @@ testImmutableAndnplaceModes((name, options) => {
             options
         );
 
+        
         
         expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
         expect(
@@ -1455,6 +1461,9 @@ describe('Regression Tests', () => {
                     '.': {
                         primary_key: 'id'
                     }
+                },
+                permissions: {
+                    type: 'none'
                 }
             }
 

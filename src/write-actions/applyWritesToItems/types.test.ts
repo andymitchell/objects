@@ -32,6 +32,9 @@ function typeCheck() {
             'children.children.children': {
                 primary_key: 'cccid'
             }
+        },
+        permissions: {
+            type: 'none'
         }
     }
 
@@ -47,6 +50,9 @@ function typeCheck() {
             '.': {
                 primary_key: 'whatever'
             }
+        },
+        permissions: {
+            type: 'none'
         }
     }
 
@@ -57,6 +63,9 @@ function typeCheck() {
                 
                 primary_key: 'id'
             }
+        },
+        permissions: {
+            type: 'none'
         }
     }   
 }

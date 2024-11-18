@@ -32,6 +32,9 @@ describe('combineWriteActionsWhereFilters', () => {
             'children.children': {
                 primary_key: 'ccid'
             }
+        },
+        permissions: {
+            type: 'none'
         }
     }
 

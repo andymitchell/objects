@@ -1,19 +1,19 @@
-import cloneDeepAndSafe from "./cloneDeepAndSafe";
+import cloneDeepSafe from "./cloneDeepSafe";
 
-describe('cloneDeepAndSafe', () => {
+describe('cloneDeepSafe', () => {
 
     
     describe('circular', () => {
         test('basic', () => {
             const obj = {hello: "world", child: {goodbye: "to you"}};
-            expect(cloneDeepAndSafe(obj, {strip_circular: true})).toEqual(obj);
+            expect(cloneDeepSafe(obj, {strip_circular: true})).toEqual(obj);
     
         })
     
         test('verify it is cloned', () => {
             const obj = {hello: "world", child: {goodbye: "to you"}};
-            expect(cloneDeepAndSafe(obj, {strip_circular: true})===obj).toBe(false);
-            expect(cloneDeepAndSafe(obj.child, {strip_circular: true})===obj.child).toBe(false);
+            expect(cloneDeepSafe(obj, {strip_circular: true})===obj).toBe(false);
+            expect(cloneDeepSafe(obj.child, {strip_circular: true})===obj.child).toBe(false);
             expect(obj.child===obj.child).toBe(true);
     
         })
@@ -28,9 +28,9 @@ describe('cloneDeepAndSafe', () => {
                 },
             };
             
-            const result = cloneDeepAndSafe(obj, {strip_circular: true});
+            const result = cloneDeepSafe(obj, {strip_circular: true});
             
-            expect(cloneDeepAndSafe(obj, {strip_circular: true})).toEqual(obj);
+            expect(cloneDeepSafe(obj, {strip_circular: true})).toEqual(obj);
             
         })
     
@@ -44,7 +44,7 @@ describe('cloneDeepAndSafe', () => {
             };
             obj.b.e = obj;
             
-            const result = cloneDeepAndSafe(obj, {strip_circular: true});
+            const result = cloneDeepSafe(obj, {strip_circular: true});
             
             expect(result).toEqual({
                 ...obj,
@@ -74,7 +74,7 @@ describe('cloneDeepAndSafe', () => {
             }
             expect(error).toBe(true);
             
-            const result = JSON.stringify(cloneDeepAndSafe(obj, {strip_circular: true}));
+            const result = JSON.stringify(cloneDeepSafe(obj, {strip_circular: true}));
             
             expect(result).toBe("{\"a\":1,\"b\":{\"c\":2,\"e\":\"[Circular *]\"}}")
             
@@ -94,7 +94,7 @@ describe('cloneDeepAndSafe', () => {
                 ]
             };
             
-            const result = cloneDeepAndSafe(obj, {strip_keys_exact: ['b.c']});
+            const result = cloneDeepSafe(obj, {strip_keys_exact: ['b.c']});
             
             expect(result).toEqual({
                 ...obj,

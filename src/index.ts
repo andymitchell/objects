@@ -5,9 +5,16 @@ import { EnsureRecord } from "./types";
 import { IPropertyMap, PreparedWhereClauseStatement, WhereFilter, WhereFilterDefinition } from "./where-filter";
 import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser, isIUser, ListOrdering, AppliedWritesOutputResponse } from "./write-actions";
 import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop";
+import cloneDeepSafe from "./utils/cloneDeepSafe";
 
 
-export {isPlainObject, safeKeyValue, makePrimaryKeyGetter, PrimaryKeyValueSchema};
+export {
+    isPlainObject, 
+    safeKeyValue, 
+    cloneDeepSafe,
+    makePrimaryKeyGetter, 
+    PrimaryKeyValueSchema
+};
 export type {PrimaryKeyValue, PrimaryKeyGetter}
 
 export {WhereFilter};

@@ -76,6 +76,24 @@ export function standardTests(testConfig:StandardTestConfig) {
         
         });
     }
+
+    
+    test('Match all', async () => {
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    emailAddress: 'andy@andy.com'
+                }
+            },
+            {},
+            ContactSchema
+        );
+        
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(true);
+    });
+    
     
     test('Match name', async () => {
         const result = await matchJavascriptObject(

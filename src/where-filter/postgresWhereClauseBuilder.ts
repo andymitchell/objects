@@ -249,9 +249,13 @@ export class PropertyMap<T extends Record<string, any> = Record<string, any>> ex
 
 function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:IPropertyMap<T>):string {
     
-    // If there's more than 1 key on the filter, split it formally into an AND 
+    
     const keys = Object.keys(filter) as Array<keyof typeof filter>;
-    if( keys.length>1 ) {
+    if( keys.length===0 ) {
+        // If there are no keys on the filter, there is no filter. Therefore return all. 
+        return '';
+    } else if( keys.length>1 ) {
+        // If there's more than 1 key on the filter, split it formally into an AND 
         filter = {
             AND: keys.map(key => ({[key]: filter[key]}))
         }

@@ -53,7 +53,13 @@ describe('postgres where clause builder', () => {
                 throw e;
             }
 
-            const queryStr = `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.whereClauseStatement}`;
+            let queryStr:string;
+            if( clause.whereClauseStatement ) {
+                queryStr = `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.whereClauseStatement}`;
+            } else {
+                queryStr = `SELECT * FROM ${schemaScope('test_table_123')}`;
+            }
+            
             try {
                 const result = await db.query(queryStr, clause.statementArguments);
                 

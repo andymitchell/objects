@@ -51,9 +51,21 @@ export default matchJavascriptObject;
 
 function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {
     
-    // If there's more than 1 key on the filter, split it formally into an AND 
+    
+
+    
+    
+    
+    
+
+
     const keys = Object.keys(filter) as Array<keyof typeof filter>;
-    if( keys.length>1 ) {
+    if( keys.length===0 ) {
+        // If there are no keys on the filter, there is no filter. Therefore return all. 
+        return true;
+        
+    } else if( keys.length>1 ) {
+        // If there's more than 1 key on the filter, split it formally into an AND 
         filter = {
             AND: keys.map(key => ({[key]: filter[key]}))
         }

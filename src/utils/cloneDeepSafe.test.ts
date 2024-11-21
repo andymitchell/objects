@@ -3,7 +3,7 @@ import cloneDeepSafe from "./cloneDeepSafe";
 describe('cloneDeepSafe', () => {
 
     
-    describe('circular', () => {
+    describe('strip_circular', () => {
         test('basic', () => {
             const obj = {hello: "world", child: {goodbye: "to you"}};
             expect(cloneDeepSafe(obj, {strip_circular: true})).toEqual(obj);
@@ -81,7 +81,7 @@ describe('cloneDeepSafe', () => {
         })
     })
 
-    describe('strip keys', () => {
+    describe('strip_keys_exact', () => {
         test('strip exact', () => {
             const obj = {
                 a: 1,
@@ -106,6 +106,102 @@ describe('cloneDeepSafe', () => {
             
         })
     })
-    
+
+
+    describe('strip_keys_regexp', () => {
+        test('strip regexp', () => {
+            const obj = {
+                a: 1,
+                b: {
+                    c: 2,
+                    d: null,
+                },
+                e: [
+                    {f: true}
+                ]
+            };
+            
+            const result = cloneDeepSafe(obj, {strip_keys_regexp: [new RegExp('b.(c|d)')]});
+            
+            expect(result).toEqual({
+                ...obj,
+                b: {
+                    c: undefined,
+                    d: undefined
+                }
+            });
+            
+        })
+    })
+
+    describe('strip_non_serializable_under_keys', () => {
+
+        test('function', () => {
+            const obj = {
+                a: 1,
+                b: {
+                    c: 2,
+                    d: () => true,
+                },
+            };
+            
+            
+            const result = cloneDeepSafe(obj, {strip_non_serializable_under_keys: ['b']});
+            
+            expect(result).toEqual({
+                ...obj,
+                b: {
+                    ...obj.b,
+                    d: undefined
+                }
+            });
+        })
+
+        test('root function', () => {
+            const obj = {
+                a: 1,
+                b: () => true
+            };
+            
+            
+            const result = cloneDeepSafe(obj, {strip_non_serializable_under_keys: ['']});
+            
+            expect(result).toEqual({
+                ...obj,
+                b: undefined
+            });
+        })
+
+
+        test('only direct descendents', () => {
+            const obj = {
+                a: 1,
+                b: {
+                    c: 2,
+                    d: () => true,
+                },
+            };
+            
+            
+            const result = cloneDeepSafe(obj, {strip_non_serializable_under_keys: ['']});
+            
+            expect(result).toEqual(obj);
+        })
+
+        test('native', () => {
+            const obj = {
+                a: 1,
+                b: globalThis
+            };
+            
+            const result = cloneDeepSafe(obj, {strip_non_serializable_under_keys: ['']});
+            
+            expect(result).toEqual({
+                ...obj,
+                b: undefined
+            });
+        })
+
+    })
 
 })

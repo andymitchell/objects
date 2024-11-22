@@ -44,7 +44,6 @@ export function checkPermission<T extends Record<string, any>>(item:Readonly<T> 
                         let secondaryPassed = false;
                         if( ddl.permissions!.property_type==='id' && ddl.permissions!.transferring_to_path ) {
                             const secondaryArrayValues = getPropertySpreadingArrays(item, ddl.permissions.transferring_to_path);
-                            console.log({secondaryArrayValues})
                             secondaryPassed = secondaryArrayValues.some(arrayValue => {
                                 return arrayValue.value===id
                             })

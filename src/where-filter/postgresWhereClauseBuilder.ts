@@ -225,9 +225,19 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             //debugger;
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
+        } else if( filter===undefined ) {
+            // Want it to return nothing (same as matchJavascriptObject), so treat it as a null
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IS NULL`);
         } else {
             //debugger;
-            throw new Error("Unknown filter type");
+            let filterString = 'na';
+            try {
+                filterString = JSON.stringify(filter);
+            } finally {
+                throw new Error("Unknown filter type: "+filterString);
+            }
+            
         }
     }
 }

@@ -93,6 +93,8 @@ export function standardTests(testConfig:StandardTestConfig) {
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(true);
     });
+
+    
     
     
     test('Match name', async () => {
@@ -1533,4 +1535,27 @@ export function standardTests(testConfig:StandardTestConfig) {
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(false);
     });
+
+
+    test('appropriately handles undefined values [regression]', async () => {
+        
+
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    emailAddress: 'andy@andy.com'
+                }
+            },
+            {
+                OR: [
+                    {'contact.name': undefined}
+                ]
+            },
+            ContactSchema
+        );
+        
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(false);
+    })
 }

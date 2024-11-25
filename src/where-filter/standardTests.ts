@@ -1560,7 +1560,7 @@ export function standardTests(testConfig:StandardTestConfig) {
     })
 
 
-    test('handles {OR: []} [regression]', async () => {
+    test('handles {OR: []} - match nothing because no conditions exist to succeed [regression]', async () => {
         
 
         const result = await matchJavascriptObject(
@@ -1580,7 +1580,7 @@ export function standardTests(testConfig:StandardTestConfig) {
 		expect(result).toBe(false);
     })
 
-    test('handles {AND: []} [regression]', async () => {
+    test('handles {AND: []} - match everything because no conditions exist to fail [regression]', async () => {
         
 
         const result = await matchJavascriptObject(
@@ -1597,6 +1597,6 @@ export function standardTests(testConfig:StandardTestConfig) {
         );
         
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+		expect(result).toBe(true);
     })
 }

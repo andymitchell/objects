@@ -285,7 +285,11 @@ function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter
                     if( typeof subClauses[0]!=='string' ) throw new Error("subClauses[0] was empty");
                     subClauseString = subClauses.length===1? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
                 } else {
-                    subClauseString = '1 = 0'; // Match nothing
+                    if( type==='AND' ) {
+                        subClauseString = '1 = 1'; // Match everything because no conditions exist to fail
+                    } else {
+                        subClauseString = '1 = 0'; // Match nothing because no conditions exist to succeed
+                    }
                 }
                 andClauses = [...andClauses, subClauseString];
             }

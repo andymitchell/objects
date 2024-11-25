@@ -281,9 +281,11 @@ function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter
                 const subClauses = [...filterType].map(subFilter => _postgresWhereClauseBuilder(subFilter, statementArguments, propertySqlMap));
                 if( type==='NOT' ) {
                     subClauseString =`NOT (${subClauses.join(' OR ')})`;
-                } else {
+                } else if( subClauses.length>0 ) {
                     if( typeof subClauses[0]!=='string' ) throw new Error("subClauses[0] was empty");
                     subClauseString = subClauses.length===1? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
+                } else {
+                    subClauseString = '1 = 0'; // Match nothing
                 }
                 andClauses = [...andClauses, subClauseString];
             }

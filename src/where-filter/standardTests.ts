@@ -1558,4 +1558,45 @@ export function standardTests(testConfig:StandardTestConfig) {
         if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
 		expect(result).toBe(false);
     })
+
+
+    test('handles {OR: []} [regression]', async () => {
+        
+
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    emailAddress: 'andy@andy.com'
+                }
+            },
+            {
+                OR: []
+            },
+            ContactSchema
+        );
+        
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(false);
+    })
+
+    test('handles {AND: []} [regression]', async () => {
+        
+
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    emailAddress: 'andy@andy.com'
+                }
+            },
+            {
+                AND: []
+            },
+            ContactSchema
+        );
+        
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(false);
+    })
 }

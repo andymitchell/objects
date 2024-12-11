@@ -17,7 +17,7 @@ export interface WriteStrategy<T extends Record<string, any>> {
 }
 
 
-export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
+export type ApplyWritesToItemsOptions<T extends Record<string, any> = Record<string, any>> = {
     /**
      * By default, any error in any action will cause nothing to change. 
      * 

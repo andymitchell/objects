@@ -1,4 +1,4 @@
-import { applyWritesToItems, checkPermission, DDL, ListOrdering } from "./applyWritesToItems/index";
+import { applyWritesToItems, ApplyWritesToItemsOptions, checkPermission, DDL, ListOrdering } from "./applyWritesToItems/index";
 import { isIUser, IUser } from "./auth";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters";
 import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, WriteActionFailuresErrorDetails, WriteActionSuccesses, createWriteActionSuccessesSchema, AppliedWritesOutputResponse } from "./types";
@@ -24,6 +24,7 @@ export type {
     WriteActionPayload, 
     DDL,
     ListOrdering,
+    ApplyWritesToItemsOptions,
     WriteActionSuccesses,
     WriteActionFailures,
     WriteActionError,

@@ -16,9 +16,24 @@ export interface WriteStrategy<T extends Record<string, any>> {
     update_handler: (writeActionPayload: WriteActionPayloadUpdate<T>, target: T) => T
 }
 
+
 export type ApplyWritesToItemsOptions<T extends Record<string, any>> = {
+    /**
+     * By default, any error in any action will cause nothing to change. 
+     * 
+     * If enabled, this will allow the actions to take effect, up until the first one that fails. All subsequent actions will then fail regardless of their viability. 
+     */
     allow_partial_success?: boolean,
-    attempt_recover_duplicate_create?: boolean,
+
+    /**
+     * Define what will happen if the create action has the same ID as an existing item
+     * - 'never': [default] the create will fail
+     * - 'if-identical': the create will only succeed if the existing item has the same properties as the new one
+     * - 'always': the created item will always succeed, effectively updating the existing item with the new properties
+     */
+    attempt_recover_duplicate_create?: 'never' | 'if-identical' | 'always-update',
+
+
     in_place_mutation?: boolean  // Use for Immer
 }
 

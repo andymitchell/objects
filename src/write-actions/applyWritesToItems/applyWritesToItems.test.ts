@@ -890,7 +890,7 @@ describe('applyWritesToItems test', () => {
     
 
     testImmutableAndnplaceModes((name, options) => {
-        test(`attempt_recover_duplicate_create [${name}]`, () => {
+        test(`attempt_recover_duplicate_create if-identical [${name}]`, () => {
 
             const actions:WriteAction<Obj>[] = [
                 {
@@ -918,12 +918,10 @@ describe('applyWritesToItems test', () => {
                 ObjSchema,
                 ddl,
                 undefined,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true
-                    },
-                    options
-                )
+                {
+                    attempt_recover_duplicate_create: 'if-identical',
+                    ...options
+                }
             );
 
             expect(result.status).toBe('error');
@@ -972,12 +970,10 @@ describe('applyWritesToItems test', () => {
                 ObjSchema,
                 ddl,
                 undefined,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true
-                    },
-                    options
-                )
+                {
+                    attempt_recover_duplicate_create: 'if-identical',
+                    ...options
+                }
             );
             expect(result2.status).toBe('ok'); if( result2.status!=='ok' ) throw new Error("noop");
             expect(result2.changes.final_items[0]!.text).toBe('Right2');
@@ -989,15 +985,94 @@ describe('applyWritesToItems test', () => {
                 ObjSchema,
                 ddl,
                 undefined,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: false
-                    },
-                    options
-                )
+                {
+                    attempt_recover_duplicate_create: 'never',
+                    ...options
+                }
             );
             expect(result3.status).toBe('error'); if( result3.status!=='error' ) throw new Error("noop");
 
+
+        })
+
+
+        test(`attempt_recover_duplicate_create fails for if-identical if not identical [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '1',
+                            'text': 'Bob'
+                        }
+                    }
+                }
+            ]
+
+            const existing:Obj = {
+                'id': '1',
+                'text': 'Alice'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [existing], 
+                ObjSchema,
+                ddl,
+                undefined,
+                {
+                    attempt_recover_duplicate_create: 'if-identical',
+                    ...options
+                }
+            );
+
+            expect(result.status).toBe('error');
+            expect(result.changes.final_items[0]!.text).toBe('Alice');
+            
+
+        })
+
+        test(`attempt_recover_duplicate_create always-update [${name}]`, () => {
+
+            const actions:WriteAction<Obj>[] = [
+                {
+                    type: 'write',
+                    ts: 0,
+                    uuid: '0',
+                    payload: {
+                        type: 'create',
+                        data: {
+                            id: '1',
+                            'text': 'Bob'
+                        }
+                    }
+                }
+            ]
+
+            const existing:Obj = {
+                'id': '1',
+                'text': 'Alice'
+            }
+
+            const result = applyWritesToItems<Obj>(
+                actions, 
+                [existing], 
+                ObjSchema,
+                ddl,
+                undefined,
+                {
+                    attempt_recover_duplicate_create: 'always-update',
+                    ...options
+                }
+            );
+
+            expect(result.status).toBe('ok');
+            expect(result.changes.final_items[0]!.text).toBe('Bob');
+            
 
         })
     });
@@ -1473,9 +1548,9 @@ describe('Regression Tests', () => {
                 RegressSchema1,
                 ddl,
                 user1,
-                Object.assign(options, {
-                    attempt_recover_duplicate_create: false
-                })
+                {
+                    attempt_recover_duplicate_create: 'never'
+                }
             );
             expect(result.status).toBe('ok');
 
@@ -1486,9 +1561,9 @@ describe('Regression Tests', () => {
                 RegressSchema1,
                 ddl,
                 user1,
-                Object.assign(options, {
-                    attempt_recover_duplicate_create: true
-                })
+                {
+                    attempt_recover_duplicate_create: 'if-identical'
+                }
             );
             expect(result2.status).toBe('ok');
             
@@ -1500,232 +1575,3 @@ describe('Regression Tests', () => {
 });
 
 
-
-/*
-
-    testImmutableAndnplaceModes((name, options) => {
-        test(`test accumulator [${name}]`, () => {
-
-            const existing:Obj = {
-                'id': '1',
-                'text': 'Right'
-            }
-
-            const result = applyWritesToItems<Obj>(
-                [
-                    {
-                        type: 'write',
-                        ts: 0,
-                        uuid: '0',
-                        payload: {
-                            type: 'create',
-                            data: {
-                                id: '2',
-                                text: 'Too'
-                            }
-                        }
-                    },
-                    {
-                        type: 'write',
-                        ts: 0,
-                        uuid: '0',
-                        payload: {
-                            type: 'update',
-                            method: 'merge',
-                            data: {
-                                text: 'One-ahh'
-                            },
-                            where: {
-                                id: '1'
-                            }
-                        }
-                    }
-                ], 
-                [existing], 
-                ObjSchema,
-                ddl,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true
-                    },
-                    options
-                )
-            );
-
-            expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
-            let accumulation = result.changes;
-            
-
-            // Run it again, with accumulator...
-            const result2 = applyWritesToItems<Obj>(
-                [
-                    {
-                        type: 'write',
-                        ts: 0,
-                        uuid: '0',
-                        payload: {
-                            type: 'update',
-                            method: 'merge',
-                            data: {
-                                text: 'Too-ahh'
-                            },
-                            where: {
-                                id: '2'
-                            }
-                        }
-                    }
-                ], 
-                result.changes.final_items, 
-                ObjSchema,
-                ddl,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true,
-                        accumulator: accumulation
-                    },
-                    options
-                )
-            );
-
-            expect(result2.status).toBe('ok'); if( result2.status!=='ok' ) throw new Error("noop");
-
-            expect(result2.changes.final_items.length).toBe(2);
-            expect(result2.changes.added.length).toBe(1);
-            expect(result2.changes.added[0]!.text).toBe('Too-ahh');
-            expect(result2.changes.updated.length).toBe(1);
-            expect(result2.changes.updated[0]!.text).toBe('One-ahh');
-            
-            accumulation = result2.changes;
-
-            // Run it again, with accumulator...
-            const result3 = applyWritesToItems<Obj>(
-                [
-                    {
-                        type: 'write',
-                        ts: 0,
-                        uuid: '0',
-                        payload: {
-                            type: 'delete',
-                            where: {
-                                id: '2'
-                            }
-                        }
-                    }
-                ], 
-                result2.changes.final_items, 
-                ObjSchema,
-                ddl,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true,
-                        accumulator: accumulation
-                    },
-                    options
-                )
-            );
-
-            expect(result3.status).toBe('ok'); if( result3.status!=='ok' ) throw new Error("noop");
-
-            expect(result3.changes.final_items.length).toBe(1);
-            expect(result3.changes.added.length).toBe(0);
-            expect(result3.changes.deleted.length).toBe(1);
-            expect(result3.changes.deleted[0]!.text).toBe('Too-ahh');
-            expect(result3.changes.updated.length).toBe(1);
-            expect(result3.changes.updated[0]!.text).toBe('One-ahh');
-
-
-            accumulation = result3.changes;
-
-            // Run it again, with accumulator...
-            const result4 = applyWritesToItems<Obj>(
-                [
-                    {
-                        type: 'write',
-                        ts: 0,
-                        uuid: '0',
-                        payload: {
-                            type: 'create',
-                            data: {
-                                id: '2',
-                                text: 'Too-brr'
-                            }
-                        }
-                    }
-                ], 
-                result3.changes.final_items, 
-                ObjSchema,
-                ddl,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true,
-                        accumulator: accumulation
-                    },
-                    options
-                )
-            );
-
-            expect(result4.status).toBe('ok'); if( result4.status!=='ok' ) throw new Error("noop");
-
-            expect(result4.changes.final_items.length).toBe(2);
-            expect(result4.changes.added.length).toBe(1);
-            expect(result4.changes.added[0]!.text).toBe('Too-brr');
-            expect(result4.changes.deleted.length).toBe(0);
-            expect(result4.changes.updated.length).toBe(1);
-            expect(result4.changes.updated[0]!.text).toBe('One-ahh');
-
-
-        })
-    });
-
-    testImmutableAndnplaceModes((name, options) => {
-        test(`accumulator holds with no write actions [${name}]`, () => {
-            const accumulation = {
-                "added": [
-                    {
-                        "id": "2",
-                        "text": "Too"
-                    }
-                ],
-                "updated": [
-                    {
-                        "id": "1",
-                        "text": "One-ahh"
-                    }
-                ],
-                "deleted": [],
-                "changed": true,
-                "final_items": [
-                    {
-                        "id": "1",
-                        "text": "One-ahh"
-                    },
-                    {
-                        "id": "2",
-                        "text": "Too"
-                    }
-                ]
-            };
-
-            const result = applyWritesToItems<Obj>(
-                [], 
-                [], 
-                ObjSchema,
-                ddl,
-                Object.assign(
-                    {
-                        attempt_recover_duplicate_create: true,
-                        accumulator: accumulation
-                    },
-                    options
-                )
-            );
-            expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
-
-            expect(accumulation.added).toEqual(result.changes.added);
-            expect(accumulation.updated).toEqual(result.changes.updated);
-            expect(accumulation.deleted).toEqual(result.changes.deleted);
-            expect(accumulation.changed).toEqual(result.changes.changed);
-
-        })
-    })
-    */

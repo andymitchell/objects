@@ -27,7 +27,7 @@ function getMutableItem<T extends Record<string, any>>(item:T):T {
 
 function getOptionDefaults<T extends Record<string, any>>():Required<ApplyWritesToItemsOptions<T>> {
     return {
-        attempt_recover_duplicate_create: false,
+        attempt_recover_duplicate_create: 'never',
         in_place_mutation: false,
         allow_partial_success: true
     }
@@ -110,7 +110,10 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
     const existingIds = new Set(wipItems.map(item => safeKeyValue(item[rules.primary_key])));
 
     // Now go through the actions 
-    for( const action of writeActions ) {
+    writeActions = [...writeActions];
+    for( let index = 0; index < writeActions.length; index++ ) {
+    //for( const action of writeActions ) {
+        const action = writeActions[index]!;
         if( failureTracker.shouldHalt() ) break;
 
         
@@ -119,7 +122,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
             const pkValue = pk(action.payload.data, true);
             if( pkValue ) {
                 if (existingIds.has(pkValue)) {
-                    if( optionsIncDefaults.attempt_recover_duplicate_create ) {
+                    if( optionsIncDefaults.attempt_recover_duplicate_create==='if-identical' ) {
                         // Recovery = at any point, does the item, with updates applied, match the create payload? If so, skip this create but don't generate an error.
                         const existing = wipItems.find((x)=> pkValue===pk(x));
                         if( existing && equivalentCreateOccurs<T>(schema, ddl, existing, action, writeActions) ) {
@@ -127,6 +130,25 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                         } else {
                             failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                         }
+                    } else if( optionsIncDefaults.attempt_recover_duplicate_create==='always-update' ) {
+                        // Convert it into an update (for the next action), and skip this action
+                        const data: T = {
+                            ...action.payload.data
+                        };
+                        delete data[rules.primary_key];
+
+                        const newUpdate:WriteAction<T> = {
+                            ...action,
+                            payload: {
+                                type: 'update',
+                                data,
+                                where: {
+                                    [rules.primary_key]: pkValue
+                                }
+                            }
+                        }
+                        
+                        writeActions.splice(index+1, 0, newUpdate);
                     } else {
                         failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                     }

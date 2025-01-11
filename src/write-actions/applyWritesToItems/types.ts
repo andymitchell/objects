@@ -52,9 +52,10 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
     /**
      * Give guidance to what it can sort by. 
      * 
-     * If this represents an API, you probably want to match the default ordering it uses.
+     * It can be used by store implementations to ensure consistent item/pagination order.
+     * 
      */
-    default_order?: ListOrdering<T>,
+    order_by?: ListOrdering<T>,
 
     pre_triggers?: {
         trigger: (replacement: T, existing?: T) => T // Throws an error if expect halt

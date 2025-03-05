@@ -1,4 +1,4 @@
-import { createDraft, produce } from "immer";
+import { createDraft } from "immer";
 import matchJavascriptObjectReal, { type ObjOrDraft } from "./matchJavascriptObject.js";
 import { type WhereFilterDefinition, isWhereFilterDefinition } from "./types.js";
 import { standardTests } from "./standardTests.js";

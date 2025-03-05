@@ -3,7 +3,7 @@ import { type ZodTypeAny, z } from "zod";
 
 export type ZodKind = keyof typeof z.ZodFirstPartyTypeKind;
 type DotPropPath = string;
-type DotPropPathsZodKind = Record<DotPropPath, ZodKind>; // e.g. {'person.age': 'ZodNumber'}
+
 
 
 type WhitelistTypes<T extends ZodKind[] = ZodKind[]> = T[number];

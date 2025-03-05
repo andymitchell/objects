@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { TreeNodeMap, ZodKind, convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod";
-import { isZodSchema } from "../utils/isZodSchema";
+import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
+import { isZodSchema } from "../utils/isZodSchema.js";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
 

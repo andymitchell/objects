@@ -1,4 +1,4 @@
-import cloneDeepSafe from "./cloneDeepSafe";
+import cloneDeepSafe from "./cloneDeepSafe.js";
 
 describe('cloneDeepSafe', () => {
 

@@ -1,5 +1,5 @@
 import { setProperty } from "dot-prop";
-import {  getProperty as getPropertySimpleDot, getPropertySpreadingArrays } from "./getPropertySimpleDot";
+import {  getProperty as getPropertySimpleDot, getPropertySpreadingArrays } from "./getPropertySimpleDot.js";
 
 describe('getPropertySpreadingArrays test', () => {
 

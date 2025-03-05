@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../../types";
-import { ListRules } from "../types";
+import type { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../../types.js";
+import type { ListRules } from "../types.js";
 import { isEqual } from "lodash-es";
-import safeKeyValue, { PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue";
+import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.js";
 
 
 type FailedAction<T extends Record<string, any>> = WriteActionFailures<T>[number];

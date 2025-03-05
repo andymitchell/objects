@@ -1,9 +1,9 @@
 
-import { z, ZodNumber, ZodOptional, ZodSchema, ZodType, ZodTypeDef } from "zod";
-import { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, PathValue, RemoveTrailingDot } from '../dot-prop-paths/types';
-import isPlainObject from "../utils/isPlainObject";
+import { z, ZodNumber, ZodOptional, ZodSchema, type ZodTypeDef } from "zod";
+import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValue } from '../dot-prop-paths/types.js';
+import isPlainObject from "../utils/isPlainObject.js";
 
-import { ObjOrDraft } from "./matchJavascriptObject";
+import type { ObjOrDraft } from "./matchJavascriptObject.js";
 
 
 export const WhereFilterLogicOperators = ['AND', 'OR', 'NOT'] as const;

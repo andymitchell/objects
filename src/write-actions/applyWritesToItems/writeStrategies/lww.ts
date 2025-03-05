@@ -1,7 +1,7 @@
 import { merge } from "lodash-es";
-import { WriteStrategy } from "../types";
-import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination";
-import { VALUE_TO_DELETE_KEY } from "../../types";
+import type { WriteStrategy } from "../types.js";
+import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination.js";
+import { VALUE_TO_DELETE_KEY } from "../../types.js";
 
 const writeLww: WriteStrategy<Record<string, any>> = {
     create_handler: (writeActionPayload) => {

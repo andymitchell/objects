@@ -1,5 +1,5 @@
-import { DotPropPathToObjectArraySpreadingArrays } from "../../dot-prop-paths/types";
-import { DDL } from "./types";
+import type { DotPropPathToObjectArraySpreadingArrays } from "../../dot-prop-paths/types.js";
+import type { DDL } from "./types.js";
 
 
 describe('write-actions type check', () => {

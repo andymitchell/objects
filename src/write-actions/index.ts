@@ -1,7 +1,9 @@
-import { applyWritesToItems, ApplyWritesToItemsOptions, checkPermission, DDL, ListOrdering } from "./applyWritesToItems/index";
-import { isIUser, IUser } from "./auth";
-import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters";
-import {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionErrorSchema, WriteActionFailures, WriteActionPayload, assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, WriteActionFailuresErrorDetails, WriteActionSuccesses, createWriteActionSuccessesSchema, AppliedWritesOutputResponse } from "./types";
+import { applyWritesToItems, checkPermission } from "./applyWritesToItems/index.js";
+import type {  ApplyWritesToItemsOptions, DDL, ListOrdering } from "./applyWritesToItems/index.js";
+import { isIUser, type IUser } from "./auth/index.js";
+import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters.js";
+import {  WriteActionErrorSchema,  assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, createWriteActionSuccessesSchema } from "./types.js";
+import type {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActionFailuresErrorDetails, WriteActionSuccesses, AppliedWritesOutputResponse } from "./types.js";
 
 export const WriteActions = {
     applyWritesToItems,

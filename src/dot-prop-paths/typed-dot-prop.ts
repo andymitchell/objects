@@ -1,5 +1,5 @@
 import { getProperty, setProperty } from "dot-prop";
-import { DotPropPathsUnion, PathValue } from "./types";
+import type { DotPropPathsUnion, PathValue } from "./types.js";
 
 export function setTypedProperty<T extends Record<string, any>, P extends DotPropPathsUnion<T>>(object:T, path:P, value: unknown):T {
     return setProperty(object, path, value);

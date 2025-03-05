@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { WriteAction, WriteActionPayloadArrayScope, createWriteActionSchema } from "./types";
+import type { WriteAction, WriteActionPayloadArrayScope } from "./types.js";
+import { createWriteActionSchema } from "./types.js";
 
 describe('write-actions type check', () => {
     // This is primarily just a type file for convenience to see if typeCheck's code flags type errors

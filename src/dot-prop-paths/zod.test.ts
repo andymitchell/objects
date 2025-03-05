@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath } from "./zod";
+import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath } from "./zod.js";
 
 describe('Zod test', () => {
 

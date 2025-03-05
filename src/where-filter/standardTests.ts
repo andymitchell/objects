@@ -1,6 +1,6 @@
 import { z } from "zod"
-import { MatchJavascriptObject, MatchJavascriptObjectInTesting } from "./types"
-import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test"
+import type { MatchJavascriptObjectInTesting } from "./types.js"
+import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test.js"
 
 
 type StandardTestConfig = {

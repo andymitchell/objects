@@ -1,8 +1,8 @@
-import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsRecord, DotPropPathsUnion, DotPropPathsUnionScalar, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, PrimaryKeyProperties, ScalarProperties } from "../../dot-prop-paths/types";
-import { PrimaryKeyValue } from "../../utils/getKeyValue";
-import { IfAny } from "../../types";
-import { EnsureRecord } from "../../types";
-import { AppliedWritesOutput, WriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types";
+import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, PrimaryKeyProperties } from "../../dot-prop-paths/types.js";
+import type { PrimaryKeyValue } from "../../utils/getKeyValue.js";
+import type { IfAny } from "../../types.js";
+import type { EnsureRecord } from "../../types.js";
+import type {  WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types.js";
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
 

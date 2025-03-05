@@ -1,7 +1,7 @@
 import { createDraft, produce } from "immer";
-import matchJavascriptObjectReal, { ObjOrDraft } from "./matchJavascriptObject";
-import { WhereFilterDefinition, isWhereFilterDefinition } from "./types";
-import { standardTests } from "./standardTests";
+import matchJavascriptObjectReal, { type ObjOrDraft } from "./matchJavascriptObject.js";
+import { type WhereFilterDefinition, isWhereFilterDefinition } from "./types.js";
+import { standardTests } from "./standardTests.js";
 
 async function matchJavascriptObject<T extends Record<string, any>>(object: ObjOrDraft<T>, filter: WhereFilterDefinition<T>):Promise<ReturnType<typeof matchJavascriptObjectReal>> {
     expect(isWhereFilterDefinition(filter)).toBe(true);

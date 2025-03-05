@@ -1,9 +1,10 @@
 
 import { z } from "zod";
-import { isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, isWhereFilterDefinition, ValueComparison, ValueComparisonNumericOperators, ValueComparisonNumericOperatorsTyped, WhereFilterDefinition, WhereFilterLogicOperators, WhereFilterLogicOperatorsTyped } from "./types";
-import {  convertSchemaToDotPropPathTree, TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod";
-import isPlainObject from "../utils/isPlainObject";
-import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath";
+import { isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, isWhereFilterDefinition, ValueComparisonNumericOperators, type ValueComparisonNumericOperatorsTyped, type WhereFilterDefinition, WhereFilterLogicOperators } from "./types.js";
+import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
+import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
+import isPlainObject from "../utils/isPlainObject.js";
+import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.js";
 
 
 /*

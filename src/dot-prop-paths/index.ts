@@ -1,5 +1,5 @@
-import {getProperty} from "./getPropertySimpleDot";
-import { DotPropPathsUnion, DotPropPathsRecord, PathValue } from "./types";
+import {getProperty} from "./getPropertySimpleDot.js";
+import type { DotPropPathsUnion, DotPropPathsRecord, PathValue } from "./types.js";
 
 export const DotPropPaths = {
     getProperty

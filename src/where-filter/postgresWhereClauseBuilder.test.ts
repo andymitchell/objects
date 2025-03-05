@@ -1,12 +1,12 @@
-import postgresWhereClauseBuilder, {  PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder";
+import postgresWhereClauseBuilder, {  type PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder.js";
 
-import {  MatchJavascriptObjectInTesting } from "./types";
-import {  standardTests } from "./standardTests";
+import { type  MatchJavascriptObjectInTesting } from "./types.js";
+import {  standardTests } from "./standardTests.js";
 
-import { DbMultipleTestsRunner, PgTestable } from "@andyrmitchell/pg-testable";
+import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod";
-import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath";
+import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
+import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.js";
 
 
 

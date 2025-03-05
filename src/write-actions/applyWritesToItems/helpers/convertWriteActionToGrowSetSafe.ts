@@ -1,5 +1,5 @@
-import { WriteAction } from "../../types";
-import { ListRules } from "../types";
+import type { WriteAction } from "../../types.js";
+import type { ListRules } from "../types.js";
 
 export default function convertWriteActionToGrowSetSafe<T extends Record<string, any>>(
     action:WriteAction<T>,

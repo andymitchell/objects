@@ -1,10 +1,16 @@
 {
     "compilerOptions": {
-        "moduleResolution": "node",
-        "module": "ESNext",
+        "target": "ESNext",
+        "module": "NodeNext",
+        "moduleResolution": "nodenext",
         "strict": true,
-        "noUncheckedIndexedAccess": true, // TODO Add this for safer code
-        "noImplicitOverride": true, // TODO Add this for safer code
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+        "noUnusedLocals": true,
+        "allowSyntheticDefaultImports": true,
+        "verbatimModuleSyntax": true,
+        "noEmit": true,
+        "allowImportingTsExtensions": true,
         "lib": [
             "ESNext"
         ]

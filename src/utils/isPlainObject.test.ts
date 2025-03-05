@@ -1,4 +1,4 @@
-import isPlainObject from "./isPlainObject";
+import isPlainObject from "./isPlainObject.js";
 import { isPlainObject as isPlainObjectLodash } from "lodash-es";
 
 describe('isPlainObject', () => {

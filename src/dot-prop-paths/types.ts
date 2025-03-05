@@ -1,8 +1,8 @@
 
 
 import { z } from "zod";
-import { EnsureRecord } from "../types";
-import { PrimaryKeyValue } from "../utils/getKeyValue";
+import type { EnsureRecord } from "../types.js";
+import type { PrimaryKeyValue } from "../utils/getKeyValue.js";
 
 export type DotPropPathsRecord<T extends Record<string, any>> = {
     [P in DotPropPathsUnion<T> as string & P]: PathValue<T, P>

@@ -1,18 +1,19 @@
 
-import { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionFailures,  WriteActionFailuresErrorDetails,  WriteActionSuccess,  WriteActionSuccesses,  isUpdateOrDeleteWriteActionPayload } from "../types";
+import type  { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionSuccess,  WriteActionSuccesses } from "../types.js";
+import {isUpdateOrDeleteWriteActionPayload} from '../types.js';
 import { setProperty } from "dot-prop";
-import { WhereFilter } from "../../where-filter";
-import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, makePrimaryKeyGetter } from "../../utils/getKeyValue";
-import { ApplyWritesToItemsOptions, DDL, ItemHash, ListRules, WriteStrategy } from "./types";
-import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe";
-import writeLww from "./writeStrategies/lww";
-import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction";
+import { WhereFilter } from "../../where-filter/index.js";
+import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.js";
+import type { ApplyWritesToItemsOptions, DDL, ItemHash, ListRules, WriteStrategy } from "./types.js";
+import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe.js";
+import writeLww from "./writeStrategies/lww.js";
+import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.js";
 import { z } from "zod";
-import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker";
-import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs";
-import { Draft, current, isDraft } from "immer";
-import { IUser } from "../auth/types";
-import { checkPermission } from "./helpers/checkPermission";
+import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker.js";
+import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.js";
+import { type Draft, current, isDraft } from "immer";
+import { type IUser } from "../auth/types.js";
+import { checkPermission } from "./helpers/checkPermission.js";
 
 
 

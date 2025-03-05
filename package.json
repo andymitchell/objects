@@ -32,11 +32,8 @@
   "license": "MIT",
   "devDependencies": {
     "@andyrmitchell/pg-testable": "^0.4.0",
-    "@andyrmitchell/trowser": "^0.2.1",
     "@types/jest": "^29.5.12",
     "@types/lodash-es": "^4.17.12",
-    "@types/pg": "^8.11.5",
-    "pg-mem": "^2.8.1",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
     "vitest": "^3.0.7"

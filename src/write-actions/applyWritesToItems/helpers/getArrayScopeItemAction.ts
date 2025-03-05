@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot";
-import { DotPropPathValidArrayValue } from "../../../dot-prop-paths/types";
-import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/zod";
-import { WriteAction,  WriteActionPayload, WriteActionPayloadArrayScope, isWriteActionArrayScopePayload } from "../../types";
-import { DDL } from "../types";
+import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.js";
+import type { DotPropPathValidArrayValue } from "../../../dot-prop-paths/types.js";
+import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/zod.js";
+import { type WriteAction, isWriteActionArrayScopePayload } from "../../types.js";
+import type { DDL } from "../types.js";
 
 
 type ArrayScopeSchemaAndDDL<ScopedType extends Record<string, any>> = {writeAction:WriteAction<ScopedType>, schema: z.ZodType<ScopedType, any, any>, ddl: DDL<ScopedType>};

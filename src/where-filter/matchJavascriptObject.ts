@@ -1,7 +1,7 @@
-import { Draft } from "immer";
-import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot";
-import isPlainObject from "../utils/isPlainObject";
-import { ArrayFilter, ArrayValueComparison, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, LogicFilter, MatchJavascriptObject, ValueComparison, ValueComparisonNumericOperators, WhereFilterDefinition, WhereFilterLogicOperators } from "./types";
+import type { Draft } from "immer";
+import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
+import isPlainObject from "../utils/isPlainObject.js";
+import { type ArrayFilter, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, type MatchJavascriptObject, type ValueComparison, ValueComparisonNumericOperators, type WhereFilterDefinition } from "./types.js";
 import { isEqual } from "lodash-es";
 
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.

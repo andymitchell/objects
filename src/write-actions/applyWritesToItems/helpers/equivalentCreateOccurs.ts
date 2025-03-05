@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { DDL } from "../types";
-import { WriteAction } from "../../types";
+import type { DDL } from "../types.js";
+import type { WriteAction } from "../../types.js";
 import { isMatch } from "lodash-es";
-import applyWritesToItems from "../applyWritesToItems";
-import { ObjOrDraft } from "../../../where-filter/matchJavascriptObject";
+import applyWritesToItems from "../applyWritesToItems.js";
+
 
 export default function equivalentCreateOccurs<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, existing:Readonly<T>, createAction:WriteAction<T>, writeActions:WriteAction<T>[]):boolean {
     if( createAction.payload.type!=='create' ) throw new Error("noop - createAction must be a createAction");

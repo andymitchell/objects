@@ -1,4 +1,4 @@
-import { isIUser, IUser } from "./types";
+import { isIUser, type IUser } from "./types.js";
 
 export {
     isIUser

@@ -1,6 +1,6 @@
-import { IUser } from "../../auth/types";
-import { DDL } from "../types";
-import { checkPermission } from "./checkPermission";
+import type { IUser } from "../../auth/types.js";
+import type { DDL } from "../types.js";
+import { checkPermission } from "./checkPermission.js";
 
 type TestItem = {
     id: string, 

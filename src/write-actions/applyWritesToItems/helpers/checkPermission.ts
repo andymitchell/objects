@@ -1,8 +1,8 @@
-import { Draft } from "immer";
-import { IUser } from "../../auth/types";
-import { DDL, DDLPermissions, DDLPermissionsSchema } from "../types";
-import { WriteActionFailuresErrorDetails } from "../../types";
-import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot";
+import type { Draft } from "immer";
+import type { IUser } from "../../auth/types.js";
+import { type DDL, DDLPermissionsSchema } from "../types.js";
+import type { WriteActionFailuresErrorDetails } from "../../types.js";
+import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.js";
 
 
 export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteActionFailuresErrorDetails | undefined {

@@ -1,4 +1,4 @@
-import { ZodTypeAny, z } from "zod";
+import { type ZodTypeAny, z } from "zod";
 
 
 export type ZodKind = keyof typeof z.ZodFirstPartyTypeKind;

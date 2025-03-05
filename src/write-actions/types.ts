@@ -1,10 +1,11 @@
-import { ZodIssueCode, z } from "zod";
-import { DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, PathValue } from "../dot-prop-paths/types";
-import { UpdatingMethod, UpdatingMethodSchema, WhereFilterDefinition, WhereFilterSchema } from "../where-filter/types"
-import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod";
+import { z } from "zod";
+import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../dot-prop-paths/types.js";
+import {  UpdatingMethodSchema, WhereFilterSchema } from "../where-filter/types.js"
+import type { UpdatingMethod, WhereFilterDefinition } from "../where-filter/types.js"
+import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod.js";
 
-import { PrimaryKeyValue, PrimaryKeyValueSchema } from "../utils/getKeyValue";
-import { Draft } from "immer";
+import { type PrimaryKeyValue, PrimaryKeyValueSchema } from "../utils/getKeyValue.js";
+import type { Draft } from "immer";
 import { isTypeEqual } from "@andyrmitchell/utils";
 
 

@@ -1,9 +1,9 @@
 import { z } from "zod";
-import safeKeyValue from "../utils/getKeyValue";
-import { WhereFilterDefinition } from "../where-filter";
-import { DDL } from "./applyWritesToItems";
-import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemAction";
-import { CombineWriteActionsWhereFiltersResponse, WriteAction } from "./types";
+import safeKeyValue from "../utils/getKeyValue.js";
+import type { WhereFilterDefinition } from "../where-filter/index.js";
+import type { DDL } from "./applyWritesToItems/index.js";
+import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemAction.js";
+import type { CombineWriteActionsWhereFiltersResponse, WriteAction } from "./types.js";
 
 
 /**

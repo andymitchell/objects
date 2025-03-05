@@ -1,11 +1,14 @@
-import { DotPropPaths, DotPropPathsRecord, DotPropPathsUnion, PathValue } from "./dot-prop-paths";
-import safeKeyValue, { PrimaryKeyGetter, PrimaryKeyValue, PrimaryKeyValueSchema, makePrimaryKeyGetter } from "./utils/getKeyValue";
-import isPlainObject from "./utils/isPlainObject";
-import { EnsureRecord } from "./types";
-import { IPropertyMap, PreparedWhereClauseStatement, WhereFilter, WhereFilterDefinition } from "./where-filter";
-import { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActions, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser, isIUser, ListOrdering, AppliedWritesOutputResponse, ApplyWritesToItemsOptions } from "./write-actions";
-import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop";
-import cloneDeepSafe from "./utils/cloneDeepSafe";
+import { DotPropPaths } from "./dot-prop-paths/index.js";
+import type {  DotPropPathsRecord, DotPropPathsUnion, PathValue } from "./dot-prop-paths/index.js";
+import safeKeyValue, { type PrimaryKeyGetter, type PrimaryKeyValue, PrimaryKeyValueSchema, makePrimaryKeyGetter } from "./utils/getKeyValue.js";
+import isPlainObject from "./utils/isPlainObject.js";
+import type { EnsureRecord } from "./types.js";
+import { WhereFilter } from "./where-filter/index.js";
+import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index.js";
+import { isIUser, WriteActions } from "./write-actions/index.js";
+import type { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser, ListOrdering, AppliedWritesOutputResponse, ApplyWritesToItemsOptions } from "./write-actions/index.js";
+import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop.js";
+import cloneDeepSafe from "./utils/cloneDeepSafe.js";
 
 
 export {

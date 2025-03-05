@@ -1,8 +1,9 @@
 // Import the specific functions from the file
-import { convertDotPropPathToPostgresJsonPath } from './convertDotPropPathToPostgresJsonPath';
-import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascriptObject';
-import postgresWhereClauseBuilder, { IPropertyMap, PreparedWhereClauseStatement, PropertyMapSchema } from './postgresWhereClauseBuilder';
-import { WhereFilterDefinition, WhereFilterSchema, isWhereFilterDefinition} from './types';
+import { convertDotPropPathToPostgresJsonPath } from './convertDotPropPathToPostgresJsonPath.js';
+import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascriptObject.js';
+import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder.js';
+import type { IPropertyMap, PreparedWhereClauseStatement } from './postgresWhereClauseBuilder.js';
+import { type WhereFilterDefinition, WhereFilterSchema, isWhereFilterDefinition} from './types.js';
 
 export const WhereFilter = {
     matchJavascriptObject, 

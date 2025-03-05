@@ -1,9 +1,10 @@
 import { z } from "zod";
-import applyWritesToItems from ".";
-import { WriteAction, WriteActionPayload, WriteActionPayloadArrayScope, assertArrayScope } from "../types";
-import { ApplyWritesToItemsOptions, DDL } from "./types";
+import applyWritesToItems from "./index.js";
+import type { WriteAction, WriteActionPayloadArrayScope } from "../types.js";
+import {assertArrayScope } from "../types.js";
+import type { ApplyWritesToItemsOptions, DDL } from "./types.js";
 import { produce } from "immer";
-import { IUser } from "../auth/types";
+import type { IUser } from "../auth/types.js";
 
 
 

@@ -1,6 +1,6 @@
 
 import { z, ZodNumber, ZodOptional, ZodSchema, type ZodTypeDef } from "zod";
-import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValue, PathValueIncDiscrimatedUnions } from '../dot-prop-paths/types.js';
+import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValueIncDiscrimatedUnions } from '../dot-prop-paths/types.js';
 import isPlainObject from "../utils/isPlainObject.js";
 
 import type { ObjOrDraft } from "./matchJavascriptObject.js";

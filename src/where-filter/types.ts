@@ -1,6 +1,6 @@
 
 import { z, ZodNumber, ZodOptional, ZodSchema, type ZodTypeDef } from "zod";
-import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValue } from '../dot-prop-paths/types.js';
+import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValue, PathValueIncDiscrimatedUnions } from '../dot-prop-paths/types.js';
 import isPlainObject from "../utils/isPlainObject.js";
 
 import type { ObjOrDraft } from "./matchJavascriptObject.js";
@@ -25,8 +25,8 @@ type ArrayElementFilter<T = any> = (T extends Record<string, any>? WhereFilterDe
 export type ArrayFilter<T extends []> = ArrayElementFilter<T[number]> | T;
 type PartialObjectFilter<T extends Record<string, any>> = Partial<{
     [P in DotPropPathsIncArrayUnion<T>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
-        ? ArrayFilter<PathValue<T, P>>
-        : ValueComparison<PathValue<T, P>>
+        ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>>
+        : ValueComparison<PathValueIncDiscrimatedUnions<T, P>>
 }>;
 
 

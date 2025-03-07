@@ -4,6 +4,7 @@
 import type { EnsureRecord } from "../types.js";
 import type { PrimaryKeyValue } from "../utils/getKeyValue.js";
 
+
 export type DotPropPathsRecord<T extends Record<string, any>> = {
     [P in DotPropPathsUnion<T> as string & P]: PathValue<T, P>
 };
@@ -94,17 +95,7 @@ export type NonArrayProperty<T> = {
 }[keyof T];
 
 
-/*
-export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
-    ? Key extends keyof T
-        ? NonNullable<T[Key]> extends Array<infer U>
-            ? PathValue<EnsureRecord<U>, Rest>
-            : PathValue<T[Key], Rest>
-        : never
-    : P extends keyof T
-        ? T[P]
-        : never;
-*/
+
 export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
     ? Key extends keyof T
         ? NonNullable<T[Key]> extends Array<infer U>
@@ -115,6 +106,20 @@ export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key
         ? NonNullable<T[P]>
         : never;
 
+
+export type PathValueIncDiscrimatedUnions<T extends Record<string, any>, P> = 
+T extends unknown 
+    ? P extends `${infer Key}.${infer Rest}`
+        ? Key extends keyof T
+            ? NonNullable<T[Key]> extends Array<infer U>
+                ? PathValueIncDiscrimatedUnions<EnsureRecord<U>, Rest>
+                : PathValueIncDiscrimatedUnions<NonNullable<T[Key]>, Rest>
+            : never
+    : P extends keyof T
+        ? NonNullable<T[P]>
+        : never
+    : never;
+    
 
 // Helper type to decrement depth
 type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];

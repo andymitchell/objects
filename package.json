@@ -1,6 +1,6 @@
 {
   "name": "@andyrmitchell/objects",
-  "version": "0.7.13",
+  "version": "0.7.14",
   "description": "",
   "exports": {
     ".": {
@@ -8,8 +8,8 @@
       "default": "./dist/index.js"
     },
     "./where-filter": {
-        "types": "./dist/index-where-filter.d.ts",
-        "default": "./dist/index-where-filter.js"
+      "types": "./dist/index-where-filter.d.ts",
+      "default": "./dist/index-where-filter.js"
     }
   },
   "module": "./dist/index.js",

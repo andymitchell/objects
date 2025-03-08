@@ -3,8 +3,8 @@ import type {  DotPropPathsRecord, DotPropPathsUnion, PathValue } from "./dot-pr
 import safeKeyValue, { type PrimaryKeyGetter, type PrimaryKeyValue, PrimaryKeyValueSchema, makePrimaryKeyGetter } from "./utils/getKeyValue.js";
 import isPlainObject from "./utils/isPlainObject.js";
 import type { EnsureRecord } from "./types.js";
-import { WhereFilter } from "./where-filter/index.js";
-import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index.js";
+import { WhereFilter } from "./where-filter/index-old.ts";
+import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index-old.ts";
 import { isIUser, WriteActions } from "./write-actions/index.js";
 import type { WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, DDL, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActionFailuresErrorDetails, WriteActionSuccesses, IUser, ListOrdering, AppliedWritesOutputResponse, ApplyWritesToItemsOptions } from "./write-actions/index.js";
 import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop.js";

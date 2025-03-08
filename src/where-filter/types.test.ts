@@ -45,13 +45,24 @@ it('it correctly identifies the available dot prop sub keys, and their type, but
 })
 
 
+it('it throws a type error if using an unknown key', () => {
+
+    type NormalType = {name: '2', 'child': {age: number}};
+
+    const a:WhereFilterDefinition<NormalType> = {
+        //"child2": 1 // OK type error because it's not a known key
+    }
+
+})
+
+
 it('with a discriminated union, even though a propery is not always present, it should be allowed as a PartialObjectFilter and have the correct type', () => {
-    // THIS IS FAILING 
+    
 
     type DiscrimatedUnion = {name: '1', message: string} | {name: '2'};
 
     const a:WhereFilterDefinition<DiscrimatedUnion> = {
-        message: 'a' // REAL ERROR: It should work because it's a string, but it has error "Type 'string' is not assignable to type 'undefined'.". Because 'message' is only available on some parts of the union, which is causing it to resolve to undefined
+        message: 'a' 
     }
 
 })

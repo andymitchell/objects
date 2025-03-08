@@ -6,6 +6,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./where-filter": {
+        "types": "./dist/index-where-filter.d.ts",
+        "default": "./dist/index-where-filter.js"
     }
   },
   "module": "./dist/index.js",
@@ -30,6 +34,7 @@
   },
   "author": "",
   "license": "MIT",
+  "sideEffects": false,
   "devDependencies": {
     "@andyrmitchell/pg-testable": "^0.4.0",
     "@types/jest": "^29.5.12",

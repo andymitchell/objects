@@ -1,6 +1,6 @@
 import { z } from "zod";
 import safeKeyValue from "../utils/getKeyValue.js";
-import type { WhereFilterDefinition } from "../where-filter/index.js";
+import type { WhereFilterDefinition } from "../where-filter/index-old.ts";
 import type { DDL } from "./applyWritesToItems/index.js";
 import { getArrayScopeSchemaAndDDL } from "./applyWritesToItems/helpers/getArrayScopeItemAction.js";
 import type { CombineWriteActionsWhereFiltersResponse, WriteAction } from "./types.js";

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters.js"
 import type { DDL } from "./applyWritesToItems/index.js";
-import type { WhereFilterDefinition } from "../where-filter/index.js";
+import type { WhereFilterDefinition } from "../where-filter/index-old.ts";
 import { assertArrayScope } from "./types.js";
 
 describe('combineWriteActionsWhereFilters', () => {

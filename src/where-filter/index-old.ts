@@ -1,11 +1,11 @@
-
+// Import the specific functions from the file
 import { convertDotPropPathToPostgresJsonPath } from './convertDotPropPathToPostgresJsonPath.ts';
 import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascriptObject.ts';
 import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder.ts';
 import type { IPropertyMap, PreparedWhereClauseStatement } from './postgresWhereClauseBuilder.ts';
 import { type WhereFilterDefinition, WhereFilterSchema, isWhereFilterDefinition} from './types.ts';
 
-export {
+export const WhereFilter = {
     matchJavascriptObject, 
     filterJavascriptObjects,
     postgresWhereClauseBuilder,
@@ -21,3 +21,12 @@ export type {
     IPropertyMap
 };
 
+
+
+/*
+// Create a namespace that encapsulates the imported functions
+export namespace WhereFilter {
+    export const matchJavascriptObject = matchJavascriptObject;
+    export const matchObjectInFilter = matchJavascriptObjectInFilter;
+}
+*/

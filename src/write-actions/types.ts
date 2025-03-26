@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../dot-prop-paths/types.js";
-import {  UpdatingMethodSchema, WhereFilterSchema } from "../where-filter/types.js"
+import {  UpdatingMethodSchema, WhereFilterSchema } from "../where-filter/schemas.js"
 import type { UpdatingMethod, WhereFilterDefinition } from "../where-filter/types.js"
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod.js";
 

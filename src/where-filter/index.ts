@@ -3,7 +3,8 @@ import { convertDotPropPathToPostgresJsonPath } from './convertDotPropPathToPost
 import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascriptObject.ts';
 import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder.ts';
 import type { IPropertyMap, PreparedWhereClauseStatement } from './postgresWhereClauseBuilder.ts';
-import { type WhereFilterDefinition, WhereFilterSchema, isWhereFilterDefinition} from './types.ts';
+import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
+import { type WhereFilterDefinition} from './types.ts';
 
 export {
     matchJavascriptObject, 

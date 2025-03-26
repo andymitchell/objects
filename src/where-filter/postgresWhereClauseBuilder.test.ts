@@ -1,7 +1,7 @@
 import postgresWhereClauseBuilder, {  type PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder.js";
 
-import { type  MatchJavascriptObjectInTesting } from "./types.js";
-import {  standardTests } from "./standardTests.js";
+
+import {  standardTests, type MatchJavascriptObjectInTesting } from "./standardTests.js";
 
 import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
 import { z } from "zod";

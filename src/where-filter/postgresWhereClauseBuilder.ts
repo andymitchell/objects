@@ -1,6 +1,7 @@
 
 import { z } from "zod";
-import { isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterArray, isWhereFilterDefinition, ValueComparisonNumericOperators, type ValueComparisonNumericOperatorsTyped, type WhereFilterDefinition, WhereFilterLogicOperators } from "./types.js";
+import { ValueComparisonNumericOperators, type ValueComparisonNumericOperatorsTyped, type WhereFilterDefinition, WhereFilterLogicOperators, isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./types.js";
+import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterArray, isWhereFilterDefinition } from './schemas.ts';
 import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
 import isPlainObject from "../utils/isPlainObject.js";

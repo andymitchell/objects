@@ -1,7 +1,9 @@
-import { z } from "zod"
-import type { MatchJavascriptObjectInTesting } from "./types.js"
-import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test.js"
+import { z, ZodSchema } from "zod"
 
+import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test.js"
+import type { MatchJavascriptObject, WhereFilterDefinition } from "./types.ts";
+
+export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(obj: T, filter:WhereFilterDefinition<T>, schema: ZodSchema<T>) => Promise<ReturnType<MatchJavascriptObject> | undefined>;
 
 type StandardTestConfig = {
     test: jest.It, 
@@ -417,6 +419,53 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             {
                 'contact.name': {
+                    contains: 'Wrong'
+                }
+            },
+            ContactSchema
+        );
+        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+		expect(result).toBe(false);
+    });
+
+
+    test('contains used on a number will not return anything', async () => {
+        let result:boolean | undefined = false;
+
+        try {
+            result = await matchJavascriptObject(
+                {
+                    contact: {
+                        name: 'Andy',
+                        age: 100
+                    }
+                },
+                {
+                    'contact.age': {
+                        // @ts-ignore
+                        contains: '100'
+                    }
+                },
+                ContactSchema
+            );
+        } catch(e) {
+            // matchJavascriptObject will throw a "A ValueComparisonContains only works on a string" error; but Postgres will just silently fail. So this test simply makes sure it doesn't pass.
+        }
+
+		expect(result).toBe(false);
+    });
+
+    test('contains used on a missing property will not return anything (but will not error)', async () => {
+        const result = await matchJavascriptObject(
+            {
+                contact: {
+                    name: 'Andy',
+                    age: 100
+                }
+            },
+            {
+                // @ts-ignore
+                'contact.unknown_property': {
                     contains: 'Wrong'
                 }
             },

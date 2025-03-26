@@ -1,8 +1,9 @@
 import type { Draft } from "immer";
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
-import { type ArrayFilter, isArrayValueComparisonElemMatch, isLogicFilter, isValueComparisonContains, isValueComparisonNumeric, isValueComparisonScalar, isWhereFilterDefinition, type MatchJavascriptObject, type ValueComparison, ValueComparisonNumericOperators, type WhereFilterDefinition } from "./types.js";
+import { type ArrayFilter, isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar, type MatchJavascriptObject, type ValueComparison, ValueComparisonNumericOperators, type WhereFilterDefinition } from "./types.js";
 import { isEqual } from "lodash-es";
+import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from "./schemas.ts";
 
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
@@ -127,7 +128,7 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
         if( isValueComparisonContains(filterValue, true) ) {
             if( typeof value==='string' ) {
                 return value.indexOf(filterValue.contains)>-1;
-            } else {
+            } else if( value!==undefined ) {
                 throw new Error("A ValueComparisonContains only works on a string");
             }
         } else if( isValueComparisonNumeric(filterValue, true) ) {

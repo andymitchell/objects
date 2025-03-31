@@ -39,6 +39,12 @@ export type LogicFilter<T extends Record<string, any>> = {
     [K in WhereFilterLogicOperatorsTyped]?: WhereFilterDefinition<T>[];
 }
 
+/**
+ * Define a search term using either the (nestable) keys of an object or boolean logic filters. 
+ * 
+ * Note if you use this as a parameter in a function, TypeScript cannot infer whether it's a logic filter or partial object filter and will claim it has no properties. 
+ * In this case, use isLogicFilter or isPartialObjectFilter to first narrow it, then you can use it.
+ */
 export type WhereFilterDefinition<T extends Record<string, any> = any> =
     PartialObjectFilter<T>
     |
@@ -101,10 +107,14 @@ function safeJson(object:any):string | undefined {
 export type UpdatingMethod = 'merge' | 'assign';
 
 
-export function isLogicFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<any>):filter is LogicFilter<T> {
+export function isLogicFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<T>):filter is LogicFilter<T> {
     return WhereFilterLogicOperators.some(type => {
-        return filter.hasOwnProperty(type) && Array.isArray(filter[type])
+        return filter.hasOwnProperty(type) && Array.isArray((filter as WhereFilterDefinition<any>)[type])
     });
+}
+export function isPartialObjectFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<T>):filter is PartialObjectFilter<T> {
+    const filterType = getValidFilterType(filter);
+    return filterType==='value';
 }
 export function getValidFilterType(filter:WhereFilterDefinition<any>, debugPath?:WhereFilterDefinition<any>[]):'logic' | 'value' | undefined {
     if( isPlainObject(filter) ) { 

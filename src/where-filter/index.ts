@@ -4,7 +4,7 @@ import matchJavascriptObject, { filterJavascriptObjects } from './matchJavascrip
 import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder.ts';
 import type { IPropertyMap, PreparedWhereClauseStatement } from './postgresWhereClauseBuilder.ts';
 import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
-import { type WhereFilterDefinition} from './types.ts';
+import { isLogicFilter, isPartialObjectFilter, type WhereFilterDefinition} from './types.ts';
 
 export {
     matchJavascriptObject, 
@@ -13,6 +13,8 @@ export {
     PropertyMapSchema,
     WhereFilterSchema,
     isWhereFilterDefinition,
+    isPartialObjectFilter,
+    isLogicFilter,
     convertDotPropPathToPostgresJsonPath
 };
 

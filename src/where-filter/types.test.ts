@@ -1,4 +1,4 @@
-import type { WhereFilterDefinition } from "./types.ts"
+import { isLogicFilter, isPartialObjectFilter, type WhereFilterDefinition } from "./types.ts"
 
 
 
@@ -65,4 +65,45 @@ it('with a discriminated union, even though a propery is not always present, it 
         message: 'a' 
     }
 
+})
+
+
+describe('Receive filter parameter in a function', () => {
+    // WhereFilterDefinition<TheType> will fail if it isn't setting the object, because 
+    // WhereFilterDefinition is a union type that can either be a logic filter or partial object filter, but TypeScript cannot infer which. 
+
+
+    it('showcasing the problem', () => {
+        type NormalType = {name: string};
+
+        function receiveFilter(a:WhereFilterDefinition<NormalType>) {
+            //a['name']; // This will fail, because TypeSCript cannot be sure which part of the union it receive (logic of values)
+        }
+    })
+
+    it('works if first test if logic or partial', () => {
+        type NormalType = {name: string};
+        function receiveFilter(a:WhereFilterDefinition<NormalType>) {
+            if( isPartialObjectFilter(a) ) {
+                a['name']; 
+            }
+            if( isLogicFilter(a) && a['OR'] ) {
+                a['OR'].some; 
+            }
+        }
+
+    })
+})
+
+describe("type guards", () => {
+    it('Can use isPartialObjectFilter even if no type defined', () => {
+        const a:WhereFilterDefinition = {name: 'Bob'};
+        
+        if( isPartialObjectFilter(a) ) {
+            
+        } else if( isLogicFilter(a) ) { 
+            
+        }
+    })
+    
 })

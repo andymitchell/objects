@@ -151,8 +151,10 @@ export type WriteActionFailureAffectedItem<T extends Record<string, any> = Recor
 }
 
 export function createWriteActionFailuresSchema<T extends Record<string, any> = Record<string, any>>() {
-    const error_details = z.array(z.union([
-        z.record(z.any()).and(z.object({type: z.literal('custom')})),
+    const error_details = z.array(z.discriminatedUnion('type', [
+        z.object({
+            type: z.literal('custom'),
+        }).passthrough(),
         z.object({
             type: z.literal('schema'),
             issues: (z.array(z.any()) as z.ZodType<z.ZodIssue[]>)

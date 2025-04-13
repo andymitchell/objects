@@ -23,7 +23,7 @@ type ArrayElementFilter<T = any> = (T extends Record<string, any>? WhereFilterDe
     T extends string | number ? T : 
     never) | ArrayValueComparison<T>
 export type ArrayFilter<T extends []> = ArrayElementFilter<T[number]> | T;
-type PartialObjectFilter<T extends Record<string, any>> = Partial<{
+export type PartialObjectFilter<T extends Record<string, any>> = Partial<{
     [P in DotPropPathsIncArrayUnion<T>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
         ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>>
         : ValueComparison<PathValueIncDiscrimatedUnions<T, P>>

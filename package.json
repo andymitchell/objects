@@ -1,57 +1,59 @@
 {
-  "name": "@andyrmitchell/objects",
-  "version": "0.9.0",
-  "description": "",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "name": "@andyrmitchell/objects",
+    "version": "0.9.0",
+    "description": "",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        },
+        "./where-filter": {
+            "types": "./dist/index-where-filter.d.ts",
+            "default": "./dist/index-where-filter.js"
+        }
     },
-    "./where-filter": {
-      "types": "./dist/index-where-filter.d.ts",
-      "default": "./dist/index-where-filter.js"
+    "type": "module",
+    "files": [
+        "dist",
+        "README.MD",
+        "LICENSE"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/andymitchell/objects.git"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build_release": "npm run build_prepare && np",
+        "build": "tsup",
+        "pkglint": "./build/publint_pipeable.sh",
+        "build_prepare": "npm run build && npm run pkglint",
+        "prepublishOnly": "npm run build_prepare",
+        "test": "vitest",
+        "test:watch": "vitest --watch"
+    },
+    "author": "",
+    "license": "MIT",
+    "sideEffects": false,
+    "devDependencies": {
+        "@andyrmitchell/pg-testable": "^0.4.0",
+        "@types/deep-eql": "^4.0.2",
+        "@types/jest": "^29.5.12",
+        "@types/lodash-es": "^4.17.12",
+        "tsup": "^8.5.0",
+        "typescript": "^5.8.3",
+        "vitest": "^3.0.7"
+    },
+    "dependencies": {
+        "@andyrmitchell/utils": "^0.16.5",
+        "deep-eql": "^5.0.2",
+        "dot-prop": "^9.0.0",
+        "immer": "^10.1.1",
+        "lodash-es": "^4.17.21"
+    },
+    "peerDependencies": {
+        "zod": "^3.25.71"
     }
-  },
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "type": "module",
-  "files": [
-    "dist",
-    "README.MD",
-    "LICENSE"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "build_release": "npm run build_prepare && np",
-    "build": "tsup",
-    "pkglint": "./build/publint_pipeable.sh",
-    "build_prepare": "npm run build && npm run pkglint",
-    "prepublishOnly": "npm run build_prepare",
-    "test": "vitest",
-    "test:watch": "vitest --watch"
-  },
-  "author": "",
-  "license": "MIT",
-  "sideEffects": false,
-  "devDependencies": {
-    "@andyrmitchell/pg-testable": "^0.4.0",
-    "@types/deep-eql": "^4.0.2",
-    "@types/jest": "^29.5.12",
-    "@types/lodash-es": "^4.17.12",
-    "tsup": "^8.5.0",
-    "typescript": "^5.8.3",
-    "vitest": "^3.0.7"
-  },
-  "dependencies": {
-    "@andyrmitchell/utils": "^0.16.5",
-    "deep-eql": "^5.0.2",
-    "dot-prop": "^9.0.0",
-    "immer": "^10.1.1",
-    "lodash-es": "^4.17.21"
-  },
-  "peerDependencies": {
-    "zod": "^3.25.71"
-  }
 }

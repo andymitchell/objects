@@ -40,15 +40,15 @@
     "@types/deep-eql": "^4.0.2",
     "@types/jest": "^29.5.12",
     "@types/lodash-es": "^4.17.12",
-    "tsup": "^8.0.1",
-    "typescript": "^5.8.2",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
     "vitest": "^3.0.7"
   },
   "dependencies": {
     "@andyrmitchell/utils": "^0.16.5",
     "deep-eql": "^5.0.2",
     "dot-prop": "^9.0.0",
-    "immer": "^10.0.4",
+    "immer": "^10.1.1",
     "lodash-es": "^4.17.21"
   },
   "peerDependencies": {

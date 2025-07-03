@@ -1,7 +1,7 @@
 import type { Draft } from "immer";
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
-import type { ArrayFilter, MatchJavascriptObject, ValueComparison, WhereFilterDefinition } from "./types.js";
+import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ValueComparison, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
@@ -32,7 +32,22 @@ A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse 
 
 export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
 
-const matchJavascriptObject:MatchJavascriptObject = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean => {
+/**
+ * Checks if a single JavaScript object matches a given filter condition.
+ *
+ * @template T - The type of the object being tested.
+ * @param {ObjOrDraft<T>} object - The object to test. Must be a plain object.
+ * @param {WhereFilterDefinition<T>} filter - The filter definition describing the conditions the object must meet.
+ * @returns {boolean} - Returns true if the object matches the filter, false otherwise.
+ *
+ * @throws {Error} - Throws an error if the input is not a plain JavaScript object.
+ *
+ * @example
+ * const user = { name: 'Alice', age: 30 };
+ * const filter = { age: { gte: 18 } };
+ * matchJavascriptObject(user, filter); // true
+ */
+const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean => {
     if( !isPlainObject(object) ) {
         let json: string = 'redacted';
         if( process.env.NODE_ENV==='test' ) {
@@ -52,6 +67,41 @@ const matchJavascriptObject:MatchJavascriptObject = <T extends Record<string, an
 export default matchJavascriptObject;
 
 
+/**
+ * Compiles a reusable matcher function from a filter definition.
+ *
+ * This allows you to create a function once and reuse it to test multiple objects
+ * against the same filter criteria, improving readability and performance when filtering many items.
+ *
+ * @template T - The type of object the filter will match.
+ * @param {WhereFilterDefinition<T>} filter - The filter definition describing the match criteria.
+ * @returns {BasicMatchJavascriptObject<T>} - A function that takes an object and returns true if it matches the filter.
+ *
+ * @example
+ * const filter = { age: { gte: 18 } };
+ * const isAdult = compileMatchJavascriptObject(filter);
+ *
+ * isAdult({ name: 'Alice', age: 30 }); // true
+ * isAdult({ name: 'Bob', age: 15 });   // false
+ */
+export const compileMatchJavascriptObject = <T extends Record<string, any>>(filter:WhereFilterDefinition<T>):MatchJavascriptObject<T> => {
+    return (object:ObjOrDraft<T>) => matchJavascriptObject(object, filter);
+}
+
+
+/**
+ * Filters an array of JavaScript objects, returning only those that match the given filter.
+ *
+ * @template T - The type of objects in the array.
+ * @param {ObjOrDraft<T>[]} objects - An array of plain JavaScript objects to filter.
+ * @param {WhereFilterDefinition<T>} filter - The filter definition used to test each object.
+ * @returns {ObjOrDraft<T>[]} - An array containing only the objects that match the filter.
+ *
+ * @example
+ * const users = [{ name: 'Alice', age: 30 }, { name: 'Bob', age: 16 }];
+ * const filter = { age: { gte: 18 } };
+ * filterJavascriptObjects(users, filter); // [{ name: 'Alice', age: 30 }]
+ */
 export function filterJavascriptObjects<T extends {} = {}>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<T>):ObjOrDraft<T>[] {
     return objects.filter(x => matchJavascriptObject<T>(x, filter));
 }

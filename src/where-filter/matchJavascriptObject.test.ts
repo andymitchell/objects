@@ -1,5 +1,5 @@
 import { createDraft } from "immer";
-import matchJavascriptObjectReal, { type ObjOrDraft } from "./matchJavascriptObject.js";
+import matchJavascriptObjectReal, { compileMatchJavascriptObject, type ObjOrDraft } from "./matchJavascriptObject.js";
 import { type WhereFilterDefinition } from "./types.js";
 import { standardTests } from "./standardTests.js";
 import { isWhereFilterDefinition } from "./schemas.ts";
@@ -18,6 +18,15 @@ describe('testMatchJavascriptObject', () => {
         test,
         expect,
         matchJavascriptObject
+    })
+
+    test('compiling', () => {
+        const customMatchJavascriptObject = compileMatchJavascriptObject({age: {gte: 18}} as const);
+
+        expect(customMatchJavascriptObject({age: 18})).toBe(true);
+        expect(customMatchJavascriptObject({age: 17})).toBe(false);
+
+        expect(customMatchJavascriptObject({veryDifferentStructure: true})).toBe(false);
     })
 
     test('Immer - Match name', async () => {

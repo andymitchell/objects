@@ -11,6 +11,8 @@ import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-p
 import cloneDeepSafe from "./utils/cloneDeepSafe.js";
 
 
+export * from "./where-filter/index.ts";
+
 export {
     isPlainObject, 
     safeKeyValue, 

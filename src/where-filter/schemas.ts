@@ -1,6 +1,7 @@
 import { z, ZodNumber, ZodOptional, type ZodSchema, type ZodTypeDef } from "zod";
-import { ValueComparisonNumericOperators, type ArrayValueComparisonElemMatch, type ValueComparisonContains, type WhereFilterDefinition } from "./types.ts";
+import type {  ArrayValueComparisonElemMatch, ValueComparisonContains, WhereFilterDefinition } from "./types.ts";
 import isPlainObject from "../utils/isPlainObject.js";
+import { ValueComparisonNumericOperators } from "./consts.ts";
 
 export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef, any> = z.lazy(() =>
     z.union([

@@ -1,10 +1,11 @@
 import type { Draft } from "immer";
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
-import { type ArrayFilter, isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar, type MatchJavascriptObject, type ValueComparison, ValueComparisonNumericOperators, type WhereFilterDefinition } from "./types.js";
-import { isEqual } from "lodash-es";
+import type { ArrayFilter, MatchJavascriptObject, ValueComparison, WhereFilterDefinition } from "./types.js";
+import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from "./schemas.ts";
-
+import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
+import { ValueComparisonNumericOperators } from "./consts.ts";
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
 /*
@@ -50,16 +51,15 @@ const matchJavascriptObject:MatchJavascriptObject = <T extends Record<string, an
 }
 export default matchJavascriptObject;
 
+
+export function filterJavascriptObjects<T extends {} = {}>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<T>):ObjOrDraft<T>[] {
+    return objects.filter(x => matchJavascriptObject<T>(x, filter));
+}
+
+
 function _matchJavascriptObject<T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition, debugPath:WhereFilterDefinition[]):boolean {
     
     
-
-    
-    
-    
-    
-
-
     const keys = Object.keys(filter) as Array<keyof typeof filter>;
     if( keys.length===0 ) {
         // If there are no keys on the filter, there is no filter. Therefore return all. 
@@ -107,9 +107,6 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
     
 }
 
-export function filterJavascriptObjects<T extends {} = {}>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<T>):ObjOrDraft<T>[] {
-    return objects.filter(x => matchJavascriptObject<T>(x, filter));
-}
 
 type ValueComparisonNumericOperatorJavascriptFunctionsTyped = {
     [K in typeof ValueComparisonNumericOperators[number]]: (value:number, filterValue: number) => boolean; 
@@ -144,7 +141,7 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
                 throw new Error("A ValueComparisonContains only works on a number");
             }
         } else {
-            return isEqual(value, filterValue);
+            return deepEql(value, filterValue);
         }
     } else {
         if( isValueComparisonScalar(filterValue) ) {
@@ -157,7 +154,7 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
 function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:WhereFilterDefinition[]):boolean {
     if( Array.isArray(filterValue) ) {
         // Two arrays = straight comparison
-        return isEqual(value, filterValue);
+        return deepEql(value, filterValue);
     } else if( isArrayValueComparisonElemMatch(filterValue) ) {
         // In an elem_match, one item in the 'value' array must match all the criteria
         if( isWhereFilterDefinition(filterValue.elem_match) ) {

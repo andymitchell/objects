@@ -1,12 +1,13 @@
 
 import { z } from "zod";
-import { ValueComparisonNumericOperators, type ValueComparisonNumericOperatorsTyped, type WhereFilterDefinition, WhereFilterLogicOperators, isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./types.js";
+import type {  ValueComparisonNumericOperatorsTyped, WhereFilterDefinition } from "./types.js";
 import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterArray, isWhereFilterDefinition } from './schemas.ts';
 import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
 import isPlainObject from "../utils/isPlainObject.js";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.js";
-
+import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
+import { ValueComparisonNumericOperators, WhereFilterLogicOperators } from "./consts.ts";
 
 /*
 Future improvements:

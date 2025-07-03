@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { WriteAction, WriteActionFailures, WriteActionFailuresErrorDetails } from "../../types.js";
 import type { ListRules } from "../types.js";
-import { isEqual } from "lodash-es";
+import deepEql from "deep-eql";
 import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.js";
 
 
@@ -25,7 +25,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
     }
 
     private findAction<IMA extends boolean = false>(action:WriteAction<T>, ifMissingAdd?: IMA): IMA extends true? FailedAction<T> : FailedAction<T>  | undefined {
-        let failedAction = this.failures.find(x => isEqual(x.action, action));
+        let failedAction = this.failures.find(x => deepEql(x.action, action));
         if( ifMissingAdd && !failedAction ) {
             failedAction = {action, error_details: [], affected_items: []};
             this.failures.push(failedAction);
@@ -50,7 +50,7 @@ export default class WriteActionFailuresTracker<T extends Record<string, any>> {
     }
 
     private addErrorDetails(action:FailedAction<T>, item:FailedItem<T>, errorDetails:WriteActionFailuresErrorDetails) {
-        if( item.error_details.some(x => isEqual(x, errorDetails)) ) {
+        if( item.error_details.some(x => deepEql(x, errorDetails)) ) {
             return;
         }
         action.error_details.push(errorDetails);

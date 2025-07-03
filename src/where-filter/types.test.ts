@@ -1,4 +1,6 @@
-import { isLogicFilter, isPartialObjectFilter, type WhereFilterDefinition } from "./types.ts"
+
+import { isLogicFilter, isPartialObjectFilter } from "./typeguards.ts";
+import { type WhereFilterDefinition } from "./types.ts"
 
 
 

@@ -24,6 +24,7 @@ type ArrayElementFilter<T = any> = (T extends Record<string, any>? WhereFilterDe
     T extends string | number ? T : 
     never) | ArrayValueComparison<T>
 export type ArrayFilter<T extends []> = ArrayElementFilter<T[number]> | T;
+
 export type PartialObjectFilter<T extends Record<string, any>> = Partial<{
     [P in DotPropPathsIncArrayUnion<T>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
         ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>>
@@ -53,6 +54,10 @@ export type WhereFilterDefinition<T extends Record<string, any> = any> =
     |
     LogicFilter<T>;
 
+// TODO Consider using this: 
+declare type WhereFilterDefinition_POSSIBLYFASTER_BUT_NEEDS_TESTING<T extends Record<string, any> = any> = T extends any
+    ? PartialObjectFilter<T> | LogicFilter<T>
+    : never;
 
 
 /*

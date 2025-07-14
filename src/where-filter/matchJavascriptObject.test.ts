@@ -20,6 +20,7 @@ describe('testMatchJavascriptObject', () => {
         matchJavascriptObject
     })
 
+
     test('compiling', () => {
         const customMatchJavascriptObject = compileMatchJavascriptObject({age: {gte: 18}} as const);
 

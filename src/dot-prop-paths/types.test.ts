@@ -22,7 +22,8 @@ it('no test just type errors', () => {
 
     type ExampleTypedValues = Partial<DotPropPathsRecord<Example>>;
     const a: ExampleTypedValues = { age: 12, 'address.city': 'New York', 'pets.somePet': 1 }; // OK
-    //const b: ExampleTypedValues = { age: 'twelve' }; // Expect fail: Type 'string' is not assignable to type 'number'.
+    // @ts-expect-error
+    const b: ExampleTypedValues = { age: 'twelve' }; // Expect fail: Type 'string' is not assignable to type 'number'.
 
     type ValueComparisonContains = { contains: string };
     type ValueComparisonArrayContains = { array_contains: string };
@@ -45,7 +46,8 @@ it('no test just type errors', () => {
     const f: Filter<ExampleGeneric<{ city: string }>> = { age: 1, 'address.city': 'New York' }; // OK
     class ExampleClass<T> {
         constructor() {
-            //this.list({age: 1}) // INCORRECT ERROR / SYSTEM FAILURE. Typescript can't handle this use case with generics defined at the class level (note that Filter<T> would work with generics, as 'f' does)
+            // @ts-expect-error
+            this.list({age: 1}) // INCORRECT ERROR / SYSTEM FAILURE. Typescript can't handle this use case with generics defined at the class level (note that Filter<T> would work with generics, as 'f' does)
             this.list2({ age: 1 }) // OK
         }
         list(where: Filter<ExampleGeneric<T>>) {
@@ -69,20 +71,23 @@ it('no test just type errors', () => {
         path: 'family',
         value: { relation: 'aunt' }
     }
-    /*
-    const i:ArrayPush<Example> = {
+    
+    
+    const i:ArrayPush<Example, 'family'> = {
         type: 'array_create', 
         path: 'family', 
+        // @ts-expect-error
         value: {relation: 'uncle2'} // Expect Fail
     }
-    */
-    /*
+    
+    
     const j: ArrayPush<Example, 'family'> = {
         type: 'array_create',
         path: 'family',
+        // @ts-expect-error
         value: { name: 'grey' } // Expect Fail
     }
-    */
+    
 
     
     type Update<T> = {
@@ -97,12 +102,13 @@ it('no test just type errors', () => {
     const p1:DotPropPathsUnionScalarArraySpreadingObjectArrays<Example> = 'hobbies';
     const p2:DotPropPathsUnionScalarArraySpreadingObjectArrays<Example> = 'parttime_hobbies';
     
-    /*
+    
     const ab: Update<Example> = {
         type: 'update',
+        // @ts-expect-error
         data: { family: [] } // Expect Fail
     };
-    */
+    
 
     const configSchema = z.object({
         name: z.string(),

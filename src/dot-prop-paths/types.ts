@@ -15,7 +15,8 @@ export type DotPropPathsRecordWithOptionalAdditionalValues<T extends Record<stri
 };
 
 
-type Path<T> = T extends Array<any>
+/*
+type Path_WORKING_BUT_POSSIBLY_INFINITE<T> = T extends Array<any>
     ? never
     : T extends object
     ? {
@@ -25,6 +26,20 @@ type Path<T> = T extends Array<any>
     }[keyof T]
     : '';
 
+Switch on 14/7/2025: 
+This was working fine in a lot of code. But I got a  "Type instantiation is excessively deep and possibly infinite.ts(2589)"
+in the test 'handles complex discriminated unions with possibly infinite recursion [regression]'. 
+I added depth guards to Path below. 
+*/
+type Path<T, Depth extends number = 6> = Depth extends 0 ? '' : T extends Array<any>
+    ? never
+    : T extends object
+    ? {
+        [K in keyof T]-?: K extends string | number
+        ? `${string & K}` | `${string & K}.${Path<NonNullable<T[K]>, Prev[Depth]>}` // Pass decremented depth
+        : never;
+    }[keyof T]
+    : '';
 
 export type RemoveTrailingDot<T> = T extends `${infer S}.` ? never : T;
 export type DotPropPathsUnion<T> = { [K in Path<T>]: RemoveTrailingDot<K> }[Path<T>];

@@ -58,11 +58,9 @@ it('should try to control types even on permissive records', () => {
         code?: string;
     }
 
-
     // TODO
     // Sadly this currently doesn't work. 
     // In an ideal world, it detect that "message" has to be a string. But typescript flips into full permissive mode. 
-
     const a: WhereFilterDefinition<ErrorObject> = {
         'message': 1 // Expect this to fail because of in ErrorObject 'message' is a string. But it doesn't fail. It doesn't have any opinion on any key.
     }

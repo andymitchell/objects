@@ -54,10 +54,6 @@ export type WhereFilterDefinition<T extends Record<string, any> = any> =
     |
     LogicFilter<T>;
 
-// TODO Consider using this: 
-declare type WhereFilterDefinition_POSSIBLYFASTER_BUT_NEEDS_TESTING<T extends Record<string, any> = any> = T extends any
-    ? PartialObjectFilter<T> | LogicFilter<T>
-    : never;
 
 
 /*

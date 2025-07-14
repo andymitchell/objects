@@ -49,6 +49,25 @@ it('it correctly identifies the available dot prop sub keys, and their type, but
 })
 
 
+it('should try to control types even on permissive records', () => {
+    type ErrorObject = {[x: string]: any;} & {
+        name?: string;
+        message?: string;
+        stack?: string;
+        cause?: unknown;
+        code?: string;
+    }
+
+
+    // TODO
+    // Sadly this currently doesn't work. 
+    // In an ideal world, it detect that "message" has to be a string. But typescript flips into full permissive mode. 
+
+    const a: WhereFilterDefinition<ErrorObject> = {
+        'message': 1 // Expect this to fail because of in ErrorObject 'message' is a string. But it doesn't fail. It doesn't have any opinion on any key.
+    }
+})
+
 it('it throws a type error if using an unknown key', () => {
 
     type NormalType = { name: '2', 'child': { age: number } };
@@ -129,16 +148,16 @@ it('handles complex discriminated unions with possibly infinite recursion [regre
     type JsonPrimitive = string | number | boolean | null;
     type JsonValue = JsonPrimitive | JsonObject | JsonArray;
     type ErrorObject = {
+        [x: string]: JsonValue; // This is the source of potentially infinite recursion 
+    } & {
+        [x: string]: JsonValue | undefined; // This is the source of potentially infinite recursion 
+    } &{
         name?: string;
         message?: string;
         stack?: string;
         cause?: unknown;
         code?: string;
-    } & {
-        [x: string]: JsonValue; // This is the source of potentially infinite recursion 
-    } & {
-        [x: string]: JsonValue | undefined; // This is the source of potentially infinite recursion 
-    }
+    } 
 
     type MinimumContext = Record<string, any>;
 
@@ -210,6 +229,10 @@ it('handles complex discriminated unions with possibly infinite recursion [regre
 
     // Run the type checks. All should be ok with no type errors (actual result in line comments below).
     logStorage.get<LogEntry<MessagingError>>(); // No type error
+    logStorage.get<LogEntry<ErrorObject>>({'context': {}}) 
+    logStorage.get<LogEntry<ErrorObject>>({'context.message': 1}); // Problem: doesn't fail like it should, as it needs to be a string not a number
+    logStorage.get<LogEntry<ErrorObject>>({'context.message2': ''}); // Problem: doesn't fail like it should, as it's not a key on ErrorObject
+    
     logStorage.get<LogEntry>({'type': 'error'}); // No type error
     logStorage.get<LogEntry<MessagingError>>({'type': 'error'}); // No type error
     logStorage.get<LogEntry<MessagingError>>({'context.message.data': {}}); // No type error. Notice it goes 3 deep just fine. 
@@ -241,10 +264,10 @@ it('handles complex discriminated unions with possibly infinite recursion [regre
         }
     ]});
 
-    // WIP Investigating why serialized error fails
-    logStorage.get<LogEntry<MessagingError>>({'context.serializedError': {}}); // Problem: it cannot go deeper than 'context.serializedError'. It just ignores it. Possibly because ErrorObject has infinite recursion and a lot of the Path tracing guards against it. 
-    logStorage.get<LogEntry<MessagingError>>({'context.serializedError.stack': ''}); // Interestingly there's no type error (which is right because it exists, but the permutations of paths doesn't seem to know that - there's no suggestion below 'context.serializedError')
-    logStorage.get<LogEntry<MessagingError>>({'context.serializedError.stack2': ''}); // Problem: no error even thought 'stack2' does not exist. It's just given up on context.serializedError. 
+    // ErrorObject is basically a Record<string, any>, so it cannot restrict keys.
+    logStorage.get<LogEntry<MessagingError>>({'context.serializedError': {}}); // Ok
+    logStorage.get<LogEntry<MessagingError>>({'context.serializedError.stack': 1}); // Problem: it should recognise this should be a string not a number
+    logStorage.get<LogEntry<MessagingError>>({'context.serializedError.stack2': ''}); // Ok. It's a Record<string, any> at heart, so it allows anything. 
     
 })
 

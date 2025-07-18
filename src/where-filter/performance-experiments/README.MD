@@ -48,6 +48,11 @@ E.g.
 
 A caveat to this is the long term goal is to precompile only until TS7 comes along, then switch back. 
 
+### Other projects to look at 
+
+- `ts-simplify`
+- `https://run-z.github.io/rollup-plugin-flat-dts/` 
+
 ### full-compilation
 
 You can see the efforts in the `full-compilation` folder. Some of them actually came close, but they're all _approximations_. Which is the main reason not to use them, as there will be tiny but infuriating differences with the dynamic version. 

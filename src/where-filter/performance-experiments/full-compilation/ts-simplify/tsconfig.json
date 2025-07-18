@@ -16,6 +16,6 @@
         ]
     },
     "include": [
-        "./*",
+        "./*", "../../../partial-compilation/wherefilter_with_precompile_step.ts",
     ]
 }

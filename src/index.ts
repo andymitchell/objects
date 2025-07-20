@@ -12,6 +12,7 @@ import cloneDeepSafe from "./utils/cloneDeepSafe.js";
 
 
 export * from "./where-filter/index.ts";
+export * from "./objects-delta/index.ts";
 
 export {
     isPlainObject, 

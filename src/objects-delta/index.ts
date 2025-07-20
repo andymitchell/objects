@@ -1,5 +1,5 @@
 import  { createObjectsDeltaTracker } from "./createObjectsDeltaTracker.ts";
-import type { ObjectsDeltaTracker, ObjectsDelta } from "./types.ts";
+import type { ObjectsDeltaTracker, ObjectsDelta, ObjectsDeltaTrackerOptions } from "./types.ts";
 import  { ObjectsDeltaEmitter } from "./ObjectsDeltaEmitter.ts";
 
 export {
@@ -9,5 +9,6 @@ export {
 
 export type {
     ObjectsDelta,
-    ObjectsDeltaTracker
+    ObjectsDeltaTracker,
+    ObjectsDeltaTrackerOptions
 }

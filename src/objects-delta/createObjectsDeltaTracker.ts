@@ -1,5 +1,6 @@
 import { isEqual } from "lodash-es";
 import type { ObjectsDeltaTracker, ObjectsDeltaTrackerOptions, ObjectsDelta } from "./types.ts";
+import { isPrimaryKeyValue, makePrimaryKeyGetter, type PrimaryKeyGetter, type PrimaryKeyValue } from "../utils/getKeyValue.ts";
 
 
 
@@ -10,9 +11,10 @@ import type { ObjectsDeltaTracker, ObjectsDeltaTrackerOptions, ObjectsDelta } fr
  * @returns A function that you pass a new array to, which returns the `ObjectsDelta` from the last call.
  */
 export function createObjectsDeltaTracker<T extends Record<string, any> = Record<string, any>>(
-    primaryKey: keyof T,
+    primaryKey: keyof T | PrimaryKeyGetter<T>,
     options: ObjectsDeltaTrackerOptions = {}
 ): ObjectsDeltaTracker<T> {
+    const getPrimaryKey:PrimaryKeyGetter<T> = isPrimaryKeyValue(primaryKey)? makePrimaryKeyGetter<T>(primaryKey) : primaryKey;
     const { useDeepEqual = true } = options;
 
     // State: This array is "closed over" by the function returned below.
@@ -24,8 +26,8 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
         // In the case of referential equality (useDeepEqual is false), a shallow copy using the spread syntax ([...newItems]) is sufficient. This creates a new array wrapper, which is important for maintaining lastItems as a distinct snapshot for the next comparison, even if the objects themselves are not cloned.    
         newItems = useDeepEqual? structuredClone(newItems) : [...newItems];
 
-        const newItemsMap = new Map<string | number, T>(newItems.map(item => [item[primaryKey] as string | number, item]));
-        const lastItemsMap = new Map<string | number, T>(lastItems.map(item => [item[primaryKey] as string | number, item]));
+        const newItemsMap = new Map<PrimaryKeyValue, T>(newItems.map(item => [getPrimaryKey(item), item]));
+        const lastItemsMap = new Map<PrimaryKeyValue, T>(lastItems.map(item => [getPrimaryKey(item), item]));
 
         const added: T[] = [];
         const updated: T[] = [];

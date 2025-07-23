@@ -24,14 +24,14 @@ const ValueComparisonNumericSchemaPartial: Record<string, ZodOptional<ZodNumber>
 ValueComparisonNumericOperators.forEach(operator => ValueComparisonNumericSchemaPartial[operator] = z.number().optional());
 const ValueComparisonNumericSchema = z.object(ValueComparisonNumericSchemaPartial);
 const ValueComparisonContainsSchema = z.object({
-    contains: z.union([z.string(), z.number(), z.symbol()]),
+    contains: z.union([z.string(), z.number()]),
 });
 /*
 const ValueComparisonArrayContainsSchema = z.object({
-    array_contains: z.union([z.string(), z.number(), z.symbol()]),
+    array_contains: z.union([z.string(), z.number()]),
 });
 */
-const ValueComparisonScalarSchema = z.union([z.string(), z.number(), z.symbol()]);
+const ValueComparisonScalarSchema = z.union([z.string(), z.number()]);
 
 const ValueComparisonSchema = z.union([
     ValueComparisonScalarSchema,

@@ -1,6 +1,6 @@
 import { isEqual } from "lodash-es";
 import type { ObjectsDeltaTracker, ObjectsDeltaTrackerOptions, ObjectsDelta } from "./types.ts";
-import { isPrimaryKeyValue, makePrimaryKeyGetter, type PrimaryKeyGetter, type PrimaryKeyValue } from "../utils/getKeyValue.ts";
+import { isFullPrimaryKeyValue, makePrimaryKeyGetter, type PrimaryKeyGetter, type PrimaryKeyValue } from "../utils/getKeyValue.ts";
 
 
 
@@ -14,7 +14,7 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
     primaryKey: keyof T | PrimaryKeyGetter<T>,
     options: ObjectsDeltaTrackerOptions = {}
 ): ObjectsDeltaTracker<T> {
-    const getPrimaryKey:PrimaryKeyGetter<T> = isPrimaryKeyValue(primaryKey)? makePrimaryKeyGetter<T>(primaryKey) : primaryKey;
+    const getPrimaryKey:PrimaryKeyGetter<T> = isFullPrimaryKeyValue(primaryKey)? makePrimaryKeyGetter<T>(primaryKey) : primaryKey;
     const { useDeepEqual = true } = options;
 
     // State: This array is "closed over" by the function returned below.

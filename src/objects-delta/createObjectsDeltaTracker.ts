@@ -40,7 +40,7 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
                 
                 // Use the selected comparison method
                 const areItemsEqual = useDeepEqual ? isEqual(oldItem, newItem) : oldItem === newItem;
-                console.log({areItemsEqual, useDeepEqual, oldItem, newItem});
+                //console.log({areItemsEqual, useDeepEqual, oldItem, newItem});
 
                 if (!areItemsEqual) {
                     updated.push(newItem);

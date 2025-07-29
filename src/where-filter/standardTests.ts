@@ -57,28 +57,47 @@ type SpreadNested = z.infer<typeof SpreadNestedSchema>;
 export function standardTests(testConfig:StandardTestConfig) {
     const {test, expect, matchJavascriptObject} = testConfig;
 
-    for( const dotPath of DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED ) {
-        test(`Attack: ${dotPath}`, async () => {
-        
-            const result = await matchJavascriptObject(
+    describe('Attack handling', () => {
+        for( const dotPath of DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED ) {
+            test(`Attack: ${dotPath}`, async () => {
+            
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            emailAddress: 'andy@andy.com'
+                        }
+                    },
+                    {
+                        [dotPath]: 'Anything'
+                    },
+                    ContactSchema
+                );
+                
+                if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+                expect(result).toBe(false);
+            
+            });
+        }
+    })
+
+    describe('error handling', () => {
+        test('undefined filter', async () => {
+  
+            await expect(matchJavascriptObject(
                 {
                     contact: {
                         name: 'Andy',
                         emailAddress: 'andy@andy.com'
                     }
                 },
-                {
-                    [dotPath]: 'Anything'
-                },
+                // @ts-expect-error 
+                undefined,
                 ContactSchema
-            );
+            )).rejects.toThrow('filter was not well-defined');
             
-            if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-            expect(result).toBe(false);
-        
         });
-    }
-
+    })
     
     test('Match all', async () => {
         const result = await matchJavascriptObject(

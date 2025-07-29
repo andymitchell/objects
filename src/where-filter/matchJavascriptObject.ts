@@ -6,6 +6,7 @@ import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
 import { ValueComparisonNumericOperators } from "./consts.ts";
+import { safeJson } from "./safeJson.ts";
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
 /*
@@ -49,16 +50,12 @@ export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
  */
 const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean => {
     if( !isPlainObject(object) ) {
-        let json: string = 'redacted';
-        if( process.env.NODE_ENV==='test' ) {
-            try {
-                json = JSON.stringify(object);
-            } catch(e) {
-                json = 'unknowable'
-            }
-
-        }
+        let json: string = process.env.NODE_ENV==='test'? safeJson(object) : 'redacted';
         throw new Error("matchJavascriptObject requires plain object. Received: "+json)
+    }
+    
+    if( !isWhereFilterDefinition(filter) ) {
+        throw new Error("matchJavascriptObject filter was not well-defined. Received: "+safeJson(filter));
     }
 
     return _matchJavascriptObject(object, filter, [filter]);

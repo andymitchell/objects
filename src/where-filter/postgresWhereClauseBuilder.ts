@@ -8,6 +8,7 @@ import isPlainObject from "../utils/isPlainObject.js";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.js";
 import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
 import { ValueComparisonNumericOperators, WhereFilterLogicOperators } from "./consts.ts";
+import { safeJson } from "./safeJson.ts";
 
 /*
 Future improvements:
@@ -21,6 +22,11 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
 
 
 export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseStatement {
+    if( !isWhereFilterDefinition(filter) ) {
+        throw new Error("postgresWhereClauseBuilder filter was not well-defined. Received: "+safeJson(filter));
+    }
+
+
     const statementArguments:PreparedStatementArgument[] = [];
 
     const whereClauseStatement = _postgresWhereClauseBuilder<T>(filter, statementArguments, propertySqlMap);

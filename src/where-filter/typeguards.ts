@@ -1,5 +1,6 @@
 import isPlainObject from "../utils/isPlainObject.ts";
 import { ValueComparisonNumericOperators, WhereFilterLogicOperators } from "./consts.ts";
+import { safeJson } from "./safeJson.ts";
 import type {  LogicFilter, PartialObjectFilter, ValueComparisonNumeric, WhereFilterDefinition } from "./types.ts";
 
 export function isLogicFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<T>):filter is LogicFilter<T> {
@@ -35,11 +36,3 @@ export function isValueComparisonScalar(x:unknown): x is string | number | boole
 }
 
 
-
-function safeJson(object:any):string | undefined {
-    try {
-        return JSON.stringify(object);
-    } catch(e) {
-        return undefined;
-    }
-}

@@ -154,6 +154,7 @@ export function createWriteActionFailuresSchema<T extends Record<string, any> = 
     const error_details = z.array(z.discriminatedUnion('type', [
         z.object({
             type: z.literal('custom'),
+            message: z.string().optional()
         }).passthrough(),
         z.object({
             type: z.literal('schema'),
@@ -190,7 +191,7 @@ export function createWriteActionFailuresSchema<T extends Record<string, any> = 
     }));
 }
 const WriteActionFailuresSchema = createWriteActionFailuresSchema();
-export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'custom'} | 
+export type WriteActionFailuresErrorDetails = Record<string, any> & {type: 'custom', message?: string} | 
     {
         type: 'schema',
         issues: z.ZodIssue[]

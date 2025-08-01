@@ -86,5 +86,3 @@ export type {
     
     IUser
 }
-
-export * from './index-old-types.ts';

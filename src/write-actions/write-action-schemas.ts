@@ -4,7 +4,15 @@ import { isTypeEqual } from "@andyrmitchell/utils";
 import type { WriteAction, FailedWriteAction, FailedWriteActionAffectedItem, WriteActionPayloadArrayScope, WriteActionPayloadUpdate, WriteActionsResponseError, WriteActionsResponseOk, SuccessfulWriteAction, WriteCommonError } from "./types.ts";
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
-import { SerializableCommonErrorSchema } from "@andyrmitchell/utils/serialize-error";
+//import { SerializableCommonErrorSchema } from "@andyrmitchell/utils/serialize-error";
+
+
+export const SerializableCommonErrorSchema = z.object({
+    message: z.string(),
+    cause: z.unknown().optional(),
+    stack: z.string().optional(),
+    name: z.string().optional(),
+});
 
 
 export function makeWriteActionSchema<T extends Record<string, any> = Record<string, any>>(objectSchema?: z.AnyZodObject):z.ZodType<WriteAction<T>> {

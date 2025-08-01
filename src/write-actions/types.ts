@@ -2,10 +2,18 @@ import { type ZodIssue } from "zod";
 import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../dot-prop-paths/types.js";
 import type { UpdatingMethod, WhereFilterDefinition } from "../where-filter/types.js"
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
-import type { Draft } from "immer";
-import type { SerializableCommonError } from "@andyrmitchell/utils/serialize-error";
+//import type { SerializableCommonError } from "@andyrmitchell/utils/serialize-error";
 
-
+interface SerializableCommonError {
+    /** The human-readable error message. */
+    message: string;
+    /** The underlying cause of the error, if available. Can be any type, but restricted to being serializable. */
+    cause?: unknown;
+    /** The stack trace at the time the error was thrown, if available. */
+    stack?: string;
+    /** The type or name of the error (e.g., "TypeError", "ValidationError"). */
+    name?: string;
+}
 
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
 
@@ -43,6 +51,12 @@ type WriteActionPayloadDelete<T extends Record<string, any>> = {
     where: WhereFilterDefinition<T>
 }
 export type WriteActionPayload<T extends Record<string, any>> = WriteActionPayloadCreate<T> | WriteActionPayloadUpdate<T> | WriteActionPayloadDelete<T> | WriteActionPayloadArrayScope<T>;
+/**
+ * An instruction to modify an object, using CRUD-inspired verbs. 
+ * 
+ * The only peculiar one is `array_scope` where every nested list can be treated atomically by first targetting/scoping it, 
+ * then applying the action at that level. It allows more granular behaviour.
+ */
 export type WriteAction<T extends Record<string, any>> = {
     type: 'write',
     ts: number,
@@ -96,25 +110,64 @@ export type WriteCommonError =
         reason: 'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email' | 'not-authenticated'
     };
 
+/**
+ * A single `WriteAction` that failed. 
+ * 
+ * 
+ * If supported, it includes the items/objects it modified.
+ */
 export type FailedWriteAction<T extends Record<string, any> = Record<string, any>> = {
     action: WriteAction<T>,
+    /**
+     * The cause of the failure. There are potentially several (although this is unlikely).
+     * The first entry should be the root cause of the failure. 
+     */
     error_details: WriteCommonError[],
+
+    /**
+     * It's recoverable if it's a temporary problem like a network issue; and unrecoverable if it can never succeed (e.g. the update would break the owner permissions)
+     */
     unrecoverable?: boolean,
+
+    /**
+     * Don't retry until this time. 
+     */
     back_off_until_ts?: number,
+
+    /**
+     * Actions are applied sequentially, so a common cause of failure is that an earlier action failed (and that needs to be remedied, then this action might work). 
+     * This tells you that initial failing action. 
+     */
     blocked_by_action_uuid?: string,
+
+    /**
+     * Optional. The items affected by this failed action. 
+     */
     affected_items?: FailedWriteActionAffectedItem<T>[]
 
 };
 
+/**
+ * A single `WriteAction` that was successful. 
+ * 
+ * If supported, it includes the items/objects it modified.
+ */
 export type SuccessfulWriteAction<T extends Record<string, any>> = {
     action: WriteAction<T>,
     affected_items?: WriteActionAffectedItem[]
 }
 
 
+/**
+ * Having been given multiple `WhereFilterDefinitions`, this represents the union of them.
+ */
 export type CombineWriteActionsWhereFiltersResponse<T extends Record<string, any>> = {status: 'ok', filter: WhereFilterDefinition<T> | undefined} | SerializableCommonError & {status: 'error', failed_actions: FailedWriteAction<T>[]};
 
-
+/**
+ * General success for actions. 
+ * 
+ * It's implied all actions succeeded.
+ */
 export type WriteActionsResponseOk = {
     status: 'ok'
 }
@@ -125,20 +178,23 @@ export type WriteActionsResponseOk = {
  */
 export type WriteActionsResponseError<T extends Record<string, any>> = SerializableCommonError & {
     status: 'error',
-    successful_actions: SuccessfulWriteAction<T>[],
-    failed_actions: FailedWriteAction<T>[]
-}
-export type WriteActionsResponse<T extends Record<string, any>> = WriteActionsResponseOk | WriteActionsResponseError<T>;
-
-export type ApplyWritesToItemsChanges<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] | Draft<T>[] }
-export type ApplyWritesToItemsResponse<T extends Record<string, any>> = WriteActionsResponseOk & {
-    changes: ApplyWritesToItemsChanges<T>,
-
     /**
-     * This is a bit of a legacy thing. `WriteActionsResponseOk` does not include it. 
-     * It's now considered redundant because it can only be a success if all actions are complete. 
+     * The actions that succeeded, if any. 
+     * 
+     * Note in the case of an error: 
+     * - `applyWritesToItems` will always fail all subsequent actions after the first failure, to prevent them being applied out of order.
+     * - It may fail all of them if any error (see `allow_partial_success` on the options)
+     * 
      */
     successful_actions: SuccessfulWriteAction<T>[],
-} | WriteActionsResponseError<T> & {
-    changes: ApplyWritesToItemsChanges<T>
+
+    /**
+     * The actions that failed, and the reason why. 
+     */
+    failed_actions: FailedWriteAction<T>[]
 }
+
+/**
+ * Either all actions succeeded, or there was an error (in which case it tells you if any succeeded, and which failed).
+ */
+export type WriteActionsResponse<T extends Record<string, any>> = WriteActionsResponseOk | WriteActionsResponseError<T>;

@@ -2,9 +2,10 @@ import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValu
 import type { PrimaryKeyValue } from "../../utils/getKeyValue.js";
 import type { IfAny } from "../../types.js";
 import type { EnsureRecord } from "../../types.js";
-import type {  WriteActionPayloadCreate, WriteActionPayloadUpdate } from "../types.js";
+import type {  SuccessfulWriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate, WriteActionsResponseError, WriteActionsResponseOk } from "../types.js";
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
+import type { Draft } from "immer";
 
 
 export type ItemHash<T> = Record<PrimaryKeyValue, T>;
@@ -174,3 +175,23 @@ const a:DDL<any> = {
 }
 const c:PrimaryKeyValue = a.lists['.'].primary_key
 */
+
+
+/**
+ * The changes to the original items passed to `applyWritesToItems`, after the actions are run. 
+ */
+export type ApplyWritesToItemsChanges<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] | Draft<T>[] }
+/**
+ * The response to `applyWritesToItems`
+ */
+export type ApplyWritesToItemsResponse<T extends Record<string, any>> = WriteActionsResponseOk & {
+    changes: ApplyWritesToItemsChanges<T>,
+
+    /**
+     * This is a bit of a legacy thing. `WriteActionsResponseOk` does not include it. 
+     * It's now considered redundant because it can only be a success if all actions are complete. 
+     */
+    successful_actions: SuccessfulWriteAction<T>[],
+} | WriteActionsResponseError<T> & {
+    changes: ApplyWritesToItemsChanges<T>
+}

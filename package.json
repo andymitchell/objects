@@ -14,6 +14,10 @@
         "./write-actions": {
             "types": "./dist/index-write-actions.d.ts",
             "default": "./dist/index-write-actions.js"
+        },
+        "./write-actions-old-types": {
+            "types": "./dist/index-write-actions-old-types.d.ts",
+            "default": "./dist/index-write-actions-old-types.js"
         }
     },
     "type": "module",

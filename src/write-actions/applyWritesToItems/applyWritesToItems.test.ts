@@ -5,6 +5,7 @@ import {assertArrayScope } from "../types.js";
 import type { ApplyWritesToItemsOptions, DDL } from "./types.js";
 import { produce } from "immer";
 import type { IUser } from "../auth/types.js";
+import { WriteActions } from "../index.ts";
 
 
 
@@ -1576,3 +1577,35 @@ describe('Regression Tests', () => {
 });
 
 
+test('', () => {
+    type Obj = {id: number};
+    const ObjSchema = z.object({id: z.number()});
+    const actions:WriteAction<Obj>[] = [];
+    const objects: Obj[] = [];
+    const user:IUser = {
+        getID: function (): string | undefined {
+            throw new Error("Function not implemented.");
+        },
+        getUuid: function (): string | undefined {
+            throw new Error("Function not implemented.");
+        },
+        getEmail: function (): string | undefined {
+            throw new Error("Function not implemented.");
+        }
+    };
+    const ddl:DDL<Obj> = {
+        version: 1,
+        lists: {
+            '.': {
+                primary_key: 'id'
+            }
+        },
+        permissions: {
+            type: 'none'
+        }
+    }
+
+    WriteActions.applyWritesToItems(actions, objects, ObjSchema, ddl, user, { 
+        'attempt_recover_duplicate_create': 'if-identical'
+    });
+})

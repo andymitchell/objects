@@ -10,6 +10,10 @@
         "./where-filter": {
             "types": "./dist/index-where-filter.d.ts",
             "default": "./dist/index-where-filter.js"
+        },
+        "./write-actions": {
+            "types": "./dist/index-write-actions.d.ts",
+            "default": "./dist/index-write-actions.js"
         }
     },
     "type": "module",
@@ -47,7 +51,7 @@
         "vitest": "^3.0.7"
     },
     "dependencies": {
-        "@andyrmitchell/utils": "^0.21.1",
+        "@andyrmitchell/utils": "^0.22.3",
         "deep-eql": "^5.0.2",
         "dot-prop": "^9.0.0",
         "immer": "^10.1.1",

@@ -4,7 +4,8 @@ export default defineConfig([
     {
         entry: {
             'index': "src/index.ts",
-            'index-where-filter': 'src/where-filter/index.ts'
+            'index-where-filter': 'src/where-filter/index.ts',
+            'index-write-actions': 'src/write-actions/index.ts'
         },
         publicDir: false,
         clean: true,

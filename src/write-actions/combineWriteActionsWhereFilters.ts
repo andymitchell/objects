@@ -25,19 +25,18 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
             if( !pkValue ) {
                 errorResponse = {
                     status: 'error', 
-                    error: {
-                        message: "Unknown key", 
-                        failed_actions: [
-                            {
-                                action: x, 
-                                affected_items: [], 
-                                error_details: [
-                                    {type: 'missing_key', primary_key: key}
-                                ],
-                                unrecoverable: true
-                            }
-                        ]
-                    }
+                    message: "Unknown key", 
+                    failed_actions: [
+                        {
+                            action: x, 
+                            affected_items: [], 
+                            error_details: [
+                                {type: 'missing_key', primary_key: key}
+                            ],
+                            unrecoverable: true
+                        }
+                    ]
+                
                 }
                 return;
             }

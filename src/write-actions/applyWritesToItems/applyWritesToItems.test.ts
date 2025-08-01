@@ -265,7 +265,7 @@ describe('applyWritesToItems test', () => {
             );
 
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
-            const failedActionItem = result.error.failed_actions[0]!.affected_items[0]!;
+            const failedActionItem = result.failed_actions[0]!.affected_items![0]!;
             expect(
                 failedActionItem.item
             ).toEqual({...obj1, none_key: 'T1'});
@@ -336,27 +336,27 @@ describe('applyWritesToItems test', () => {
             
 
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
-            const firstFailedAction = result.error.failed_actions[0]!;
+            const firstFailedAction = result.failed_actions[0]!;
             expect(firstFailedAction.action.payload.type).toBe('create'); if( firstFailedAction.action.payload.type!=='create' ) throw new Error("noop - create");
             // @ts-ignore wilfully breaking schema here 
             expect(firstFailedAction.action.payload.data.none_key).toBe('T1');
             // @ts-ignore wilfully breaking schema here 
-            expect(firstFailedAction.affected_items[0]!.item.none_key).toBe('T1');
-            expect(firstFailedAction.affected_items[0]!.error_details[0]!.type).toBe('missing_key');
+            expect(firstFailedAction.affected_items![0]!.item.none_key).toBe('T1');
+            expect(firstFailedAction.affected_items![0]!.error_details[0]!.type).toBe('missing_key');
             expect(firstFailedAction.error_details[0]!.type).toBe('missing_key');
             expect(firstFailedAction.unrecoverable).toBe(true);
 
 
-            const secondFailedAction = result.error.failed_actions[1]!;
+            const secondFailedAction = result.failed_actions[1]!;
             expect(secondFailedAction.action.payload.type).toBe('create'); if( secondFailedAction.action.payload.type!=='create' ) throw new Error("noop - create");
             // @ts-ignore wilfully breaking schema here 
             expect(secondFailedAction.blocked_by_action_uuid).toBe('1');
             
-            const thirdFailedAction = result.error.failed_actions[2]!;
+            const thirdFailedAction = result.failed_actions[2]!;
             expect(thirdFailedAction.action.payload.type).toBe('update'); if( thirdFailedAction.action.payload.type!=='update' ) throw new Error("noop - update");
             // @ts-ignore wilfully breaking schema here 
             expect(thirdFailedAction.action.payload.data.none_key).toBe('T2');
-            expect(thirdFailedAction.affected_items.length).toBe(0);
+            expect(thirdFailedAction.affected_items!.length).toBe(0);
 
             // Now check that it partially succeeded
             expect(result.changes.added.length).toBe(1);
@@ -367,8 +367,8 @@ describe('applyWritesToItems test', () => {
 
             expect(result.successful_actions.length).toEqual(1);
             expect(result.successful_actions[0]!.action.uuid).toEqual('0');
-            expect(result.successful_actions[0]!.affected_items.length).toEqual(1);
-            expect(result.successful_actions[0]!.affected_items[0]!.item_pk).toEqual('a1');
+            expect(result.successful_actions[0]!.affected_items!.length).toEqual(1);
+            expect(result.successful_actions[0]!.affected_items![0]!.item_pk).toEqual('a1');
 
             
         });
@@ -417,9 +417,9 @@ describe('applyWritesToItems test', () => {
             
             expect(result.successful_actions.length).toEqual(1);
             expect(result.successful_actions[0]!.action.uuid).toEqual('0');
-            expect(result.successful_actions[0]!.affected_items.length).toEqual(2);
-            expect(result.successful_actions[0]!.affected_items[0]!.item_pk).toEqual('1');
-            expect(result.successful_actions[0]!.affected_items[1]!.item_pk).toEqual('2');
+            expect(result.successful_actions[0]!.affected_items!.length).toEqual(2);
+            expect(result.successful_actions[0]!.affected_items![0]!.item_pk).toEqual('1');
+            expect(result.successful_actions[0]!.affected_items![1]!.item_pk).toEqual('2');
             expect(result.changes.final_items.every(x => x.text==='Alice')).toBe(true);
 
             
@@ -521,7 +521,7 @@ describe('applyWritesToItems test', () => {
             expect(result.changes.final_items.length).toBe(1);
             expect(result.changes.final_items[0]!.id).toBe('a1');
 
-            expect(result.error.failed_actions.length).toBe(1);
+            expect(result.failed_actions.length).toBe(1);
             expect(result.successful_actions.length).toBe(2);
         });
     });
@@ -592,7 +592,7 @@ describe('applyWritesToItems test', () => {
             expect(result.changes.final_items[0]!.id).toBe('1');
             expect(result.changes.final_items[0]!.children![0]!.name).toBe('Bob'); // update applied
             // @ts-ignore
-            expect(result.error.failed_actions[0]!.affected_items[0]!.item.bad_key).toBe('expect fail');
+            expect(result.failed_actions[0]!.affected_items![0]!.item.bad_key).toBe('expect fail');
             
         });
     });
@@ -842,9 +842,9 @@ describe('applyWritesToItems test', () => {
 
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
             
-            const firstFailedAction = result.error.failed_actions[0]!;
+            const firstFailedAction = result.failed_actions[0]!;
             expect(firstFailedAction.unrecoverable).toBe(true);
-            expect(firstFailedAction.affected_items[0]!.error_details[0]!.type).toBe('create_duplicated_key');
+            expect(firstFailedAction.affected_items![0]!.error_details[0]!.type).toBe('create_duplicated_key');
         });
     });
 
@@ -876,10 +876,10 @@ describe('applyWritesToItems test', () => {
             
 
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
-            const firstFailedAction = result.error.failed_actions[0]!;
+            const firstFailedAction = result.failed_actions[0]!;
             expect(firstFailedAction.action.payload.type).toBe('update'); if( firstFailedAction.action.payload.type!=='update' ) throw new Error("noop - update");
-            expect(firstFailedAction.affected_items[0]!.item.id).toBe('1');
-            expect(firstFailedAction.affected_items[0]!.error_details[0]!.type).toBe('update_altered_key');
+            expect(firstFailedAction.affected_items![0]!.item.id).toBe('1');
+            expect(firstFailedAction.affected_items![0]!.error_details[0]!.type).toBe('update_altered_key');
             expect(firstFailedAction.unrecoverable).toBe(true);
             
             // Make sure when there's an error, it doesn't change the original items 
@@ -1172,7 +1172,7 @@ describe('applyWritesToItems test', () => {
             );
 
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
-            expect(result.error.failed_actions[0]!.error_details[0]!.type).toBe('permission_denied');
+            expect(result.failed_actions[0]!.error_details[0]!.type).toBe('permission_denied');
 
 
         })
@@ -1284,7 +1284,7 @@ describe('applyWritesToItems test', () => {
             );
 
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
-            expect(result.error.failed_actions[0]!.error_details[0]!.type).toBe('permission_denied');
+            expect(result.failed_actions[0]!.error_details[0]!.type).toBe('permission_denied');
             
 
 

@@ -1,4 +1,10 @@
 
+/*
+
+TODO How is this different to the much better tested cloneDeepScalarValues ? 
+*/
+
+
 type CloneDeepSafeOptions = {
     /**
      * Strip non-serializable (e.g. function, wasm) keys directly under the given keys

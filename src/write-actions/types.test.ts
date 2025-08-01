@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { WriteAction, WriteActionPayloadArrayScope } from "./types.js";
-import { createWriteActionSchema } from "./types.js";
+import { makeWriteActionSchema } from "./write-action-schemas.ts";
+
 
 describe('write-actions type check', () => {
     // This is primarily just a type file for convenience to see if typeCheck's code flags type errors
@@ -25,7 +26,7 @@ describe('write-actions type check', () => {
             }),
         });
 
-        const writeActionSchema = createWriteActionSchema(schema);
+        const writeActionSchema = makeWriteActionSchema(schema);
 
         type Real = { id: string, text: string, owner: { age: number, name: string }, sub_tasks: { text: string, siblings: {id:string, text:string}[] }[] };
         type Fake = { id: string, rext: string, owner: { age: number, name: string }, bub_sasks: { text: string, riblings: {id:string, text:string}[] }[] };
@@ -122,10 +123,10 @@ describe('write-actions type check', () => {
         
 
 
-        expect(writeActionSchema.writeAction.safeParse(actionA).success).toBe(true); // Expect OK
-        expect(writeActionSchema.writeAction.safeParse(actionB).success).toBe(true); // Expect OK
-        expect(writeActionSchema.writeAction.safeParse(actionFakeA).success).toBe(false); // Expect fail
-        expect(writeActionSchema.writeAction.safeParse(actionFakeB).success).toBe(false); // Expect fail
+        expect(writeActionSchema.safeParse(actionA).success).toBe(true); // Expect OK
+        expect(writeActionSchema.safeParse(actionB).success).toBe(true); // Expect OK
+        expect(writeActionSchema.safeParse(actionFakeA).success).toBe(false); // Expect fail
+        expect(writeActionSchema.safeParse(actionFakeB).success).toBe(false); // Expect fail
         
     })
 })

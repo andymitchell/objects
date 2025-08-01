@@ -1,5 +1,5 @@
 
-import type  { AppliedWritesOutput, AppliedWritesOutputResponse, WriteAction,  WriteActionSuccess,  WriteActionSuccesses } from "../types.js";
+import type  { ApplyWritesToItemsChanges, ApplyWritesToItemsResponse, WriteAction,  SuccessfulWriteAction } from "../types.js";
 import {isUpdateOrDeleteWriteActionPayload} from '../types.js';
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter/index-old.ts";
@@ -34,41 +34,42 @@ function getOptionDefaults<T extends Record<string, any>>():Required<ApplyWrites
     }
 }
 
-class WriteActionSuccessesTracker<T extends Record<string, any>> {
+class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     private pk:PrimaryKeyGetter<T>;
-    private actionsMap:Record<string, WriteActionSuccess<T>>;
+    private actionsMap:Record<string, SuccessfulWriteAction<T>>;
     constructor(primaryKey:keyof T) {
         this.pk = makePrimaryKeyGetter(primaryKey);
         this.actionsMap = {};
     }
 
-    private findWriteActionSuccess(action:WriteAction<T>, createIfMissing?: boolean) {
+    private findSuccessfulWriteAction(action:WriteAction<T>, createIfMissing?: boolean) {
         if( !this.actionsMap[action.uuid] && createIfMissing ) this.actionsMap[action.uuid] = {action, affected_items: []};
         return this.actionsMap[action.uuid]!;
     }
 
     report(action:WriteAction<T>, item: T) {
-        const successfulAction = this.findWriteActionSuccess(action, true);
+        const successfulAction = this.findSuccessfulWriteAction(action, true);
         const item_pk = this.pk(item, true);
+        if( !successfulAction.affected_items ) successfulAction.affected_items = [];
         if( !successfulAction.affected_items.some(x => x.item_pk===item_pk) ) {
             successfulAction.affected_items.push({item_pk});
         }
     }
 
-    get():WriteActionSuccesses<T> {
+    get():SuccessfulWriteAction<T>[] {
         return JSON.parse(JSON.stringify(Object.values(this.actionsMap)));
     }
 }
 
-export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): AppliedWritesOutputResponse<T> {
+export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResponse<T> {
     return _applyWritesToItems(writeActions, items, schema, ddl, user, options);
 }
-function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): AppliedWritesOutputResponse<T> {
+function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): ApplyWritesToItemsResponse<T> {
 
     if( writeActions.length===0 ) {
         return {
             status: 'ok', 
-            changes: emptyAppliedWritesOutput(items),
+            changes: emptyApplyWritesToItemsChanges(items),
             successful_actions: []
         };
     }
@@ -91,7 +92,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
     
     
     // Track successes, in part because higher up rollbacks want to know what items were affected by an action 
-    const successTracker = new WriteActionSuccessesTracker<T>(rules.primary_key);
+    const successTracker = new SuccessfulWriteActionesTracker<T>(rules.primary_key);
 
     // Track schema issues
     // #fail_continues: the higher up ideally wants to know every action that fails (so a it can mark them as unrecoverable in one hit), and every item that'll fail as a consequence (because if it applied optimistic updates, it needs to roll them back)
@@ -243,8 +244,8 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                             );
 
                                         if( arrayResponse.status!=='ok' ) {
-                                            arrayResponse.error.failed_actions;
-                                            failureTracker.mergeUnderAction(action, arrayResponse.error.failed_actions);
+                                            arrayResponse.failed_actions;
+                                            failureTracker.mergeUnderAction(action, arrayResponse.failed_actions);
                                         }
 
                                         setProperty(
@@ -303,14 +304,14 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
         actionsBlockedByFailure.forEach(action => failureTracker.blocked(action, failedActionUUID));
 
 
-        let successful_actions: WriteActionSuccesses<T> = [];
-        let changes: AppliedWritesOutput<T>;
+        let successful_actions: SuccessfulWriteAction<T>[] = [];
+        let changes: ApplyWritesToItemsChanges<T>;
         if( optionsIncDefaults.allow_partial_success ) {
             // Thought: if addedHash/updatedHash/deletedHash/etc ends up reading ahead, it's still possible to generate the output by re-running applyWritesItems with just the actions in successTracker.get 
-            changes = generateAppliedWritesOutput(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults);
+            changes = generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults);
             successful_actions = successTracker.get();
         } else {
-            changes = emptyAppliedWritesOutput(items);
+            changes = emptyApplyWritesToItemsChanges(items);
         }
 
         // FUTURE IDEA: DETECT WHICH SUBSEQUENT ACTIONS WOULD STILL HAVE FAILED. Find out in one go what won't work (e.g. subsequent schema fails). Solution: take out the initial failing error, then run the remaining actions against the current mutableState, but passed in a recursive call in a way that it won't be mutated. Roll the returned failed actions into failureTracker, replacing any marked as blocked. 
@@ -319,17 +320,17 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
             status: 'error',
             changes,
             successful_actions,
-            error: {
-                type: 'write_action_fail',
-                message: "Some write actions failed.",
-                failed_actions: failureTracker.get()
-            }
+        
+            //type: 'write_action_fail',
+            message: "Some write actions failed.",
+            failed_actions: failureTracker.get()
+        
         }
     } else {
         return {
             status: 'ok', 
             successful_actions: successTracker.get(),
-            changes: generateAppliedWritesOutput(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults)
+            changes: generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults)
         };
     }
 
@@ -356,12 +357,12 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
     return finalItems;
 }
 
-function emptyAppliedWritesOutput<T extends Record<string, any>>(originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[]):AppliedWritesOutput<T> {
+function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[]):ApplyWritesToItemsChanges<T> {
     return {added: [], updated: [], deleted: [], changed: false, final_items: originalItems as T[]};
 }
-function generateAppliedWritesOutput<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>):AppliedWritesOutput<T> {
+function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>):ApplyWritesToItemsChanges<T> {
 
-    const changes: AppliedWritesOutput<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), deleted: Object.values(deletedHash), changed: false, final_items: [] };
+    const changes: ApplyWritesToItemsChanges<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), deleted: Object.values(deletedHash), changed: false, final_items: [] };
     const newChange = !!(changes.added.length || changes.updated.length || changes.deleted.length);
     changes.changed = newChange;
     if( newChange ) {

@@ -2,22 +2,63 @@ import { applyWritesToItems, checkPermission } from "./applyWritesToItems/index.
 import type {  ApplyWritesToItemsOptions, DDL, ListOrdering } from "./applyWritesToItems/index.js";
 import { isIUser, type IUser } from "./auth/index.js";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters.js";
-import {  WriteActionErrorSchema,  assertArrayScope, createWriteActionFailuresSchema, createWriteActionSchema, createWriteActionSuccessesSchema } from "./types.js";
-import type {  WriteActionAffectedItem, WriteActionFailureAffectedItem, AppliedWritesOutput, WriteAction, WriteActionError, WriteActionFailures, WriteActionPayload, WriteActionFailuresErrorDetails, WriteActionSuccesses, AppliedWritesOutputResponse } from "./types.js";
+import { assertArrayScope, type ApplyWritesToItemsChanges, type ApplyWritesToItemsResponse, type FailedWriteAction, type FailedWriteActionAffectedItem, type SuccessfulWriteAction, type WriteAction, type WriteActionAffectedItem, type WriteActionPayload, type WriteActionsResponse, type WriteActionsResponseError, type WriteActionsResponseOk, type WriteCommonError } from "./types.ts";
+import {  FailedWriteActionSchema, makeFailedWriteActionSchema, makeSuccessfulWriteActionSchema, makeWriteActionSchema, SuccessfulWriteActionSchema, WriteActionSchema, WriteActionsResponseErrorSchema, WriteActionsResponseOkSchema, WriteActionsResponseSchema, WriteCommonErrorSchema } from "./write-action-schemas.ts";
 
+
+
+/**
+ * Combine the functions into the `WriteActions` namespace. 
+ * 
+ * It's helpful as a reminder of their names, but not advised as it breaks tree-shaking. 
+ * 
+ * Each item can be separately imported solo. 
+ */
 export const WriteActions = {
     applyWritesToItems,
     combineWriteActionsWhereFilters,
-    createWriteActionSchema,
-    createWriteActionSuccessesSchema,
-    createWriteActionFailuresSchema,
-    WriteActionErrorSchema,
+    schemas: {
+        
+        WriteActionsResponseSchema,
+        WriteActionsResponseOkSchema,
+        WriteActionsResponseErrorSchema,
+
+        WriteCommonErrorSchema,
+
+        WriteActionSchema,
+        makeWriteActionSchema,
+
+        SuccessfulWriteActionSchema,
+        makeSuccessfulWriteActionSchema,
+        FailedWriteActionSchema,
+        makeFailedWriteActionSchema
+        
+    },
     assertArrayScope,
     checkPermission
 }
 
 export {
+    applyWritesToItems,
+    combineWriteActionsWhereFilters,
+    WriteActionsResponseSchema,
+    WriteActionsResponseOkSchema,
+    WriteActionsResponseErrorSchema,
+
+    WriteCommonErrorSchema,
+
+    WriteActionSchema,
+    makeWriteActionSchema,
+
+    SuccessfulWriteActionSchema,
+    makeSuccessfulWriteActionSchema,
+    FailedWriteActionSchema,
+    makeFailedWriteActionSchema,
     assertArrayScope,
+    checkPermission
+}
+
+export {
     isIUser
 }
 
@@ -27,13 +68,21 @@ export type {
     DDL,
     ListOrdering,
     ApplyWritesToItemsOptions,
-    WriteActionSuccesses,
-    WriteActionFailures,
-    WriteActionError,
-    AppliedWritesOutput,
-    AppliedWritesOutputResponse,
+
+    WriteActionsResponse,
+    WriteActionsResponseOk,
+    WriteActionsResponseError,
+
+    SuccessfulWriteAction,
+    FailedWriteAction,
+    WriteCommonError,
+
+    ApplyWritesToItemsChanges,
+    ApplyWritesToItemsResponse,
+
     WriteActionAffectedItem,
-    WriteActionFailureAffectedItem,
-    WriteActionFailuresErrorDetails,
+    FailedWriteActionAffectedItem,
     IUser
 }
+
+export * from './legacy-types.ts';

@@ -358,12 +358,12 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
 }
 
 function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[]):ApplyWritesToItemsChanges<T> {
-    return {added: [], updated: [], deleted: [], changed: false, final_items: originalItems as T[]};
+    return {added: [], updated: [], removed: [], changed: false, final_items: originalItems as T[]};
 }
 function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>):ApplyWritesToItemsChanges<T> {
 
-    const changes: ApplyWritesToItemsChanges<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), deleted: Object.values(deletedHash), changed: false, final_items: [] };
-    const newChange = !!(changes.added.length || changes.updated.length || changes.deleted.length);
+    const changes: ApplyWritesToItemsChanges<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), removed: Object.values(deletedHash), changed: false, final_items: [] };
+    const newChange = !!(changes.added.length || changes.updated.length || changes.removed.length);
     changes.changed = newChange;
     if( newChange ) {
         changes.final_items = generateFinalItems<T>(addedHash, updatedHash, deletedHash, originalItems, pk, optionsIncDefaults);

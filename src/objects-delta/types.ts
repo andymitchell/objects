@@ -1,9 +1,34 @@
+import { isTypeEqual } from "@andyrmitchell/utils";
+import type { PrimaryKeyValue } from "../utils/getKeyValue.ts";
 
+/**
+ * Represents the difference between two sets of objects.
+ * 
+ * @note Unlike a `ChangeSet`, which is an instruction for applying changes, an `ObjectsDelta`
+ * is an **observation** of what has changed between two states — typically used
+ * for diffing, or syncing logic.
+ * 
+ */
 export type ObjectsDelta<T extends Record<string, any> = Record<string, any>> = {
     added: T[];
     updated: T[];
     removed: T[];
 };
+
+
+
+/**
+ * Like `ObjectsDelta` but doesn't specify the deleted object (because it may not be available), only its primary key. 
+ */
+export type ObjectsDeltaUsingRemovedKeys<T extends Record<string, any> = Record<string, any>> = {
+    added: T[];
+    updated: T[];
+    removed_keys: PrimaryKeyValue[]
+}
+
+
+isTypeEqual<Omit<ObjectsDelta<any>, 'removed'>, Omit<ObjectsDeltaUsingRemovedKeys<any>, 'removed_keys'>>(true);
+
 
 /**
  * Options for configuring the differential tracker.

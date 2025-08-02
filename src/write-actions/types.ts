@@ -56,6 +56,19 @@ export type WriteActionPayload<T extends Record<string, any>> = WriteActionPaylo
  * 
  * The only peculiar one is `array_scope` where every nested list can be treated atomically by first targetting/scoping it, 
  * then applying the action at that level. It allows more granular behaviour.
+ * 
+ * @example
+ * const a:WriteAction<{id:number}> = {
+ *  type: 'write', 
+ *  ts: Date.now(),
+ *  uuid: uuidv4(), 
+ *  payload: {
+ *     type: 'create', 
+ *     data: {
+ *         id: '1'
+ *     }
+ *  }
+ * }
  */
 export type WriteAction<T extends Record<string, any>> = {
     type: 'write',

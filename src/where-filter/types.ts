@@ -44,15 +44,57 @@ export type LogicFilter<T extends Record<string, any>> = {
 }
 
 /**
- * Define a search term using either the (nestable) keys of an object or boolean logic filters. 
+ * Defines a query for filtering objects, similar to a WHERE clause in database queries.
+ * It allows for filtering based on an object's properties, including those that are nested.
+ *
+ * You can define a filter in two primary ways:
+ * 1.  **Partial Object Filter**: Specify the properties and the values you want to match. Use dot notation to access nested properties.
+ * 2.  **Logic Filter**: Combine multiple filters using logical operators like `AND`, `OR`, and `NOT`.
+ *
+ * @example
+ * // Simple filter on a top-level property
+ * const filterById = { id: '123' };
+ *
+ * @example
+ * // Filter using dot notation for a nested property
+ * const filterByNestedChildName = { 'person.child.name': 'Alice' };
+ *
+ * @example
+ * // Filter for objects where the 'tags' array contains 'typescript'
+ * const filterByTag = { 'tags.elem_match': { $in: ['typescript'] } };
+ *
+ * @example
+ * // A filter using the 'OR' logical operator to find objects that are either
+ * // high priority or have a status of 'completed'.
+ * const logicalFilter = {
+ *   OR: [
+ *     { isPriority: true },
+ *     { status: 'completed' }
+ *   ]
+ * };
+ *
+ * @example
+ * // A filter for a numeric property, finding objects where 'age' is greater than 30.
+ * const numericFilter = { 'person.age': { gt: 30 } };
+ *
  * 
- * Note if you use this as a parameter in a function, TypeScript cannot infer whether it's a logic filter or partial object filter and will claim it has no properties. 
- * In this case, use isLogicFilter or isPartialObjectFilter to first narrow it, then you can use it.
+ * @note It is loosely inspired by Mongo 
+ * 
+ * @note When using `WhereFilterDefinition` as a function parameter, TypeScript may have trouble
+ * inferring whether it's a logic filter or a partial object filter. To resolve this,
+ * you can use type guards like `isLogicFilter` or `isPartialObjectFilter` to narrow
+ * the type before accessing its properties.
  */
 export type WhereFilterDefinition<T extends Record<string, any> = any> =
     PartialObjectFilter<T>
     |
     LogicFilter<T>;
+
+    
+export type UpdatingMethod = 'merge' | 'assign';
+
+
+
 
 
 
@@ -83,11 +125,6 @@ class Bob<T> {
 
 
 
-
-
-
-    
-export type UpdatingMethod = 'merge' | 'assign';
 
 
 

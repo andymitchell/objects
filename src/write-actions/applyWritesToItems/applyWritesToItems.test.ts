@@ -169,7 +169,7 @@ describe('applyWritesToItems test', () => {
 
             expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
             expect(
-                result.changes.deleted.length
+                result.changes.removed.length
             ).toEqual(1);
 
             expect(

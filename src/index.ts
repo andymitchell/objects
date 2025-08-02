@@ -3,16 +3,18 @@ import type {  DotPropPathsRecord, DotPropPathsUnion, PathValue } from "./dot-pr
 import safeKeyValue, { type PrimaryKeyGetter, type PrimaryKeyValue, PrimaryKeyValueSchema, makePrimaryKeyGetter } from "./utils/getKeyValue.js";
 import isPlainObject from "./utils/isPlainObject.js";
 import type { EnsureRecord } from "./types.js";
-import { WhereFilter } from "./where-filter/index-old.ts";
-import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index-old.ts";
 
 
 import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop.js";
 import cloneDeepSafe from "./utils/cloneDeepSafe.js";
+import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index.ts";
+import { WhereFilter } from "./where-filter/index-old.ts";
 
 
 export * from "./where-filter/index.ts";
 export * from "./objects-delta/index.ts";
+export * from "./change-set/index.ts";
+export * from './write-actions/index.ts';
 
 export {
     isPlainObject, 
@@ -41,7 +43,5 @@ export {
     setTypedProperty
 }
 
-
-export * from './write-actions/index.ts';
 
 export type {EnsureRecord}

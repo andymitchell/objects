@@ -6,6 +6,7 @@ import type {  SuccessfulWriteAction, WriteActionPayloadCreate, WriteActionPaylo
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
 import type { Draft } from "immer";
+import type { ObjectsDelta } from "../../objects-delta/types.ts";
 
 
 export type ItemHash<T> = Record<PrimaryKeyValue, T>;
@@ -180,7 +181,11 @@ const c:PrimaryKeyValue = a.lists['.'].primary_key
 /**
  * The changes to the original items passed to `applyWritesToItems`, after the actions are run. 
  */
-export type ApplyWritesToItemsChanges<T extends Record<string, any>> = { added: T[], updated: T[], deleted: T[], changed: boolean, final_items: T[] | Draft<T>[] }
+export type ApplyWritesToItemsChanges<T extends Record<string, any>> = 
+ObjectsDelta<T> & { 
+    changed: boolean, 
+    final_items: T[] | Draft<T>[] 
+}
 /**
  * The response to `applyWritesToItems`
  */

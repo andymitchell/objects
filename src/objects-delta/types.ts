@@ -25,9 +25,32 @@ export type ObjectsDeltaUsingRemovedKeys<T extends Record<string, any> = Record<
     updated: T[];
     removed_keys: PrimaryKeyValue[]
 }
-
-
 isTypeEqual<Omit<ObjectsDelta<any>, 'removed'>, Omit<ObjectsDeltaUsingRemovedKeys<any>, 'removed_keys'>>(true);
+
+
+
+/**
+ * Represents a set of state changes, e.g. to be applied to a collection of objects.
+ */
+export type ObjectsDeltaFlexible<T extends Record<string, any> = Record<string, any>> = 
+(ObjectsDelta<T> & PartialModifiedAt) | 
+(ObjectsDeltaUsingRemovedKeys<T> & PartialModifiedAt)
+
+type PartialModifiedAt = Partial<ModifiedAt>;
+type ModifiedAt = {
+    /** The time the delta was created, or possibly executed */
+    modified_at:number
+};
+
+/**
+ * Represents a set of state changes, e.g. to be applied to a collection of objects, 
+ * along with the timestamp for when the instruction was created (or executed if you prefer).
+ * 
+ * It's just `DeltaChanges` with `{modified_at: number}` attached. 
+ */
+export type ObjectsDeltaFlexibleWithModifiedAt<T extends Record<string, any> = Record<string, any>> = 
+(ObjectsDelta<T> & ModifiedAt) | 
+(ObjectsDeltaUsingRemovedKeys<T> & ModifiedAt)
 
 
 /**

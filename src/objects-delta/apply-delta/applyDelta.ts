@@ -1,9 +1,11 @@
-import type { PrimaryKeyGetter, PrimaryKeyValue } from "../utils/getKeyValue.ts";
-import type { ChangeSet } from "./types.ts";
+import type { PrimaryKeyGetter, PrimaryKeyValue } from "../../utils/getKeyValue.ts";
+import { isObjectsDeltaUsingRemovedKeysFast } from "../schemas.ts";
+import type { ObjectsDeltaFlexible } from "../types.ts";
 
 
 
-type ApplyChangeSetOptions = {
+
+type ApplyDeltaChangesOptions = {
     /**
      * An optional list of primary keys. Only items whose keys appear in this list
      * will be added, updated, or deleted.
@@ -21,7 +23,7 @@ type ApplyChangeSetOptions = {
 
 }
 /**
- * Applies a `ChangeSet` to an existing array of items, returning a new array with:
+ * Applies a `DeltaChanges` to an existing array of items, returning a new array with:
  * - Items in `deleted_keys` removed,
  * - Items in `added_or_updated` added or replacing existing ones with matching primary keys.
  * 
@@ -29,13 +31,13 @@ type ApplyChangeSetOptions = {
  * 
  * 
  * It performs three main operations in a single pass:
- * 1.  **Updates:** If an item in `changeSet.updates` has a primary key that already exists in the `items` array, it replaces the old item.
- * 2.  **Additions:** If an item in `changeSet.added` has a primary key that is not in the `items` array, it is added to the array. If it is in the `items` array, it replaces the old item.
- * 3.  **Deletions:** It removes any items from the `items` array whose primary keys are listed in `changeSet.deleted_keys`.
+ * 1.  **Updates:** If an item in `delta.updates` has a primary key that already exists in the `items` array, it replaces the old item.
+ * 2.  **Additions:** If an item in `delta.added` has a primary key that is not in the `items` array, it is added to the array. If it is in the `items` array, it replaces the old item.
+ * 3.  **Deletions:** It removes any items from the `items` array whose primary keys are listed in `delta.deleted_keys`.
  * 
  * 
  * @param items The original array of objects that will be changed (and replaced - not mutated).
- * @param changeSet The `ChangeSet` object containing the items to add, update and delete. If it's adding an item that's already in the array, it'll be updated.
+ * @param delta The `DeltaChanges` object containing the items to add, update and delete. If it's adding an item that's already in the array, it'll be updated.
  * @param pk A function that takes an item of type `T` and returns its unique primary key, for comparison. 
  * @param options Optional controls, such as a whitelist of primary keys to allow.
  * @returns A **new array** of objects with the change set applied.
@@ -48,13 +50,13 @@ type ApplyChangeSetOptions = {
  *   { id: 3, name: 'Cherry' }
  * ];
  * 
- * const changeSet = {
+ * const delta = {
  *   added: [{ id: 4, name: 'Date' }],
  *   updated: [{ id: 2, name: 'Blueberry' }],
  *   deleted_keys: [1]
  * };
  * 
- * const result = applyChangeSet(items, changeSet, item => item.id);
+ * const result = applyDelta(items, delta, item => item.id);
  * // result:
  * // [
  * //   { id: 2, name: 'Blueberry' },
@@ -69,28 +71,35 @@ type ApplyChangeSetOptions = {
  *   { id: 2, name: 'Beta' }
  * ];
  * 
- * const changeSet = {
+ * const delta = {
  *   added: [{ id: 2, name: 'Beta Prime' }], // replaces existing item with id:2
  *   updated: [],
  *   deleted_keys: []
  * };
  * 
- * const result = applyChangeSet(items, changeSet, item => item.id);
+ * const result = applyDelta(items, delta, item => item.id);
  * // result:
  * // [
  * //   { id: 1, name: 'Alpha' },
  * //   { id: 2, name: 'Beta Prime' }
  * // ]
  * 
+ * 
+ * @note Applying a delta is distinct from a `WriteAction`. While a `WriteAction` provides explicit instructions
+ * on how to *modify* data (e.g., "increment this value"), a delta simply provides the final
+ * state of the objects that have been added or changed. This makes it ideal for scenarios where
+ * the system receives a batch of the most current data from a source and needs to synchronize its
+ * local state to match, without needing to know the specific operations that led to the new state.
+ * 
  */
-export function applyChangeSet<T extends Record<string, any>>(items:T[], changeSet:ChangeSet<T>, pk:PrimaryKeyGetter<T>, options?: ApplyChangeSetOptions):T[] {
+export function applyDelta<T extends Record<string, any>>(items:T[], delta:ObjectsDeltaFlexible<T>, pk:PrimaryKeyGetter<T>, options?: ApplyDeltaChangesOptions):T[] {
 
-    const removedKeys = 'removed_keys' in changeSet? changeSet.removed_keys : changeSet.removed.map(x => pk(x));
+    const removedKeys = isObjectsDeltaUsingRemovedKeysFast(delta)? delta.removed_keys : delta.removed.map(x => pk(x));
 
 
 
     const updatedItemMap = new Map<PrimaryKeyValue, T>();
-    [...changeSet.added, ...changeSet.updated].forEach(item => updatedItemMap.set(pk(item), item));
+    [...delta.added, ...delta.updated].forEach(item => updatedItemMap.set(pk(item), item));
 
 
     const whitelist:Set<PrimaryKeyValue> | undefined = options?.whitelist_item_pks? new Set(options.whitelist_item_pks) : undefined;
@@ -113,7 +122,7 @@ export function applyChangeSet<T extends Record<string, any>>(items:T[], changeS
 
     
     // Add new items
-    const addItems = changeSet.added.filter(item => {
+    const addItems = delta.added.filter(item => {
         const itemPk = pk(item);
         return !updatedPks.has(itemPk) && 
             (!whitelist || whitelist.has(itemPk))

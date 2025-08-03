@@ -17,8 +17,7 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
     const getPrimaryKey:PrimaryKeyGetter<T> = isFullPrimaryKeyValue(primaryKey)? makePrimaryKeyGetter<T>(primaryKey) : primaryKey;
     const { useDeepEqual = true } = options;
 
-    // State: This array is "closed over" by the function returned below.
-    // It will persist across calls to that returned function.
+    // State: This array will persist across calls to the returned function.
     let lastItems: T[] = [];
 
     return (newItems: T[]): ObjectsDelta<T> => {

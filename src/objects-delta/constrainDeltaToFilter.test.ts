@@ -1,9 +1,10 @@
 import type { PrimaryKeyGetter } from "../utils/getKeyValue.ts";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
-import { constrainChangeSetToFilter } from "./constrainChangeSetToFilter.ts";
-import type { ChangeSet } from "./types.ts";
+import { constrainDeltaToFilter } from "./constrainDeltaToFilter.ts";
+import type { ObjectsDeltaFlexible } from "./types.ts";
 
-describe('constrainChangeSetToFilter', () => {
+
+describe('constrainDeltaToFilter', () => {
 
     // --- Test Data ---
     interface Item {
@@ -24,26 +25,26 @@ describe('constrainChangeSetToFilter', () => {
     const filterCategoryA: WhereFilterDefinition<Item> = { category: 'A' };
     const filterValueGt25: WhereFilterDefinition<Item> = { value: { gte: 25 } };
 
-    // This helper runs tests for both ChangeSet variants (`removed` and `removed_keys`)
-    const testBothChangeSetTypes = (
+    // This helper runs tests for both ObjectsDeltaFlexible variants (`removed` and `removed_keys`)
+    const testBothObjectsDeltaFlexibleTypes = (
         description: string,
         testFn: (type: 'removed' | 'removed_keys') => void
     ) => {
         describe(description, () => {
-            it('should work for ChangeSet with `removed`', () => testFn('removed'));
-            it('should work for ChangeSet with `removed_keys`', () => testFn('removed_keys'));
+            it('should work for ObjectsDeltaFlexible with `removed`', () => testFn('removed'));
+            it('should work for ObjectsDeltaFlexible with `removed_keys`', () => testFn('removed_keys'));
         });
     };
 
     describe('Core filtering behavior', () => {
-        testBothChangeSetTypes('when items from `added` and `updated` are filtered out', (type) => {
+        testBothObjectsDeltaFlexibleTypes('when items from `added` and `updated` are filtered out', (type) => {
             const changeSet = {
                 added: [item1, item2], // item2 is inactive, should be removed
                 updated: [item3, item4], // item4 is inactive, should be removed
                 ...(type === 'removed' ? { removed: [item5] } : { removed_keys: [item5.id] }),
             };
 
-            const result = constrainChangeSetToFilter(filterActive, changeSet, pk);
+            const result = constrainDeltaToFilter(filterActive, changeSet, pk);
 
             expect(result.added).toEqual([item1]);
             expect(result.updated).toEqual([item3]);
@@ -57,14 +58,14 @@ describe('constrainChangeSetToFilter', () => {
             }
         });
 
-        testBothChangeSetTypes('when a filter removes all `added` and `updated` items', (type) => {
+        testBothObjectsDeltaFlexibleTypes('when a filter removes all `added` and `updated` items', (type) => {
              const changeSet = {
                 added: [item2, item4], // Both inactive
                 updated: [],
                 ...(type === 'removed' ? { removed: [] } : { removed_keys: [] }),
             };
             
-            const result = constrainChangeSetToFilter(filterActive, changeSet, pk);
+            const result = constrainDeltaToFilter(filterActive, changeSet, pk);
 
             expect(result.added).toEqual([]);
             expect(result.updated).toEqual([]);
@@ -78,17 +79,17 @@ describe('constrainChangeSetToFilter', () => {
     });
 
     describe('Referential equality', () => {
-        it('should return the original ChangeSet object if no changes are made', () => {
-            const changeSet: ChangeSet<Item> = {
+        it('should return the original ObjectsDeltaFlexible object if no changes are made', () => {
+            const changeSet: ObjectsDeltaFlexible<Item> = {
                 added: [item1, item3], // All active
                 updated: [item5], // All active
                 removed: [],
             };
-            const result = constrainChangeSetToFilter(filterActive, changeSet, pk);
+            const result = constrainDeltaToFilter(filterActive, changeSet, pk);
             expect(result).toBe(changeSet);
         });
 
-        testBothChangeSetTypes('should return original `updated` array if only `added` is changed', (type) => {
+        testBothObjectsDeltaFlexibleTypes('should return original `updated` array if only `added` is changed', (type) => {
             const originalUpdated = [item3];
             const changeSet = {
                 added: [item1, item2], // item2 will be removed
@@ -96,14 +97,14 @@ describe('constrainChangeSetToFilter', () => {
                 ...(type === 'removed' ? { removed: [] } : { removed_keys: [] }),
             };
             
-            const result = constrainChangeSetToFilter(filterActive, changeSet, pk);
+            const result = constrainDeltaToFilter(filterActive, changeSet, pk);
 
             expect(result.added).toEqual([item1]); // New array
             expect(result.added).not.toBe(changeSet.added);
             expect(result.updated).toBe(originalUpdated); // Same array reference
         });
 
-        testBothChangeSetTypes('should return original `added` array if only `updated` is changed', (type) => {
+        testBothObjectsDeltaFlexibleTypes('should return original `added` array if only `updated` is changed', (type) => {
             const originalAdded = [item1];
             const changeSet = {
                 added: originalAdded,
@@ -111,7 +112,7 @@ describe('constrainChangeSetToFilter', () => {
                 ...(type === 'removed' ? { removed: [] } : { removed_keys: [] }),
             };
             
-            const result = constrainChangeSetToFilter(filterActive, changeSet, pk);
+            const result = constrainDeltaToFilter(filterActive, changeSet, pk);
 
             expect(result.updated).toEqual([item3]); // New array
             expect(result.updated).not.toBe(changeSet.updated);
@@ -120,7 +121,7 @@ describe('constrainChangeSetToFilter', () => {
     });
 
     describe('De-duplication of removed items', () => {
-        testBothChangeSetTypes('should not add a duplicate if a filtered item was already in the removed list', (type) => {
+        testBothObjectsDeltaFlexibleTypes('should not add a duplicate if a filtered item was already in the removed list', (type) => {
             // item2 is in `added` but also already in `removed`/`removed_keys`.
             // The filter will fail it, moving it to the removed set. The function must not create a duplicate.
             const changeSet = {
@@ -129,7 +130,7 @@ describe('constrainChangeSetToFilter', () => {
                 ...(type === 'removed' ? { removed: [item2] } : { removed_keys: [item2.id] }),
             };
 
-            const result = constrainChangeSetToFilter(filterActive, changeSet, pk);
+            const result = constrainDeltaToFilter(filterActive, changeSet, pk);
 
             expect(result.added).toEqual([item1]);
             
@@ -146,35 +147,35 @@ describe('constrainChangeSetToFilter', () => {
     });
 
     describe('Edge Cases', () => {
-        testBothChangeSetTypes('should handle an empty ChangeSet correctly', (type) => {
+        testBothObjectsDeltaFlexibleTypes('should handle an empty ObjectsDeltaFlexible correctly', (type) => {
             const changeSet = {
                 added: [],
                 updated: [],
                 ...(type === 'removed' ? { removed: [] } : { removed_keys: [] }),
             };
-            const result = constrainChangeSetToFilter(filterCategoryA, changeSet, pk);
+            const result = constrainDeltaToFilter(filterCategoryA, changeSet, pk);
             expect(result).toBe(changeSet); // No changes, should return the same object
             expect(result).toEqual({ added: [], updated: [], ...(type === 'removed' ? { removed: [] } : { removed_keys: [] }) });
         });
         
-        testBothChangeSetTypes('should handle a ChangeSet with only removed items', (type) => {
+        testBothObjectsDeltaFlexibleTypes('should handle a ObjectsDeltaFlexible with only removed items', (type) => {
             const changeSet = {
                 added: [],
                 updated: [],
                 ...(type === 'removed' ? { removed: [item1] } : { removed_keys: [item1.id] }),
             };
-            const result = constrainChangeSetToFilter(filterCategoryA, changeSet, pk);
+            const result = constrainDeltaToFilter(filterCategoryA, changeSet, pk);
             expect(result).toBe(changeSet);
         });
 
-        testBothChangeSetTypes('should handle a complex filter correctly', (type) => {
+        testBothObjectsDeltaFlexibleTypes('should handle a complex filter correctly', (type) => {
              const changeSet = {
                 added: [item1, item3], // item1 (val 10) fails, item3 (val 30) passes
                 updated: [item2, item4], // item2 (val 20) fails, item4 (val 40) passes
                 ...(type === 'removed' ? { removed: [] } : { removed_keys: [] }),
             };
 
-            const result = constrainChangeSetToFilter(filterValueGt25, changeSet, pk);
+            const result = constrainDeltaToFilter(filterValueGt25, changeSet, pk);
 
             expect(result.added).toEqual([item3]);
             expect(result.updated).toEqual([item4]);

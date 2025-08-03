@@ -13,7 +13,6 @@ import { WhereFilter } from "./where-filter/index-old.ts";
 
 export * from "./where-filter/index.ts";
 export * from "./objects-delta/index.ts";
-export * from "./change-set/index.ts";
 export * from './write-actions/index.ts';
 
 export {

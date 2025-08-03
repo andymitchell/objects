@@ -1,7 +1,7 @@
 import  { applyChangeSet } from "./applyChangeSet.ts"
 import  { constrainChangeSetToFilter } from "./constrainChangeSetToFilter.ts"
-import  { ChangeSetSchema, isChangeSet } from "./schemas.ts"
-import type { ChangeSet } from "./types.ts"
+import  { ChangeSetSchema, ChangeSetWithModifiedAtSchema, isChangeSet } from "./schemas.ts"
+import type { ChangeSet, ChangeSetWithModifiedAt } from "./types.ts"
 
 export {
     applyChangeSet,
@@ -10,9 +10,11 @@ export {
 
 export {
     isChangeSet,
-    ChangeSetSchema
+    ChangeSetSchema,
+    ChangeSetWithModifiedAtSchema
 }
 
 export type {
-    ChangeSet
+    ChangeSet,
+    ChangeSetWithModifiedAt
 }

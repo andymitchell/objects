@@ -1,5 +1,5 @@
 import { isTypeEqual } from "@andyrmitchell/utils";
-import type { ChangeSet } from "./types.ts";
+import type { ChangeSet, ChangeSetWithModifiedAt } from "./types.ts";
 import z from "zod";
 import { ObjectsDeltaSchema, ObjectsDeltaUsingRemovedKeysSchema } from "../objects-delta/schemas.ts";
 
@@ -13,3 +13,10 @@ isTypeEqual<z.infer<typeof ChangeSetSchema>, ChangeSet<any>>(true); // Maintain 
 export function isChangeSet<T extends Record<string, any> = Record<string, any>>(x: unknown): x is ChangeSet<T> {
     return ChangeSetSchema.safeParse(x).success;
 }
+
+const ModifiedAtSchema = z.object({'modified_at': z.number()})
+export const ChangeSetWithModifiedAtSchema = z.union([
+    ObjectsDeltaSchema.merge(ModifiedAtSchema),
+    ObjectsDeltaUsingRemovedKeysSchema.merge(ModifiedAtSchema),
+])
+isTypeEqual<z.infer<typeof ChangeSetWithModifiedAtSchema>, ChangeSetWithModifiedAt<any>>(true);

@@ -17,3 +17,14 @@ export type ChangeSet<T extends Record<string, any> = Record<string, any>> =
 ObjectsDelta<T> | 
 ObjectsDeltaUsingRemovedKeys<T>
 
+type ModifiedAt = {modified_at:number};
+
+/**
+ * Represents a set of state changes to be applied to a collection of objects, along with the timestamp
+ * for when the instruction was created (or executed if you prefer).
+ * 
+ * It's just `ChangeSet` with `{modified_at: number}` attached. 
+ */
+export type ChangeSetWithModifiedAt<T extends Record<string, any> = Record<string, any>> = 
+(ObjectsDelta<T> & ModifiedAt) | 
+(ObjectsDeltaUsingRemovedKeys<T> & ModifiedAt)

@@ -92,7 +92,7 @@ testImmutableAndnplaceModes((name, options) => {
         
         expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
         expect(
-            result.changes.added[0]!
+            result.changes.insert[0]!
         ).toEqual(obj2);
 
         
@@ -138,7 +138,7 @@ describe('applyWritesToItems test', () => {
 
             expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
             expect(
-                result.changes.updated[0]!
+                result.changes.update[0]!
             ).toEqual({...obj1, text: 'T1'});
 
             expect(
@@ -169,7 +169,7 @@ describe('applyWritesToItems test', () => {
 
             expect(result.status).toBe('ok'); if( result.status!=='ok' ) throw new Error("noop");
             expect(
-                result.changes.removed.length
+                result.changes.remove_keys.length
             ).toEqual(1);
 
             expect(
@@ -360,8 +360,8 @@ describe('applyWritesToItems test', () => {
             expect(thirdFailedAction.affected_items!.length).toBe(0);
 
             // Now check that it partially succeeded
-            expect(result.changes.added.length).toBe(1);
-            expect(result.changes.added[0]!.id).toBe('a1');
+            expect(result.changes.insert.length).toBe(1);
+            expect(result.changes.insert[0]!.id).toBe('a1');
             expect(result.changes.final_items.length).toBe(2);
             expect(result.changes.final_items[0]!.id).toBe('1');
             expect(result.changes.final_items[1]!.id).toBe('a1');
@@ -464,7 +464,7 @@ describe('applyWritesToItems test', () => {
             expect(result.status).toBe('error'); if( result.status!=='error' ) throw new Error("noop");
 
             // Now check that it failed
-            expect(result.changes.added.length).toBe(0);
+            expect(result.changes.insert.length).toBe(0);
             expect(result.changes.final_items.length).toBe(1);
             expect(result.changes.final_items[0]!.id).toBe('1');
             expect(result.changes.final_items===originalItems).toBe(true);
@@ -587,8 +587,8 @@ describe('applyWritesToItems test', () => {
             
 
             // Now check that it failed
-            expect(result.changes.updated.length).toBe(1);
-            expect(result.changes.updated[0]!.id).toBe('1');
+            expect(result.changes.update.length).toBe(1);
+            expect(result.changes.update[0]!.id).toBe('1');
             expect(result.changes.final_items.length).toBe(1);
             expect(result.changes.final_items[0]!.id).toBe('1');
             expect(result.changes.final_items[0]!.children![0]!.name).toBe('Bob'); // update applied
@@ -661,7 +661,7 @@ describe('applyWritesToItems test', () => {
             
 
             // Now check that it failed, and nothing is changed
-            expect(result.changes.updated.length).toBe(0);
+            expect(result.changes.update.length).toBe(0);
             expect(result.changes.final_items.length).toBe(1);
             expect(result.changes.final_items[0]!.id).toBe('1');
             expect(!result.changes.final_items[0]!.children![0]!.name).toBe(true);

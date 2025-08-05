@@ -1,5 +1,5 @@
 
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeEqual, isTypeExtended } from "@andyrmitchell/utils";
 import { PrimaryKeyValueSchema} from "../utils/getKeyValue.ts";
 import z from "zod";
 import type { ObjectsDelta, ObjectsDeltaApplicable} from "./types.ts";
@@ -22,9 +22,10 @@ export function isObjectsDelta(x: unknown): x is ObjectsDelta {
 
 
 export const ObjectsDeltaApplicableSchema = ObjectsDeltaSchema.partial().merge(z.object({
-    upsert: z.array(itemSchema),
+    upsert: z.array(itemSchema).optional(),
 }));
 isTypeEqual<z.infer<typeof ObjectsDeltaApplicableSchema>, ObjectsDeltaApplicable>(true);
+isTypeExtended<ObjectsDeltaApplicable, z.infer<typeof ObjectsDeltaApplicableSchema>>(true);
 
 export function isObjectsDeltaApplicable(x: unknown): x is ObjectsDeltaApplicable {
     return ObjectsDeltaApplicableSchema.safeParse(x).success;

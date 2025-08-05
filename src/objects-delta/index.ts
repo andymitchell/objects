@@ -1,4 +1,4 @@
-import  { createObjectsArrayDiffer } from "./createObjectsArrayDiffer.ts";
+import  { createObjectsArrayDiffer, diffObjectsArrays } from "./createObjectsArrayDiffer.ts";
 import type { ObjectsArrayDiffer, ObjectsDelta, ObjectsArrayDifferOptions, ObjectsDeltaApplicable } from "./types.ts";
 import { isObjectsDeltaFast } from "./types.ts";
 import  { ObjectsDeltaEmitter } from "./ObjectsDeltaEmitter.ts";
@@ -14,6 +14,7 @@ import  { testApplyDelta } from "./apply-delta/testApplyDelta.ts";
 
 export {
     createObjectsArrayDiffer,
+    diffObjectsArrays,
     ObjectsDeltaEmitter,
 
     constrainDeltaToFilter,

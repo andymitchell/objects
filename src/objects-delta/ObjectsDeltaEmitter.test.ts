@@ -56,7 +56,8 @@ describe('ObjectsDeltaEmitter', () => {
     it('should correctly identify and emit deltas when using referential equality (useDeepEqual: false)', () => {
         // 1. Setup
         const viewDeltaEmitter = new ObjectsDeltaEmitter<TestItem>('id', { useDeepEqual: false });
-        const listener = vi.fn();
+        const events:ObjectsDelta<TestItem>[] = [];
+        const listener = vi.fn(event => events.push(event));
         viewDeltaEmitter.on('UPDATE_DELTA', listener);
 
         const item1 = { id: 1, value: 'A' };
@@ -81,13 +82,17 @@ describe('ObjectsDeltaEmitter', () => {
             remove_keys: [item2.id],
             created_at: Date.now()
         };
-        expect(listener).toHaveBeenLastCalledWith(expectedDelta);
+        expect(listener).toHaveBeenLastCalledWith({
+            ...expectedDelta,
+            created_at: events[0]!.created_at
+        });
     });
 
     it('should NOT emit an UPDATE_DELTA event if there are no changes', () => {
         // 1. Setup
         const viewDeltaEmitter = new ObjectsDeltaEmitter<TestItem>('id', { useDeepEqual: true });
-        const listener = vi.fn();
+        const events:ObjectsDelta<TestItem>[] = [];
+        const listener = vi.fn(event => events.push(event));
         viewDeltaEmitter.on('UPDATE_DELTA', listener);
 
         const initialItems: TestItem[] = [{ id: 1, value: 'A' }];
@@ -104,7 +109,10 @@ describe('ObjectsDeltaEmitter', () => {
             remove_keys: [],
             created_at: Date.now()
         };
-        expect(listener).toHaveBeenCalledWith(expectedDelta);
+        expect(listener).toHaveBeenCalledWith({
+            ...expectedDelta,
+            created_at: events[0]!.created_at
+        });
     });
 
     it('should not detect an update with useDeepEqual: false if the object reference has not changed', () => {

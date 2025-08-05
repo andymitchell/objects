@@ -12,7 +12,7 @@ type ObjectsDeltaEvents<T extends Record<string, any> = Record<string, any>> = {
 
 /**
  * 
- * Track changes to an array of items and emit an UPDATE_DELTA event containing the changes (as a `ObjectsDelta` object, containing {insert: [], update: [], removed: []})
+ * Track changes to an array of items and emit an UPDATE_DELTA event containing the changes (as a `ObjectsDelta` object, containing {insert: [], update: [], remove_keys: []})
  * 
  * 
  * @example 

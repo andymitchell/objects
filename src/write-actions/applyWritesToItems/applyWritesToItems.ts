@@ -358,12 +358,12 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
 }
 
 function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[]):ApplyWritesToItemsChanges<T> {
-    return {added: [], updated: [], removed: [], changed: false, final_items: originalItems as T[]};
+    return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems as T[], created_at: Date.now()};
 }
 function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>):ApplyWritesToItemsChanges<T> {
 
-    const changes: ApplyWritesToItemsChanges<T> = { added: Object.values(addedHash), updated: Object.values(updatedHash), removed: Object.values(deletedHash), changed: false, final_items: [] };
-    const newChange = !!(changes.added.length || changes.updated.length || changes.removed.length);
+    const changes: ApplyWritesToItemsChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now() };
+    const newChange = !!(changes.insert.length || changes.update.length || changes.remove_keys.length);
     changes.changed = newChange;
     if( newChange ) {
         changes.final_items = generateFinalItems<T>(addedHash, updatedHash, deletedHash, originalItems, pk, optionsIncDefaults);

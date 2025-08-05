@@ -1,35 +1,42 @@
-import  { createObjectsDeltaTracker } from "./createObjectsDeltaTracker.ts";
-import type { ObjectsDeltaTracker, ObjectsDelta, ObjectsDeltaTrackerOptions, ObjectsDeltaUsingRemovedKeys, ObjectsDeltaFlexible, ObjectsDeltaFlexibleWithModifiedAt } from "./types.ts";
+import  { createObjectsArrayDiffer } from "./createObjectsArrayDiffer.ts";
+import type { ObjectsArrayDiffer, ObjectsDelta, ObjectsArrayDifferOptions, ObjectsDeltaApplicable } from "./types.ts";
+import { isObjectsDeltaFast } from "./types.ts";
 import  { ObjectsDeltaEmitter } from "./ObjectsDeltaEmitter.ts";
 import  { constrainDeltaToFilter } from "./constrainDeltaToFilter.ts";
 import  { applyDelta } from "./apply-delta/applyDelta.ts";
-import { isObjectsDelta, isObjectsDeltaUsingRemovedKeys, isObjectsDeltaUsingRemovedKeysFast, ObjectsDeltaFlexibleSchema, ObjectsDeltaFlexibleWithModifiedAtSchema, ObjectsDeltaSchema, ObjectsDeltaUsingRemovedKeysSchema } from "./schemas.ts";
+import  { isObjectsDelta, isObjectsDeltaApplicable, ObjectsDeltaApplicableSchema, ObjectsDeltaSchema } from "./schemas.ts";
+import { reduceObjectsDeltas } from "./reduce-objects-delta/reduceObjectsDeltas.ts";
+import  { testReduceObjectDeltas } from "./reduce-objects-delta/testReduceObjectDeltas.ts";
+import  { testApplyDelta } from "./apply-delta/testApplyDelta.ts";
+
+
 
 
 export {
-    createObjectsDeltaTracker,
+    createObjectsArrayDiffer,
     ObjectsDeltaEmitter,
 
     constrainDeltaToFilter,
     applyDelta,
+    reduceObjectsDeltas,
 
     ObjectsDeltaSchema,
-    ObjectsDeltaUsingRemovedKeysSchema,
-    ObjectsDeltaFlexibleSchema,
-    ObjectsDeltaFlexibleWithModifiedAtSchema,
+    ObjectsDeltaApplicableSchema,
     isObjectsDelta,
-    isObjectsDeltaUsingRemovedKeys,
-    isObjectsDeltaUsingRemovedKeysFast
+    isObjectsDeltaApplicable,
+    isObjectsDeltaFast,
+
+    testApplyDelta,
+    testReduceObjectDeltas,
 }
 
 export type {
     ObjectsDelta,
-    ObjectsDeltaUsingRemovedKeys,
-    ObjectsDeltaFlexible,
-    ObjectsDeltaFlexibleWithModifiedAt,
+    ObjectsDeltaApplicable,
+    
 
-    ObjectsDeltaTracker,
-    ObjectsDeltaTrackerOptions
+    ObjectsArrayDiffer,
+    ObjectsArrayDifferOptions
 }
 
 

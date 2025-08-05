@@ -1,64 +1,96 @@
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeExtended } from "@andyrmitchell/utils";
 import type { PrimaryKeyValue } from "../utils/getKeyValue.ts";
+import type { FlexibleTimestamp } from "@andyrmitchell/composite-timestamps";
 
 /**
  * Represents the difference between two sets of objects.
  * 
- * @note Unlike a `ChangeSet`, which is an instruction for applying changes, an `ObjectsDelta`
- * is an **observation** of what has changed between two states — typically used
- * for diffing, or syncing logic.
- * 
  */
-export type ObjectsDelta<T extends Record<string, any> = Record<string, any>> = {
-    added: T[];
-    updated: T[];
-    removed: T[];
+export interface ObjectsDelta<T extends Record<string, any> = Record<string, any>> {
+    /**
+     * Objects inserted to a set. 
+     * 
+     */
+    insert: T[];
+
+    /**
+     * Objects updated in a set. 
+     */
+    update: T[];
+
+    /**
+     * Object primary keys removed from a set.
+     * 
+     * It uses keys because in some cases the object may have been destroyed.
+     */
+    remove_keys: PrimaryKeyValue[],
+
+    /**
+     * The time this delta was created.
+     */
+    created_at: FlexibleTimestamp
 };
 
+/**
+ * A delta that is intended to be applied to an array of objects to make the changes (@see `applyDelta` as an example).
+ * 
+ */
+export interface ObjectsDeltaApplicable<T extends Record<string, any> = Record<string, any>>  {
 
+    /**
+     * Objects to insert to the end of a set. 
+     * 
+     * If the object already exists in the target array, it will **not be updated**. Use `upsert` or `update` for that instead.
+     * 
+     * The reason is that it's possible the target was intentionally updated after the delta was created, and 
+     * 'insert' is being understood strictly, and the caller would not expect it to overwrite the updated item. 
+     * I.e. being strict with `insert` and `upsert` reduces ambiguity. 
+     * 
+     */
+    insert?: T[];
+
+    /**
+     * Objects to update in a set. 
+     * 
+     * If an object does not exist in the target array, it's a no-op. 
+     */
+    update?: T[];
+
+    /**
+     * Objects to remove from a set.
+     * 
+     * It uses keys because in some cases the object may have been destroyed.
+     */
+    remove_keys?: PrimaryKeyValue[],
+
+    /**
+     * The time this delta was created.
+     */
+    created_at?: FlexibleTimestamp
+
+    /**
+     * Objects to `insert`  into the target array if they don't exist, or `update` if they do 
+     */
+    upsert?: T[]
+
+};
+isTypeExtended<Required<ObjectsDeltaApplicable>, ObjectsDelta>(true); // ObjectsDeltaApplicable does not `extend` to write better JSDoc, but it needs to maintain alignment with ObjectsDelta.
 
 /**
- * Like `ObjectsDelta` but doesn't specify the deleted object (because it may not be available), only its primary key. 
+ * A zod-free way to distinguish ObjectsDelta from ObjectsDeltaApplicable.
+ * @param x 
+ * @returns 
  */
-export type ObjectsDeltaUsingRemovedKeys<T extends Record<string, any> = Record<string, any>> = {
-    added: T[];
-    updated: T[];
-    removed_keys: PrimaryKeyValue[]
+export function isObjectsDeltaFast(x: ObjectsDelta | ObjectsDeltaApplicable): x is ObjectsDelta {
+    return !("upsert" in x) && (['insert', 'update', 'remove_keys', 'created_at'].every(key => key in x));
 }
-isTypeEqual<Omit<ObjectsDelta<any>, 'removed'>, Omit<ObjectsDeltaUsingRemovedKeys<any>, 'removed_keys'>>(true);
-
-
-
-/**
- * Represents a set of state changes, e.g. to be applied to a collection of objects.
- */
-export type ObjectsDeltaFlexible<T extends Record<string, any> = Record<string, any>> = 
-(ObjectsDelta<T> & PartialModifiedAt) | 
-(ObjectsDeltaUsingRemovedKeys<T> & PartialModifiedAt)
-
-type PartialModifiedAt = Partial<ModifiedAt>;
-type ModifiedAt = {
-    /** The time the delta was created, or possibly executed */
-    modified_at:number
-};
-
-/**
- * Represents a set of state changes, e.g. to be applied to a collection of objects, 
- * along with the timestamp for when the instruction was created (or executed if you prefer).
- * 
- * It's just `DeltaChanges` with `{modified_at: number}` attached. 
- */
-export type ObjectsDeltaFlexibleWithModifiedAt<T extends Record<string, any> = Record<string, any>> = 
-(ObjectsDelta<T> & ModifiedAt) | 
-(ObjectsDeltaUsingRemovedKeys<T> & ModifiedAt)
-
 
 /**
  * Options for configuring the differential tracker.
  */
-export interface ObjectsDeltaTrackerOptions {
+export interface ObjectsArrayDifferOptions {
     /**
-     * Determines the comparison method for detecting updated items.
+     * Determines the comparison method for detecting update items.
      * - `true` (default): Performs a deep equality check. Best for objects where properties might change without the object reference changing.
      * - `false`: Performs a strict reference check (`===`). Much more efficient if item references are guaranteed to change when data changes (e.g., in a Redux-style immutable state management).
      * 
@@ -72,6 +104,6 @@ export interface ObjectsDeltaTrackerOptions {
  * from the previous state.
  * 
  * @param newItems the new state
- * @returns A `ObjectsDelta` object showing what changed from the previous state, in format `{added:T[], updated: T[], removed:T[]}`
+ * @returns A `ObjectsDelta` object showing what changed from the previous state, in format `{insert:T[], update: T[], removed:T[]}`
  */
-export type ObjectsDeltaTracker<T extends Record<string, any> = Record<string, any>> = (newItems: T[]) => ObjectsDelta<T>;
+export type ObjectsArrayDiffer<T extends Record<string, any> = Record<string, any>> = (newItems: T[]) => ObjectsDelta<T>;

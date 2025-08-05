@@ -16,11 +16,12 @@ describe('ObjectsDeltaEmitter', () => {
     it('should correctly identify and emit deltas when using deep equality (useDeepEqual: true)', () => {
         // 1. Setup
         const viewDeltaEmitter = new ObjectsDeltaEmitter<TestItem>('id', { useDeepEqual: true });
-        const listener = vi.fn();
+        const events:ObjectsDelta<TestItem>[] = [];
+        const listener = vi.fn(event => events.push(event));
         viewDeltaEmitter.on('UPDATE_DELTA', listener);
 
         const initialItems: TestItem[] = [{ id: 1, value: 'A' }, { id: 2, value: 'B' }];
-        const updatedItems: TestItem[] = [
+        const updateItems: TestItem[] = [
             { id: 1, value: 'A_modified' }, // Updated
             { id: 3, value: 'C' }          // Added
             // Item with id: 2 is removed
@@ -30,24 +31,26 @@ describe('ObjectsDeltaEmitter', () => {
         viewDeltaEmitter.update(initialItems);
 
         // 3. Second update to generate a delta
-        viewDeltaEmitter.update(updatedItems);
+        viewDeltaEmitter.update(updateItems);
 
         // 4. Assertions
         expect(listener).toHaveBeenCalledTimes(2);
 
         const expectedInitialDelta: ObjectsDelta<TestItem> = {
-            added: [{ id: 1, value: 'A' }, { id: 2, value: 'B' }],
-            updated: [],
-            removed: [],
+            insert: [{ id: 1, value: 'A' }, { id: 2, value: 'B' }],
+            update: [],
+            remove_keys: [],
+            created_at: Date.now()
         };
-        expect(listener).toHaveBeenNthCalledWith(1, expectedInitialDelta);
+        expect(listener).toHaveBeenNthCalledWith(1, {...expectedInitialDelta, created_at: events[0]?.created_at});
 
         const expectedSecondDelta: ObjectsDelta<TestItem> = {
-            added: [{ id: 3, value: 'C' }],
-            updated: [{ id: 1, value: 'A_modified' }],
-            removed: [{ id: 2, value: 'B' }],
+            insert: [{ id: 3, value: 'C' }],
+            update: [{ id: 1, value: 'A_modified' }],
+            remove_keys: [2],
+            created_at: Date.now()
         };
-        expect(listener).toHaveBeenNthCalledWith(2, expectedSecondDelta);
+        expect(listener).toHaveBeenNthCalledWith(2, {...expectedSecondDelta, created_at: events[1]?.created_at});
     });
 
     it('should correctly identify and emit deltas when using referential equality (useDeepEqual: false)', () => {
@@ -60,22 +63,23 @@ describe('ObjectsDeltaEmitter', () => {
         const item2 = { id: 2, value: 'B' };
         const initialItems: TestItem[] = [item1, item2];
 
-        // Create a new object for the updated item to break reference equality
+        // Create a new object for the update item to break reference equality
         const item1Updated = { id: 1, value: 'A_modified' };
         const item3 = { id: 3, value: 'C' };
-        const updatedItems: TestItem[] = [item1Updated, item3];
+        const updateItems: TestItem[] = [item1Updated, item3];
 
         // 2. Actions
         viewDeltaEmitter.update(initialItems);
-        viewDeltaEmitter.update(updatedItems);
+        viewDeltaEmitter.update(updateItems);
 
         // 3. Assertions
         expect(listener).toHaveBeenCalledTimes(2);
 
         const expectedDelta: ObjectsDelta<TestItem> = {
-            added: [item3],
-            updated: [item1Updated],
-            removed: [item2],
+            insert: [item3],
+            update: [item1Updated],
+            remove_keys: [item2.id],
+            created_at: Date.now()
         };
         expect(listener).toHaveBeenLastCalledWith(expectedDelta);
     });
@@ -95,9 +99,10 @@ describe('ObjectsDeltaEmitter', () => {
         // 3. Assertions
         expect(listener).toHaveBeenCalledOnce();
         const expectedDelta: ObjectsDelta<TestItem> = {
-            added: [{ id: 1, value: 'A' }],
-            updated: [],
-            removed: [],
+            insert: [{ id: 1, value: 'A' }],
+            update: [],
+            remove_keys: [],
+            created_at: Date.now()
         };
         expect(listener).toHaveBeenCalledWith(expectedDelta);
     });
@@ -143,24 +148,23 @@ describe('ObjectsDeltaEmitter', () => {
         expect(capturedDelta.length).toBe(1);
 
         const delta = capturedDelta[0]!;
-        const addedItemInDelta = delta.added[0]!;
+        const insertItemInDelta = delta.insert[0]!;
 
         // Check that the object in the delta is not the same reference as the original
-        expect(addedItemInDelta).not.toBe(originalItem);
-        expect(addedItemInDelta.nested).not.toBe(originalItem.nested);
+        expect(insertItemInDelta).not.toBe(originalItem);
+        expect(insertItemInDelta.nested).not.toBe(originalItem.nested);
         // Verify it's a deep copy with the same values
-        expect(addedItemInDelta).toEqual(originalItem);
+        expect(insertItemInDelta).toEqual(originalItem);
 
         // Prove that mutating the delta does not affect the emitter's internal state
-        addedItemInDelta.value = 'mutated';
-        addedItemInDelta.nested!.prop = 'mutated';
+        insertItemInDelta.value = 'mutated';
+        insertItemInDelta.nested!.prop = 'mutated';
 
         // Update with an empty array to see what is reported as "removed"
         viewDeltaEmitter.update([]);
         const secondDelta = capturedDelta[1]!;
 
         // The "removed" item should be the original, unmodified object, not the mutated one.
-        expect(secondDelta.removed[0]!.value).toBe('A');
-        expect(secondDelta.removed[0]!.nested?.prop).toBe('original');
+        expect(secondDelta.remove_keys[0]!).toBe(originalItem.id);
     });
 });

@@ -1,5 +1,5 @@
 import { isEqual } from "lodash-es";
-import type { ObjectsDeltaTracker, ObjectsDeltaTrackerOptions, ObjectsDelta } from "./types.ts";
+import type { ObjectsArrayDiffer, ObjectsArrayDifferOptions, ObjectsDelta } from "./types.ts";
 import { isFullPrimaryKeyValue, makePrimaryKeyGetter, type PrimaryKeyGetter, type PrimaryKeyValue } from "../utils/getKeyValue.ts";
 
 
@@ -10,10 +10,10 @@ import { isFullPrimaryKeyValue, makePrimaryKeyGetter, type PrimaryKeyGetter, typ
  * @param options Configuration for the tracker's behavior.
  * @returns A function that you pass a new array to, which returns the `ObjectsDelta` from the last call.
  */
-export function createObjectsDeltaTracker<T extends Record<string, any> = Record<string, any>>(
+export function createObjectsArrayDiffer<T extends Record<string, any> = Record<string, any>>(
     primaryKey: keyof T | PrimaryKeyGetter<T>,
-    options: ObjectsDeltaTrackerOptions = {}
-): ObjectsDeltaTracker<T> {
+    options: ObjectsArrayDifferOptions = {}
+): ObjectsArrayDiffer<T> {
     const getPrimaryKey:PrimaryKeyGetter<T> = isFullPrimaryKeyValue(primaryKey)? makePrimaryKeyGetter<T>(primaryKey) : primaryKey;
     const { useDeepEqual = true } = options;
 
@@ -28,14 +28,14 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
         const newItemsMap = new Map<PrimaryKeyValue, T>(newItems.map(item => [getPrimaryKey(item), item]));
         const lastItemsMap = new Map<PrimaryKeyValue, T>(lastItems.map(item => [getPrimaryKey(item), item]));
 
-        const added: T[] = [];
-        const updated: T[] = [];
-        const removed: T[] = [];
+        const insert: T[] = [];
+        const update: T[] = [];
+        const remove_keys: PrimaryKeyValue[] = [];
 
-        // Check for new or updated items
+        // Check for new or update items
         for (const [key, newItem] of newItemsMap.entries()) {
             if (!lastItemsMap.has(key)) {
-                added.push(newItem);
+                insert.push(newItem);
             } else {
                 const oldItem = lastItemsMap.get(key);
                 
@@ -44,7 +44,7 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
                 //console.log({areItemsEqual, useDeepEqual, oldItem, newItem});
 
                 if (!areItemsEqual) {
-                    updated.push(newItem);
+                    update.push(newItem);
                 }
             }
         }
@@ -52,13 +52,13 @@ export function createObjectsDeltaTracker<T extends Record<string, any> = Record
         // Check for removed items
         for (const [key, oldItem] of lastItemsMap.entries()) {
             if (!newItemsMap.has(key)) {
-                removed.push(oldItem);
+                remove_keys.push(getPrimaryKey(oldItem));
             }
         }
 
         // Update the state for the *next* time the function is called
         lastItems = newItems;
 
-        return { added, updated, removed };
+        return { insert, update, remove_keys, created_at: Date.now() };
     };
 }

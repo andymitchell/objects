@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createObjectsDeltaTracker } from './createObjectsDeltaTracker.ts';
-import type { ObjectsDeltaTracker } from './types.ts';
+import { createObjectsArrayDiffer } from './createObjectsArrayDiffer.ts';
+import type { ObjectsArrayDiffer } from './types.ts';
 
 // Define a standard interface for test items.
 interface TestItem {
@@ -27,84 +27,84 @@ const getInitialItems = (): TestItem[] => [
 ];
 
 
-describe('createObjectsDeltaTracker', () => {
+describe('createObjectsArrayDiffer', () => {
 
     // A suite of reusable tests that should pass for both `useDeepEqual: true` and `useDeepEqual: false`
     // when object references are managed correctly (i.e., new data means a new object reference).
-    const runSharedTests = (trackerGenerator: () => ObjectsDeltaTracker<TestItem>) => {
-        let tracker: ObjectsDeltaTracker<TestItem>;
+    const runSharedTests = (trackerGenerator: () => ObjectsArrayDiffer<TestItem>) => {
+        let tracker: ObjectsArrayDiffer<TestItem>;
 
         beforeEach(() => {
             tracker = trackerGenerator();
         });
 
-        it('should return all items as added on the first run', () => {
+        it('should return all items as insert on the first run', () => {
             const items = getInitialItems();
             const delta = tracker(items);
-            expect(delta.added).toEqual(items);
-            expect(delta.updated).toEqual([]);
-            expect(delta.removed).toEqual([]);
+            expect(delta.insert).toEqual(items);
+            expect(delta.update).toEqual([]);
+            expect(delta.remove_keys).toEqual([]);
         });
 
         it('should detect no changes when the same array is passed again', () => {
             const items = getInitialItems();
             tracker(items); // Initial run
             const delta = tracker(items); // Second run with same items
-            expect(delta.added).toEqual([]);
-            expect(delta.updated).toEqual([]);
-            expect(delta.removed).toEqual([]);
+            expect(delta.insert).toEqual([]);
+            expect(delta.update).toEqual([]);
+            expect(delta.remove_keys).toEqual([]);
         });
 
-        it('should correctly identify added items', () => {
+        it('should correctly identify insert items', () => {
             const items = getInitialItems();
             tracker(items);
             const newItem = { id: 4, name: 'Date' };
             const newItems = [...items, newItem];
             const delta = tracker(newItems);
 
-            expect(delta.added).toEqual([newItem]);
-            expect(delta.updated).toEqual([]);
-            expect(delta.removed).toEqual([]);
+            expect(delta.insert).toEqual([newItem]);
+            expect(delta.update).toEqual([]);
+            expect(delta.remove_keys).toEqual([]);
         });
 
-        it('should correctly identify removed items', () => {
+        it('should correctly identify remove_keys items', () => {
             const items = getInitialItems();
             tracker(items);
             const newItems = items.slice(0, 2); // Remove item with id 3
             const delta = tracker(newItems);
 
-            expect(delta.removed).toEqual([items[2]]);
-            expect(delta.added).toEqual([]);
-            expect(delta.updated).toEqual([]);
+            expect(delta.remove_keys).toEqual([items[2]!.id]);
+            expect(delta.insert).toEqual([]);
+            expect(delta.update).toEqual([]);
         });
 
-        it('should correctly identify updated items when references change', () => {
+        it('should correctly identify update items when references change', () => {
             const items = getInitialItems();
             tracker(items);
 
-            const updatedItem = { ...items[1], name: 'Better Banana' } as TestItem; // New reference
-            const newItems: TestItem[] = [items[0]!, updatedItem, items[2]!];
+            const updateItem = { ...items[1], name: 'Better Banana' } as TestItem; // New reference
+            const newItems: TestItem[] = [items[0]!, updateItem, items[2]!];
             const delta = tracker(newItems);
 
-            expect(delta.updated).toEqual([updatedItem]);
-            expect(delta.added).toEqual([]);
-            expect(delta.removed).toEqual([]);
+            expect(delta.update).toEqual([updateItem]);
+            expect(delta.insert).toEqual([]);
+            expect(delta.remove_keys).toEqual([]);
         });
 
         it('should handle a mix of additions, updates, and removals', () => {
             const items = getInitialItems();
             tracker(items);
 
-            const updatedItem = { ...items[1], name: 'Blueberry' } as TestItem; // Update id 2
+            const updateItem = { ...items[1], name: 'Blueberry' } as TestItem; // Update id 2
             const newItem = { id: 4, name: 'Date' }; // Add id 4
 
             // New state: remove id 1, update id 2, keep id 3, add id 4
-            const newItems = [updatedItem, items[2]!, newItem];
+            const newItems = [updateItem, items[2]!, newItem];
             const delta = tracker(newItems);
 
-            expect(delta.added).toEqual([newItem]);
-            expect(delta.updated).toEqual([updatedItem]);
-            expect(delta.removed).toEqual([items[0]]); // Removed Apple
+            expect(delta.insert).toEqual([newItem]);
+            expect(delta.update).toEqual([updateItem]);
+            expect(delta.remove_keys).toEqual([items[0]!.id]); // Removed Apple
         });
 
         it('should handle replacing all items', () => {
@@ -113,34 +113,34 @@ describe('createObjectsDeltaTracker', () => {
             const newItems = [{ id: 10, name: 'Xylophone' }, { id: 11, name: 'Yacht' }];
             const delta = tracker(newItems);
 
-            expect(delta.added).toEqual(newItems);
-            expect(delta.removed).toEqual(items);
-            expect(delta.updated).toEqual([]);
+            expect(delta.insert).toEqual(newItems);
+            expect(delta.remove_keys).toEqual(items.map(x => x.id));
+            expect(delta.update).toEqual([]);
         });
 
         it('should handle an empty initial array', () => {
             const delta = tracker([]);
 
-            expect(delta.added).toEqual([]);
-            expect(delta.updated).toEqual([]);
-            expect(delta.removed).toEqual([]);
+            expect(delta.insert).toEqual([]);
+            expect(delta.update).toEqual([]);
+            expect(delta.remove_keys).toEqual([]);
         });
 
-        it('should handle an empty new array (all items removed)', () => {
+        it('should handle an empty new array (all items remove_keys)', () => {
             const items = getInitialItems();
             tracker(items); // Initial state
             const delta = tracker([]); // Pass empty array
 
-            expect(delta.removed).toEqual(items);
-            expect(delta.added).toEqual([]);
-            expect(delta.updated).toEqual([]);
+            expect(delta.remove_keys).toEqual(items.map(x => x.id));
+            expect(delta.insert).toEqual([]);
+            expect(delta.update).toEqual([]);
         });
 
     };
 
     describe('with strict equality (useDeepEqual: false)', () => {
 
-        const trackerGenerator = () => createObjectsDeltaTracker<TestItem>('id', { useDeepEqual: false })
+        const trackerGenerator = () => createObjectsArrayDiffer<TestItem>('id', { useDeepEqual: false })
 
 
 
@@ -148,7 +148,7 @@ describe('createObjectsDeltaTracker', () => {
         runSharedTests(trackerGenerator);
 
         describe('non standard tests', () => {
-            let tracker: ObjectsDeltaTracker<TestItem>;
+            let tracker: ObjectsArrayDiffer<TestItem>;
             beforeEach(() => {
                 tracker = trackerGenerator();
             });
@@ -164,9 +164,9 @@ describe('createObjectsDeltaTracker', () => {
                 const delta = tracker(items);
 
                 // With strict equality, this mutation is missed.
-                expect(delta.updated).toEqual([]);
-                expect(delta.added).toEqual([]);
-                expect(delta.removed).toEqual([]);
+                expect(delta.update).toEqual([]);
+                expect(delta.insert).toEqual([]);
+                expect(delta.remove_keys).toEqual([]);
             });
         })
 
@@ -174,13 +174,13 @@ describe('createObjectsDeltaTracker', () => {
 
     describe('with deep equality (useDeepEqual: true)', () => {
 
-        const trackerGenerator = () => createObjectsDeltaTracker<TestItem>('id', { useDeepEqual: true })
+        const trackerGenerator = () => createObjectsArrayDiffer<TestItem>('id', { useDeepEqual: true })
 
         // Run all the shared tests
         runSharedTests(trackerGenerator);
 
         describe('non standard tests', () => {
-            let tracker: ObjectsDeltaTracker<TestItem>;
+            let tracker: ObjectsArrayDiffer<TestItem>;
             beforeEach(() => {
                 tracker = trackerGenerator();
             });
@@ -196,9 +196,9 @@ describe('createObjectsDeltaTracker', () => {
                 items[0]!.data!.value = 'Mutated';
                 const delta = tracker(items);
 
-                expect(delta.updated).toEqual([items[0]]);
-                expect(delta.added).toEqual([]);
-                expect(delta.removed).toEqual([]);
+                expect(delta.update).toEqual([items[0]]);
+                expect(delta.insert).toEqual([]);
+                expect(delta.remove_keys).toEqual([]);
             });
 
             it('should detect an update for deeply equal but not referentially equal objects', () => {
@@ -208,17 +208,17 @@ describe('createObjectsDeltaTracker', () => {
                 tracker(initial);
 
                 // Create a new object with the same data
-                const updated = [
+                const update = [
                     { id: 1, name: 'Deep', data: { value: 'B' } }
                 ];
 
                 // Ensure references are not the same
-                expect(initial[0]).not.toBe(updated[0]);
+                expect(initial[0]).not.toBe(update[0]);
 
-                const delta = tracker(updated);
-                expect(delta.updated).toEqual(updated);
-                expect(delta.added).toEqual([]);
-                expect(delta.removed).toEqual([]);
+                const delta = tracker(update);
+                expect(delta.update).toEqual(update);
+                expect(delta.insert).toEqual([]);
+                expect(delta.remove_keys).toEqual([]);
             });
 
             it('should NOT detect an update for deeply equal objects with different references', () => {
@@ -236,9 +236,9 @@ describe('createObjectsDeltaTracker', () => {
                 expect(initial[0]).not.toBe(newItems[0]);
 
                 const delta = tracker(newItems);
-                expect(delta.updated).toEqual([]);
-                expect(delta.added).toEqual([]);
-                expect(delta.removed).toEqual([]);
+                expect(delta.update).toEqual([]);
+                expect(delta.insert).toEqual([]);
+                expect(delta.remove_keys).toEqual([]);
             });
 
             it('should handle complex nested object changes', () => {
@@ -247,14 +247,14 @@ describe('createObjectsDeltaTracker', () => {
                 ];
                 tracker(initial);
 
-                const updated = [
+                const update = [
                     { id: 1, name: 'Nested', data: { value: 'X', nested: { prop: 'Z' } } }
                 ];
 
-                const delta = tracker(updated);
-                expect(delta.updated).toEqual(updated);
-                expect(delta.added).toEqual([]);
-                expect(delta.removed).toEqual([]);
+                const delta = tracker(update);
+                expect(delta.update).toEqual(update);
+                expect(delta.insert).toEqual([]);
+                expect(delta.remove_keys).toEqual([]);
             });
         })
 

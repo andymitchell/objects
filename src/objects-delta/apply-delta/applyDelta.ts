@@ -1,139 +1,164 @@
-import type { PrimaryKeyGetter, PrimaryKeyValue } from "../../utils/getKeyValue.ts";
-import { isObjectsDeltaUsingRemovedKeysFast } from "../schemas.ts";
-import type { ObjectsDeltaFlexible } from "../types.ts";
+import type { PrimaryKeyValue } from "../../utils/getKeyValue.ts";
+import type { ObjectsDeltaApplicable } from "../types.ts";
 
 
+// Helper type for the primary key getter function
+type PrimaryKeyGetter<T> = (item: T) => PrimaryKeyValue;
 
-
+// Optional configuration for the function as specified
 type ApplyDeltaChangesOptions = {
     /**
      * An optional list of primary keys. Only items whose keys appear in this list
-     * will be added, updated, or deleted.
+     * will be inserted, updated, or deleted.
      *
-     * This can be useful when applying changes scoped to a particular subset of data (e.g., filtered views).
-     * 
-     * If existing items in the array don't match the whitelist, they'll be deleted.
-     * 
-     * @default []
+     * If existing items in the array don't match the whitelist, they'll be effectively removed from the final result.
+     * If an empty array (`[]`) is provided, the function will immediately return an empty array.
      *
-     * @example
-     * { whitelist_item_pks: [2, 3] }
+     * @default undefined (no whitelist)
      */
-    whitelist_item_pks?:PrimaryKeyValue[]
+    whitelist_item_pks?: PrimaryKeyValue[];
 
-}
+    /**
+     * If true, it will mutate the passed-in array. This is useful for performance-critical scenarios
+     * or when integrating with libraries like Immer that use drafts.
+     *
+     * @default false (The function is a pure operation and returns a new array)
+     */
+    mutate?: boolean;
+};
+
 /**
- * Applies a `DeltaChanges` to an existing array of items, returning a new array with:
- * - Items in `deleted_keys` removed,
- * - Items in `added_or_updated` added or replacing existing ones with matching primary keys.
+ * Applies a delta (`ObjectsDeltaApplicable`) to an existing array of items, returning the resulting array.
  * 
- * This function is a pure operation and does not mutate the original `items` array, or any of its items.
+ * What changes:
+ * - Items in `removed_keys` removed. 
+ * - Items in 'insert' are added only if they don't exist 
+ * - Items in 'update' are updated only if they exist 
+ * - Items in 'upsert' are added if they don't exist, or updated if they do 
  * 
- * 
- * It performs three main operations in a single pass:
- * 1.  **Updates:** If an item in `delta.updates` has a primary key that already exists in the `items` array, it replaces the old item.
- * 2.  **Additions:** If an item in `delta.added` has a primary key that is not in the `items` array, it is added to the array. If it is in the `items` array, it replaces the old item.
- * 3.  **Deletions:** It removes any items from the `items` array whose primary keys are listed in `delta.deleted_keys`.
- * 
- * 
- * @param items The original array of objects that will be changed (and replaced - not mutated).
- * @param delta The `DeltaChanges` object containing the items to add, update and delete. If it's adding an item that's already in the array, it'll be updated.
- * @param pk A function that takes an item of type `T` and returns its unique primary key, for comparison. 
- * @param options Optional controls, such as a whitelist of primary keys to allow.
- * @returns A **new array** of objects with the change set applied.
- * 
- * 
- * @example
- * const items = [
- *   { id: 1, name: 'Apple' },
- *   { id: 2, name: 'Banana' },
- *   { id: 3, name: 'Cherry' }
- * ];
- * 
- * const delta = {
- *   added: [{ id: 4, name: 'Date' }],
- *   updated: [{ id: 2, name: 'Blueberry' }],
- *   deleted_keys: [1]
- * };
- * 
- * const result = applyDelta(items, delta, item => item.id);
- * // result:
- * // [
- * //   { id: 2, name: 'Blueberry' },
- * //   { id: 3, name: 'Cherry' },
- * //   { id: 4, name: 'Date' }
- * // ]
- * 
- * @example
- * // When an item in `added` has a primary key already in the array, it replaces the existing item:
- * const items = [
- *   { id: 1, name: 'Alpha' },
- *   { id: 2, name: 'Beta' }
- * ];
- * 
- * const delta = {
- *   added: [{ id: 2, name: 'Beta Prime' }], // replaces existing item with id:2
- *   updated: [],
- *   deleted_keys: []
- * };
- * 
- * const result = applyDelta(items, delta, item => item.id);
- * // result:
- * // [
- * //   { id: 1, name: 'Alpha' },
- * //   { id: 2, name: 'Beta Prime' }
- * // ]
- * 
+ * Conflict resolution: 
+ * - A key cannot be removed and inserted/updated/upserted simultaneously. Throws an error.
+ * - `upsert` takes precedence over `insert` and `update`.
+ * - An item in both `insert` and `update` is treated as an `upsert`.
+ *
+ *
+ * @param items The original array of objects.
+ * @param delta The `ObjectsDeltaApplicable` object containing the changes to apply.
+ * @param pk A getter function that takes an item of type `T` and returns its unique primary key.
+ * @param options Optional configuration for whitelisting and mutation.
+ * @returns A new array with the delta changes applied, or the mutated original array if `options.mutate` is true.
+ * @throws {Error} if a primary key is found in `remove_keys` and also in any modification list (`insert`, `update`, `upsert`).
  * 
  * @note Applying a delta is distinct from a `WriteAction`. While a `WriteAction` provides explicit instructions
  * on how to *modify* data (e.g., "increment this value"), a delta simply provides the final
- * state of the objects that have been added or changed. This makes it ideal for scenarios where
+ * state of the objects that have been insert or changed. This makes it ideal for scenarios where
  * the system receives a batch of the most current data from a source and needs to synchronize its
  * local state to match, without needing to know the specific operations that led to the new state.
- * 
  */
-export function applyDelta<T extends Record<string, any>>(items:T[], delta:ObjectsDeltaFlexible<T>, pk:PrimaryKeyGetter<T>, options?: ApplyDeltaChangesOptions):T[] {
+export function applyDelta<T extends Record<string, any>>(
+    items: T[],
+    delta: ObjectsDeltaApplicable<T>,
+    pk: PrimaryKeyGetter<T>,
+    options: ApplyDeltaChangesOptions = {}
+): T[] {
+    // #### Options Handling and Initial Setup ####
 
-    const removedKeys = isObjectsDeltaUsingRemovedKeysFast(delta)? delta.removed_keys : delta.removed.map(x => pk(x));
+    const { mutate = false, whitelist_item_pks } = options;
 
-
-
-    const updatedItemMap = new Map<PrimaryKeyValue, T>();
-    [...delta.added, ...delta.updated].forEach(item => updatedItemMap.set(pk(item), item));
-
-
-    const whitelist:Set<PrimaryKeyValue> | undefined = options?.whitelist_item_pks? new Set(options.whitelist_item_pks) : undefined;
-
-    const updatedPks = new Set<PrimaryKeyValue>();
-
-    // Update or delete items
-    items = items.map(item => {
-        const itemPk = pk(item);
-        if( removedKeys.includes(itemPk) || (whitelist && !whitelist.has(itemPk)) ) {
-            return undefined;
-        } else if( updatedItemMap.has(itemPk) ) {
-            updatedPks.add(itemPk);
-            return updatedItemMap.get(itemPk)!;
-        } else {
-            return item;
+    // If the whitelist is an empty array, the result is always an empty array.
+    if (whitelist_item_pks && whitelist_item_pks.length === 0) {
+        if (mutate) {
+            items.length = 0;
+            return items;
         }
-    })
-    .filter((item):item is T => !!item);
-
-    
-    // Add new items
-    const addItems = delta.added.filter(item => {
-        const itemPk = pk(item);
-        return !updatedPks.has(itemPk) && 
-            (!whitelist || whitelist.has(itemPk))
-    })
-    if( addItems.length>0 ) {
-        items = [
-            ...items, 
-            ...addItems
-        ]
+        return [];
     }
 
-    return items;
-}
+    const whitelistSet = whitelist_item_pks ? new Set(whitelist_item_pks) : undefined;
+    const workingArray = mutate ? items : [...items];
 
+    // ####  Pre-computation and Conflict Resolution ####
+
+    const removeKeys = new Set(delta.remove_keys ?? []);
+    const insertMap = new Map((delta.insert ?? []).map(item => [pk(item), item]));
+    const updateMap = new Map((delta.update ?? []).map(item => [pk(item), item]));
+    const upsertMap = new Map((delta.upsert ?? []).map(item => [pk(item), item]));
+
+    // #### Resolve Conflicts (Highest Priority) ####
+
+    // A key cannot be removed and inserted/modified simultaneously.
+    for (const key of removeKeys) {
+        if (insertMap.has(key) || updateMap.has(key) || upsertMap.has(key)) {
+            throw new Error("Conflicting delta: A primary key cannot be in 'remove_keys' and also in 'insert', 'update', or 'upsert'.");
+        }
+    }
+
+    // `upsert` takes precedence over `insert` and `update`.
+    for (const key of upsertMap.keys()) {
+        insertMap.delete(key);
+        updateMap.delete(key);
+    }
+
+    // An item in both `insert` and `update` is treated as an `upsert`.
+    for (const [key] of insertMap) {
+        if (updateMap.has(key)) {
+            upsertMap.set(key, updateMap.get(key)!);
+            insertMap.delete(key);
+            updateMap.delete(key);
+        }
+    }
+
+    // #### Applying the Delta ####
+
+    // Build the final state in a Map for efficient key-based operations.
+    const finalItemsMap = new Map<PrimaryKeyValue, T>();
+
+    // Initialize with current items, applying the whitelist.
+    for (const item of workingArray) {
+        const key = pk(item);
+        if (whitelistSet && !whitelistSet.has(key)) {
+            continue; // This item is not in the whitelist, so it's effectively removed.
+        }
+        finalItemsMap.set(key, item);
+    }
+
+    // Apply removals.
+    for (const key of removeKeys) {
+        finalItemsMap.delete(key);
+    }
+
+    // Apply updates (only if the item already exists).
+    for (const [key, item] of updateMap.entries()) {
+        if (whitelistSet && !whitelistSet.has(key)) continue;
+        if (finalItemsMap.has(key)) {
+            finalItemsMap.set(key, item);
+        }
+    }
+
+    // Apply upserts (updates or inserts).
+    for (const [key, item] of upsertMap.entries()) {
+        if (whitelistSet && !whitelistSet.has(key)) continue;
+        finalItemsMap.set(key, item);
+    }
+
+    // Apply inserts (only if the item does not already exist).
+    for (const [key, item] of insertMap.entries()) {
+        if (whitelistSet && !whitelistSet.has(key)) continue;
+        if (!finalItemsMap.has(key)) {
+            finalItemsMap.set(key, item);
+        }
+    }
+
+    // #### Finalization and Return Value ####
+
+    if (mutate) {
+        const finalValues = Array.from(finalItemsMap.values());
+        // Modify the original array in-place to match the final state.
+        items.length = 0;
+        items.push(...finalValues);
+        return items;
+    } else {
+        // Return a new array containing the final state.
+        return Array.from(finalItemsMap.values());
+    }
+}

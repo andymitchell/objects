@@ -16,21 +16,27 @@ import { type IUser } from "../auth/types.js";
 import { checkPermission } from "./helpers/checkPermission.js";
 
 
+type ObjectCloneMode = 'clone' | 'mutate';
 
-function getMutableItem<T extends Record<string, any>>(item:T):T {
-    // If immer draft it must be restored before cloned:
-    if( isDraft(item) ) item = current(item);
+function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectCloneMode):T {
 
-    const clone = structuredClone(item) as T;
-    return clone;
+    if( mode==='mutate' ) {
+        return item;
+    } else {
+        // If immer draft it must be restored before cloned:
+        if( isDraft(item) ) item = current(item);
+
+        const clone = structuredClone(item) as T;
+        return clone;
+    }
 }
 
 
 function getOptionDefaults<T extends Record<string, any>>():Required<ApplyWritesToItemsOptions<T>> {
     return {
         attempt_recover_duplicate_create: 'never',
-        in_place_mutation: false,
-        allow_partial_success: true
+        mutate: false,
+        atomic: false
     }
 }
 
@@ -61,10 +67,65 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     }
 }
 
-export default function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResponse<T> {
+
+
+/**
+ * Applies the write actions (`WriteAction`) to an array of items, returning a new or mutated array.
+ * 
+ * **This is an alias of `applyWritesToItems`** but it correctly returns Immer Drafts if they were passed in. 
+ * It's split into its own function (instead of being an overload of `applyWritesToItems`) due to a higher DX cost: if you want to explicitly specify T as a generic, it requires 2 to be specified.
+ * 
+ * Purity and Referential Comparison:
+ * - It defaults to returning a new array and new objects (only if the write actions affect them)
+ *      - It supports referential comparison, only altering the array or objects' references **if** the write action affects it
+ * - If you pass Immer Draft `items`, use the `mutate` option for a more efficient mutation 
+ * 
+ * If any action fails, then all fail (unless you use the `allow_partial_success` option, which keeps all actions _up to_ the failing one)
+ * 
+ * @param writeActions The actions to perform 
+ * @param items The items to perform them on (by default they will not be mutated)
+ * @param schema 
+ * @param ddl The rules for how the write actions will be implemented
+ * @param user Required if the `ddl` specifies permissions  
+ * @param options Optional:
+ *  - allow_partial_success: if an action fails, keep all the actions that worked leading up to it (but none after)
+    - attempt_recover_duplicate_create: specify the conflict resolution strategy for creating an item that already exists in `items` 
+    - mutate: keeps the same object references and modifies the passed-in `items` array directly
+ * @returns A new array (unless `mutate` is used) with the actions applied to its objects
+ */
+export function applyWritesToItemsTyped<T extends Record<string, any>, I extends T | Draft<T>>(writeActions: WriteAction<T>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResponse<I> {
+    // This function works as overload for applyWritesToItems (instead of the 'Typed' suffix);
+    // but with the cost of requiring the user to specify 2 generics instead of just 1 T.
+    // So decided to give the consumer the choice. 
+
+    return applyWritesToItems(writeActions, items as T[], schema, ddl, user, options) as ApplyWritesToItemsResponse<I>;
+}
+
+/**
+ * Applies the write actions (`WriteAction`) to an array of items, returning an updated array. 
+ * 
+ * Purity and Referential Comparison:
+ * - It defaults to returning a new array and new objects (only if the write actions affect them)
+ *      - It supports referential comparison, only altering the array or objects' references **if** the write action affects it
+ * - If you pass Immer Draft `items`, use the `mutate` option for a more efficient mutation 
+ * 
+ * If any action fails, then all fail (unless you use the `allow_partial_success` option, which keeps all actions _up to_ the failing one)
+ * 
+ * @param writeActions The actions to perform 
+ * @param items The items to perform them on (by default they will not be mutated)
+ * @param schema 
+ * @param ddl The rules for how the write actions will be implemented
+ * @param user Required if the `ddl` specifies permissions  
+ * @param options Optional:
+ *  - allow_partial_success: if an action fails, keep all the actions that worked leading up to it (but none after)
+    - attempt_recover_duplicate_create: specify the conflict resolution strategy for creating an item that already exists in `items` 
+    - mutate: keeps the same object references and modifies the passed-in `items` array directly
+ * @returns A new array (unless `mutate` is used) with the actions applied to its objects
+ */
+export function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResponse<T>  {
     return _applyWritesToItems(writeActions, items, schema, ddl, user, options);
 }
-function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: ReadonlyArray<Readonly<T>> | Draft<T>[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): ApplyWritesToItemsResponse<T> {
+function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): ApplyWritesToItemsResponse<T> {
 
     if( writeActions.length===0 ) {
         return {
@@ -75,10 +136,25 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
     }
     
     const optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>> = Object.assign(getOptionDefaults<T>(), options);
-    if( console && "debug" in console && isDraft(items) && !optionsIncDefaults.in_place_mutation ) {
-        // FYI Don't auto enable it, because there might be reasons they want to return a fresh array. 
-        console.debug("applyWritesToItems has been passed an Immer draft. It's faster and more fitting to Immer's model to enable 'in_place_mutation'.");
+    if( isDraft(items) && !optionsIncDefaults.mutate ) {
+        throw new Error("When using Immer drafts you need to use mutate. Immer does not support replacing the array.");
     }
+
+
+    let objectCloneMode: ObjectCloneMode = optionsIncDefaults.mutate? 'mutate' : 'clone';
+    let mutatedItemsRollback:MutatedItemsRollback<T> | undefined;
+    // Handle the challenge of rollbacks while maintaining referential comparison. 
+    if( optionsIncDefaults.atomic && optionsIncDefaults.mutate ) {
+        if( isDraft(items) ) {
+            // Immer works on the basis that any mutation to an object triggers a flag, and it can never be rolled back (even if applying identical original properties to the same pointer)
+            // Therefore we will keep the outer array (like mutate) but replace changed objects (like immutable), knowing they're not deployed until successful at the end.
+            objectCloneMode = 'clone';
+        } else {
+            mutatedItemsRollback = new MutatedItemsRollback(items);
+        }
+    }
+
+    const referentialComparisonOk = !optionsIncDefaults.mutate || isDraft(items);
     
     // Load the rules
     const rules:ListRules<T> | undefined = ddl.lists['.'];
@@ -202,32 +278,28 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                             switch (action.payload.type) {
                                 case 'update':
                                     if (!mutableUpdatedItem) {
-                                        mutableUpdatedItem = getMutableItem(item);
+                                        mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                     }
 
-                                    const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
-                                    const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
-                                    if( schemaOk ) {
-
-                                        // An update is not allowed to change the primary key 
-                                        if( pk(mutableUpdatedItem)===pkValue ) {
-                                            mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.in_place_mutation decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
-                                        } else {
-                                            failureTracker.report(action, item, {
-                                                'type': 'update_altered_key',
-                                                primary_key: rules.primary_key
-                                            })
-                                        }
-                                        
-
-                                        
-                                    } // #fail_continues
-
+                                    const payloadSetsPrimaryKeyAs = rules.primary_key in action.payload.data && (action.payload.data as T)[rules.primary_key];
+                                    if( payloadSetsPrimaryKeyAs && payloadSetsPrimaryKeyAs!==pk(mutableUpdatedItem) ) {
+                                        failureTracker.report(action, item, {
+                                            'type': 'update_altered_key',
+                                            primary_key: rules.primary_key
+                                        })
+                                    } else {
+                                        console.log("Run the update?!")
+                                        const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
+                                        const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
+                                        if( schemaOk ) {
+                                            mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.mutate decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)                                            
+                                        } // #fail_continues
+                                    }
 
                                     break;
                                 case 'array_scope':
                                     if (!mutableUpdatedItem) {
-                                        mutableUpdatedItem = getMutableItem(item);
+                                        mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                     }
                                     // Get all arrays that match the scope, then recurse into applyWritesToItems for them
                                     const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
@@ -239,7 +311,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                             scopedArray.schema, 
                                             scopedArray.ddl, 
                                             user,
-                                            Object.assign({}, optionsIncDefaults, {in_place_mutation: false}),
+                                            Object.assign({}, optionsIncDefaults, {mutate: false}),
                                             true
                                             );
 
@@ -306,12 +378,15 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
 
         let successful_actions: SuccessfulWriteAction<T>[] = [];
         let changes: ApplyWritesToItemsChanges<T>;
-        if( optionsIncDefaults.allow_partial_success ) {
-            // Thought: if addedHash/updatedHash/deletedHash/etc ends up reading ahead, it's still possible to generate the output by re-running applyWritesItems with just the actions in successTracker.get 
-            changes = generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults);
-            successful_actions = successTracker.get();
-        } else {
+        if( optionsIncDefaults.atomic ) {
+            if( mutatedItemsRollback ) {
+                items = mutatedItemsRollback.rollback();
+            }
             changes = emptyApplyWritesToItemsChanges(items);
+        } else {
+            // Thought: if addedHash/updatedHash/deletedHash/etc ends up reading ahead, it's still possible to generate the output by re-running applyWritesItems with just the actions in successTracker.get 
+            changes = generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults, referentialComparisonOk);
+            successful_actions = successTracker.get();
         }
 
         // FUTURE IDEA: DETECT WHICH SUBSEQUENT ACTIONS WOULD STILL HAVE FAILED. Find out in one go what won't work (e.g. subsequent schema fails). Solution: take out the initial failing error, then run the remaining actions against the current mutableState, but passed in a recursive call in a way that it won't be mutated. Roll the returned failed actions into failureTracker, replacing any marked as blocked. 
@@ -330,7 +405,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
         return {
             status: 'ok', 
             successful_actions: successTracker.get(),
-            changes: generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults)
+            changes: generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults, referentialComparisonOk)
         };
     }
 
@@ -338,8 +413,8 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
     
 }
 
-function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>) {
-    let finalItems = optionsIncDefaults.in_place_mutation? originalItems as T[] : [...originalItems] as T[];
+function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>) {
+    let finalItems = optionsIncDefaults.mutate? originalItems as T[] : [...originalItems] as T[];
     for( let i = 0; i < finalItems.length; i++ ) {
         if( !finalItems[i] ) throw new Error(`finalItems[i] was empty, suggesting either an item has been nullified, or splicing has shortened the length such that i is beyond the end. i: ${i}, length: ${finalItems.length}`);
         const pkValue = pk(finalItems[i]!);
@@ -357,20 +432,98 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
     return finalItems;
 }
 
-function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[]):ApplyWritesToItemsChanges<T> {
-    return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems as T[], created_at: Date.now()};
+function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:T[]):ApplyWritesToItemsChanges<T> {
+    return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems, created_at: Date.now(), referential_comparison_ok: true};
 }
-function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:ReadonlyArray<Readonly<T>> | Draft<T>[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>):ApplyWritesToItemsChanges<T> {
+function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>, referentialComparisonOk:boolean):ApplyWritesToItemsChanges<T> {
 
-    const changes: ApplyWritesToItemsChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now() };
+    const changes: ApplyWritesToItemsChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now(), referential_comparison_ok: referentialComparisonOk };
     const newChange = !!(changes.insert.length || changes.update.length || changes.remove_keys.length);
     changes.changed = newChange;
     if( newChange ) {
         changes.final_items = generateFinalItems<T>(addedHash, updatedHash, deletedHash, originalItems, pk, optionsIncDefaults);
     } else {
         // Use the original array for shallow comparison to indicate no change 
-        changes.final_items = originalItems as T[]
+        changes.final_items = originalItems
     }
 
     return changes;
+}
+
+
+
+
+/**
+ * When mutating objects and 'atomic' is enabled, it needs a way to roll them back while maintaining the same reference 
+ * (so they don't appear to have changed).
+ * 
+ * This achieves it by restoring the same array, same object references, and same values in them no matter how they were changed.
+ * 
+ * It will not work for Immer (because Immer flags an object as dirty when its mutated, even if the mutation makes no changes. See #immer_flags)
+ */
+class MutatedItemsRollback<T extends Record<string, any> = Record<string, any>> {
+
+    private initialState:{array_reference: T[], object_references: T[], values: T[]};
+
+    constructor(items:T[]) {
+        if( isDraft(items) ) throw new Error("Immer cannot work with MutatedItemsRollback. See #immer_flags.");
+
+        this.initialState = {array_reference: items, object_references: [...items], values: structuredClone(items)}
+    }
+
+    rollback():T[] {
+        const items = this.initialState.array_reference;
+
+        items.length = 0;
+        this.initialState.object_references.forEach(x => items.push(x));
+
+        this.initialState.values.forEach((x, index) => {
+            rollbackObjectWhilePreservingReference(items[index]!, x);
+        })
+        return items;
+    }
+}
+
+/**
+ * Makes the `target` identical to `original`, without changing the `target` reference. 
+ * 
+ * Use it to maintain referential comparison when rolling back a mutated object. I.e. the object is unchanged.
+ * 
+ * How it works: 
+ * - It removes keys from `target` that aren't in the `source`
+ * - For every key in `source`, it adds it to `target` with the same reference
+ * 
+ *
+ * @param {T} target The object to update
+ * @param {T} original The object to sync from 
+ * 
+ * @note It is not a deep clone - it just syncs references at the top level (without recursion) - but it does make them equal.
+ * 
+ */
+function rollbackObjectWhilePreservingReference<T extends Record<string, any> | any[]>(target: T, original: T): void {
+
+    if (target === original) return;
+
+
+    // 1. Remove keys from the target that are not present in the source.
+    for (const key in target) {
+        if (!(key in original)) {
+            delete target[key];
+        }
+    }
+
+    // 2. Update/add keys from the source to the target.
+
+
+    for (const key in original) {
+        target[key] = original[key];
+    }
+
+    // Also get symbol properties.
+    for (const symbol of Object.getOwnPropertySymbols(original)) {
+        const descriptor = Object.getOwnPropertyDescriptor(original, symbol)!;
+        Object.defineProperty(target, symbol, descriptor);
+    }
+
+
 }

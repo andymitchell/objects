@@ -1,7 +1,15 @@
-import applyWritesToItems from "./applyWritesToItems.js";
+import {applyWritesToItems, applyWritesToItemsTyped} from "./applyWritesToItems.js";
 import { checkPermission } from "./helpers/checkPermission.js";
 import type { ApplyWritesToItemsOptions, DDL, ListOrdering } from "./types.js";
 
-export default applyWritesToItems;
-export {applyWritesToItems, checkPermission};
-export type {DDL, ListOrdering, ApplyWritesToItemsOptions};
+
+export {
+    applyWritesToItems, 
+    checkPermission, 
+    applyWritesToItemsTyped
+};
+export type {
+    DDL, 
+    ListOrdering, 
+    ApplyWritesToItemsOptions
+};

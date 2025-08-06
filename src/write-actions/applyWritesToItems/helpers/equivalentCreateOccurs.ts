@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { DDL } from "../types.js";
 import type { WriteAction } from "../../types.js";
 import { isMatch } from "lodash-es";
-import applyWritesToItems from "../applyWritesToItems.js";
+import {applyWritesToItems} from "../applyWritesToItems.js";
 
 
 export default function equivalentCreateOccurs<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, existing:Readonly<T>, createAction:WriteAction<T>, writeActions:WriteAction<T>[]):boolean {

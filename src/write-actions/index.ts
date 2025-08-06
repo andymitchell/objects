@@ -1,4 +1,4 @@
-import { applyWritesToItems, checkPermission } from "./applyWritesToItems/index.js";
+import { applyWritesToItems, applyWritesToItemsTyped, checkPermission } from "./applyWritesToItems/index.js";
 import type {  ApplyWritesToItemsOptions, DDL, ListOrdering } from "./applyWritesToItems/index.js";
 import { isIUser, type IUser } from "./auth/index.js";
 import combineWriteActionsWhereFilters from "./combineWriteActionsWhereFilters.js";
@@ -16,6 +16,7 @@ import type {ApplyWritesToItemsChanges, ApplyWritesToItemsResponse} from './appl
  */
 export const WriteActions = {
     applyWritesToItems,
+    applyWritesToItemsTyped,
     combineWriteActionsWhereFilters,
     schemas: {
         
@@ -40,6 +41,7 @@ export const WriteActions = {
 
 export {
     applyWritesToItems,
+    applyWritesToItemsTyped,
     combineWriteActionsWhereFilters,
     WriteActionsResponseSchema,
     WriteActionsResponseOkSchema,

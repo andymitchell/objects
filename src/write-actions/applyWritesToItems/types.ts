@@ -5,7 +5,6 @@ import type { EnsureRecord } from "../../types.js";
 import type {  SuccessfulWriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate, WriteActionsResponseError, WriteActionsResponseOk } from "../types.js";
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
-import type { Draft } from "immer";
 import type { ObjectsDelta } from "../../objects-delta/types.ts";
 
 
@@ -20,13 +19,7 @@ export interface WriteStrategy<T extends Record<string, any>> {
 
 
 export type ApplyWritesToItemsOptions<T extends Record<string, any> = Record<string, any>> = {
-    /**
-     * By default, any error in any action will cause nothing to change. 
-     * 
-     * If enabled, this will allow the actions to take effect, up until the first one that fails. All subsequent actions will then fail regardless of their viability. 
-     */
-    allow_partial_success?: boolean,
-
+  
     /**
      * Define what will happen if the create action has the same ID as an existing item
      * - 'never': [default] the create will fail
@@ -36,7 +29,28 @@ export type ApplyWritesToItemsOptions<T extends Record<string, any> = Record<str
     attempt_recover_duplicate_create?: 'never' | 'if-identical' | 'always-update',
 
 
-    in_place_mutation?: boolean  // Use for Immer
+        
+    /** 
+     * Either all actions occur, or none (i.e. if 1 fails, they all fail). 
+     * 
+     * Aka the actions are a transaction block
+     * 
+     * @default false
+     */
+    atomic?: boolean
+
+    /** 
+     * Mutate in-place instead of cloning the array/objects when they update.
+     * 
+     * The most likely reason to do this is because you're passing an Immer draft, which needs the same array returning. 
+     * 
+     * **When mutating, referential comparison works for**: 
+     * - ✅ Using Immer Drafts for `items` (because the draft resolves to new objects) 
+     * - ❌ Everything else fails, because objects have the same reference even when changed 
+     * 
+     * @default false
+     */
+    mutate?: boolean
 }
 
 
@@ -181,15 +195,32 @@ const c:PrimaryKeyValue = a.lists['.'].primary_key
 /**
  * The changes to the original items passed to `applyWritesToItems`, after the actions are run. 
  */
-export type ApplyWritesToItemsChanges<T extends Record<string, any>> = 
-ObjectsDelta<T> & { 
+export type ApplyWritesToItemsChanges<
+    T extends Record<string, any>
+    > = 
+    ObjectsDelta<T> & { 
     changed: boolean, 
-    final_items: T[] | Draft<T>[] 
+
+    /**
+     * The final version of the input items, with all the changes
+     */
+    final_items: T[],
+
+    /**
+     * If true then `final_items` can be used for referential comparison (e.g. in React): 
+     * - The array only changes if any items changed 
+     * - If an item is modified, it'll replaced with a new object
+     * 
+     * It requires either `in_place_mutation` to be disabled, or Immer drafts to be used.
+     */
+    referential_comparison_ok: boolean,
 }
 /**
  * The response to `applyWritesToItems`
  */
-export type ApplyWritesToItemsResponse<T extends Record<string, any>> = WriteActionsResponseOk & {
+export type ApplyWritesToItemsResponse<
+    T extends Record<string, any>
+    > = WriteActionsResponseOk & {
     changes: ApplyWritesToItemsChanges<T>,
 
     /**
@@ -197,6 +228,9 @@ export type ApplyWritesToItemsResponse<T extends Record<string, any>> = WriteAct
      * It's now considered redundant because it can only be a success if all actions are complete. 
      */
     successful_actions: SuccessfulWriteAction<T>[],
+
 } | WriteActionsResponseError<T> & {
     changes: ApplyWritesToItemsChanges<T>
+    
+
 }

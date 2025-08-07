@@ -449,7 +449,7 @@ describe('applyWritesToItems', () => {
                     const initialObj1 = structuredClone(obj1);
                     const items = [initialObj1];
 
-                    console.log('initial items', items)
+                    
 
                     const {result} = applyWritesToItemsInTesting(
                         [
@@ -806,6 +806,7 @@ describe('applyWritesToItems', () => {
                             originalItems,
                             ObjSchema,
                             ddl,
+                            undefined,
                             {
                                 atomic: false
                             }
@@ -895,7 +896,6 @@ describe('applyWritesToItems', () => {
                         // Now check that it failed, and nothing is changed
                         expect(result.changes.update.length).toBe(0);
                         expect(result.changes.final_items.length).toBe(1);
-                        console.log("Final items children", result.changes.final_items[0]?.children);
                         expect(result.changes.final_items[0]!.id).toBe('1');
                         expect(result.changes.final_items[0]!.children![0]!.name).toBeUndefined();
                         expect(result.changes.final_items).toEqual(originalItemsClone);
@@ -1117,11 +1117,85 @@ describe('applyWritesToItems', () => {
 
                             expect(result.status).toBe('error'); if (result.status !== 'error') throw new Error("noop");
 
-                            console.log(result);
 
                             expect(result.changes.final_items === originalItems).toBe(true);
                             expect(result.changes.final_items).toEqual(originalItems);
                             expect(originalItems[0] === obj1Ref).toBe(true);
+                        }
+
+                        
+
+                    });
+
+                    test(`no reference changes with 1 write on array_scope (recursed), 1 fail and atomic=true`, (cx) => {
+                        
+                        const originalItems: Obj[] = [
+                            {
+                                id: '1',
+                                children: [
+                                    { cid: '1', children: [] }
+                                ]
+                            }
+                        ];
+                        const obj1Ref = originalItems[0];
+
+                        const {result} = applyWritesToItemsInTesting(
+                            [
+                                {
+                                    type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
+                                        type: 'array_scope',
+                                        scope: 'children',
+                                        action: {
+                                            type: 'update',
+                                            method: 'merge',
+                                            data: {
+                                                name: 'Bob'
+                                            },
+                                            where: {
+                                                cid: '1'
+                                            }
+                                        },
+                                        where: {
+                                            id: '1'
+                                        }
+                                    })
+                                },
+                                {
+                                    type: 'write', ts: 0, uuid: '0', payload: {
+                                        type: 'update',
+                                        method: 'merge',
+                                        data: {
+                                            // @ts-ignore wilfully breaking schema here 
+                                            none_key: 'T1'
+                                        },
+                                        where: {
+                                            id: obj1.id
+                                        }
+                                    }
+                                },
+                            ],
+                            originalItems,
+                            ObjSchema,
+                            ddl,
+                            undefined,
+                            {
+                                atomic: true
+                            }
+
+                        );
+                        if (mutable === 'mutable' && immer!=='immer') {
+                            // Mutable without immer does not support referential comparison
+                            expect(result.changes.referential_comparison_ok).toBe(false);
+                        } else {
+                            expect(result.changes.referential_comparison_ok).toBe(true);
+
+                            expect(result.status).toBe('error'); if (result.status !== 'error') throw new Error("noop");
+
+
+                            expect(result.changes.final_items === originalItems).toBe(true);
+                            expect(result.changes.final_items).toEqual(originalItems);
+                            expect(originalItems[0] === obj1Ref).toBe(true);
+                            expect(originalItems[0] === result.changes.final_items[0]).toBe(true);
                         }
 
                         
@@ -1749,223 +1823,36 @@ describe('applyWritesToItems', () => {
 
 
 
-            describe('Immer compatible', () => {
+            
 
-                if (name === 'mutable') {
-                    test('changes ok using produce', async () => {
 
-                        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a1'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        text: 'sue'
-                                    },
-                                    where: {
-                                        id: obj2.id
-                                    }
+            describe('config', () => {
+                test('throws error if trying to use immer and immutable', (cx) => {
+                    if( name!=='immutable' ) cx.skip()
+                    const originalItems = [structuredClone(obj1), structuredClone(obj2)];
+                    const actions: WriteAction<Obj>[] = [
+                        {
+                            type: 'write', ts: 0, uuid: '0', payload: {
+                                type: 'create',
+                                data: {
+                                    id: 'a1'
                                 }
                             }
-                        ]
+                        }
+                    ]
 
-                        const finalItems = produce(originalItems, draft => {
-                            applyWritesToItems(
-                                actions,
-                                draft,
-                                ObjSchema,
-                                ddl,
-                                undefined,
-                                options
-                            );
-                        });
-
-                        expect(finalItems === originalItems).toBe(false);
-                        expect(finalItems[0] === originalItems[0]!).toBe(true);
-                        expect(finalItems[1] === originalItems[1]).toBe(false);
-                    })
-
-                    
-                    test('handles atomic rollback on error using produce', async () => {
-
-                        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
-                        console.log(originalItems);
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    data: {
-                                        text: 'Updated Text'
-                                    },
-                                    where: {
-                                        id: obj1.id
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'new-entry',
-                                        text: 'Something new'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: obj2.id // Collision
-                                    }
-                                }
-                            }
-                        ]
-
-                        const finalItems = produce(originalItems, draft => {
-                            applyWritesToItems(
-                                actions,
-                                draft,
-                                ObjSchema,
-                                ddl,
-                                undefined,
-                                {...options, atomic: true}
-                            );
-                        });
-
-                        
-                        console.log(finalItems);
-                        expect(finalItems.map(x => x.id)).toEqual([obj1.id, obj2.id]);
-                        expect(finalItems[0]).toEqual(originalItems[0]);
-                        expect(finalItems[1]).toEqual(originalItems[1]);
-
-                        expect(finalItems === originalItems).toBe(true);
-                        expect(finalItems[1] === originalItems[1]).toBe(true);
-                        expect(finalItems[0] === originalItems[0]).toBe(true);
-                    })
-
-                    test('changes ok using createDraft/finishDraft', async () => {
-
-                        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
-                        const draftItems = createDraft(originalItems);
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a1'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        text: 'sue'
-                                    },
-                                    where: {
-                                        id: obj2.id
-                                    }
-                                }
-                            }
-                        ]
-
-
-                        const result = applyWritesToItems(
+                    expect(() => produce(originalItems, draft => {
+                        applyWritesToItems(
                             actions,
-                            draftItems,
+                            draft,
                             ObjSchema,
                             ddl,
                             undefined,
                             options
                         );
-                        expect(draftItems === result.changes.final_items).toBe(true);
-
-                        const finalItems = finishDraft(result.changes.final_items);
-                        expect(finalItems === originalItems).toBe(false);
-                        expect(finalItems[0] === originalItems[0]!).toBe(true);
-                        expect(finalItems[1] === originalItems[1]).toBe(false);
-
-                    })
-
-                    test('0 change', async () => {
-
-                        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        text: 'sue'
-                                    },
-                                    where: {
-                                        id: 'no exist'
-                                    }
-                                }
-                            }
-                        ]
-
-                        const finalItems = produce(originalItems, draft => {
-                            applyWritesToItems(
-                                actions,
-                                draft,
-                                ObjSchema,
-                                ddl,
-                                undefined,
-                                options
-                            );
-                        });
-
-                        expect(finalItems === originalItems).toBe(true);
-                        expect(finalItems[0] === originalItems[0]!).toBe(true);
-                        expect(finalItems[1] === originalItems[1]).toBe(true);
-                    })
-                }
-                if (name === 'immutable') {
-                    test('throws error if trying to use immer and immutable', () => {
-                        const originalItems = [structuredClone(obj1), structuredClone(obj2)];
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a1'
-                                    }
-                                }
-                            }
-                        ]
-
-                        expect(() => produce(originalItems, draft => {
-                            applyWritesToItems(
-                                actions,
-                                draft,
-                                ObjSchema,
-                                ddl,
-                                undefined,
-                                options
-                            );
-                        })).toThrow('When using Immer drafts you need to use mutate.');
-                    })
-                }
+                    })).toThrow('When using Immer drafts you need to use mutate.');
+                })
             })
-
-
-
-
 
 
             describe('Regression Tests', () => {
@@ -2039,7 +1926,7 @@ describe('applyWritesToItems', () => {
 });
 
 
-test('Prove Immer flags objects even if no material change #immer_flags', () => {
+test('Prove Immer flags objects even if no material change #immer_cannot_mutate_in_atomic', () => {
     const originalItems = [{id: 1, text: 'Bob'}, {id: 2, text: ''}];
     const finalItems = produce(originalItems, draft => {
         

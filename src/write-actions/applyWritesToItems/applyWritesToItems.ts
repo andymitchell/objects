@@ -25,7 +25,7 @@ function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectClon
     } else {
         // If immer draft it must be restored before cloned:
         if( isDraft(item) ) item = current(item);
-
+        
         const clone = structuredClone(item) as T;
         return clone;
     }
@@ -84,6 +84,7 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  * Support for Immer:
  * - You must use the `mutate` option if you pass an Immer Draft array of `items`
  * - The `changes` object returned is only available during the `produce` function. It ceases to be accessible afterwards (as Immer cancels the draft objects). See #immer_changes_cancelled_post_produce.
+ * - 🐢 If you use Immer and `atomic`, then to be able to rollback it needs to clone objects (because any mutation in Immer is an irreversible flag, so it must first clone), which is slower that you might expect. But as fast as normal non-Immer operations.
  * 
  * Transactional/atomic behaviour
  * - By default, it completes as many actions as it can, and if any fail it stops doing subsequent actions.
@@ -118,6 +119,7 @@ export function applyWritesToItemsTyped<T extends Record<string, any>, I extends
  * Support for Immer:
  * - You must use the `mutate` option if you pass an Immer Draft array of `items`
  * - The `changes` object returned is only available during the `produce` function. It ceases to be accessible afterwards (as Immer cancels the draft objects). See #immer_changes_cancelled_post_produce.
+ * - 🐢 If you use Immer and `atomic`, then to be able to rollback it needs to clone objects (because any mutation in Immer is an irreversible flag, so it must first clone), which is slower that you might expect. But as fast as normal non-Immer operations.
  * 
  * Transactional/atomic behaviour
  * - By default, it completes as many actions as it can, and if any fail it stops doing subsequent actions.
@@ -311,27 +313,32 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
 
                                     break;
                                 case 'array_scope':
-                                    console.log("Into array_scope")
                                     if (!mutableUpdatedItem) {
-                                        console.log("ABout to mutate item", isDraft(item));
-                                        console.log("Mutating item", isDraft(item)? current(item) : item)
-                                        console.log("Is item.children a draft?", isDraft(item.children));
                                         mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                     }
                                     // Get all arrays that match the scope, then recurse into applyWritesToItems for them
                                     const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
 
+                                    
+
                                     for( const scopedArray of scopedArrays ) {
+
+                                        // #immer_cannot_mutate_in_atomic
+                                        // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.
+                                        // In Immer, any update to an object or property flags the whole draft, and it cannot be undone. 
+                                        // At the moment, Immer+atomic can rollback because it clones the object before updating it, only accepting it if all actions succeed.
+                                        // The problem is when it recurses into _applyWritesToItems: the recursed level succeeds and mutates an object.
+                                        // Now it can no longer be rolled back, even if the top level now fails on a subsequent action. 
+                                        // To workaround this, in the case of (`atomic` + Immer + array_scope), it must clone the target before recursing into it 
+                                        const preventMutation = optionsIncDefaults.mutate && optionsIncDefaults.atomic && isDraft(scopedArray.items);
+
                                         const arrayResponse = _applyWritesToItems(
                                             [scopedArray.writeAction], 
-                                            //scopedArray.items, 
-                                            isDraft(scopedArray.items)? current(scopedArray.items) : scopedArray.items, 
+                                            preventMutation? structuredClone(current(scopedArray.items)) : scopedArray.items, 
                                             scopedArray.schema, 
                                             scopedArray.ddl, 
                                             user,
-                                            //optionsIncDefaults,
-                                            {...optionsIncDefaults, mutate: false},
-                                            //Object.assign({}, optionsIncDefaults, {mutate: false}),
+                                            optionsIncDefaults,
                                             true
                                             );
 
@@ -340,12 +347,10 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                             failureTracker.mergeUnderAction(action, arrayResponse.failed_actions);
                                         }
 
-                                        console.log('Is returned final_items a draft?', isDraft(arrayResponse.changes.final_items));
                                         setProperty(
                                             mutableUpdatedItem,
                                             scopedArray.path,
                                             arrayResponse.changes.final_items
-                                            //isDraft(arrayResponse.changes.final_items)? current(arrayResponse.changes.final_items) : arrayResponse.changes.final_items
                                         )
                                     
                                     }
@@ -481,14 +486,14 @@ function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedH
  * 
  * This achieves it by restoring the same array, same object references, and same values in them no matter how they were changed.
  * 
- * It will not work for Immer (because Immer flags an object as dirty when its mutated, even if the mutation makes no changes. See #immer_flags)
+ * It will not work for Immer (because Immer flags an object as dirty when its mutated, even if the mutation makes no changes. See #immer_cannot_mutate_in_atomic)
  */
 class MutatedItemsRollback<T extends Record<string, any> = Record<string, any>> {
 
     private initialState:{array_reference: T[], object_references: T[], values: T[]};
 
     constructor(items:T[]) {
-        if( isDraft(items) ) throw new Error("Immer cannot work with MutatedItemsRollback. See #immer_flags.");
+        if( isDraft(items) ) throw new Error("Immer cannot work with MutatedItemsRollback. See #immer_cannot_mutate_in_atomic.");
 
         this.initialState = {array_reference: items, object_references: [...items], values: structuredClone(items)}
     }

@@ -32,11 +32,12 @@ function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectClon
 }
 
 
-function getOptionDefaults<T extends Record<string, any>>():Required<ApplyWritesToItemsOptions<T>> {
+function getOptionDefaults<T extends Record<string, any>>(options?:Partial<ApplyWritesToItemsOptions<T>>):Required<ApplyWritesToItemsOptions<T>> {
     return {
         attempt_recover_duplicate_create: 'never',
         mutate: false,
-        atomic: false
+        atomic: false,
+        ...options
     }
 }
 
@@ -78,9 +79,15 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  * Purity and Referential Comparison:
  * - It defaults to returning a new array and new objects (only if the write actions affect them)
  *      - It supports referential comparison, only altering the array or objects' references **if** the write action affects it
- * - If you pass Immer Draft `items`, use the `mutate` option for a more efficient mutation 
+ * - If you use the `mutate` option on non-Immer `items`, then referential comparison is not guaranteed  
  * 
- * If any action fails, then all fail (unless you use the `allow_partial_success` option, which keeps all actions _up to_ the failing one)
+ * Support for Immer:
+ * - You must use the `mutate` option if you pass an Immer Draft array of `items`
+ * - The `changes` object returned is only available during the `produce` function. It ceases to be accessible afterwards (as Immer cancels the draft objects). See #immer_changes_cancelled_post_produce.
+ * 
+ * Transactional/atomic behaviour
+ * - By default, it completes as many actions as it can, and if any fail it stops doing subsequent actions.
+ * - If you use the `atomic` option, then if any action fails, all fail. 
  * 
  * @param writeActions The actions to perform 
  * @param items The items to perform them on (by default they will not be mutated)
@@ -88,7 +95,7 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  * @param ddl The rules for how the write actions will be implemented
  * @param user Required if the `ddl` specifies permissions  
  * @param options Optional:
- *  - allow_partial_success: if an action fails, keep all the actions that worked leading up to it (but none after)
+ *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: specify the conflict resolution strategy for creating an item that already exists in `items` 
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
@@ -97,7 +104,6 @@ export function applyWritesToItemsTyped<T extends Record<string, any>, I extends
     // This function works as overload for applyWritesToItems (instead of the 'Typed' suffix);
     // but with the cost of requiring the user to specify 2 generics instead of just 1 T.
     // So decided to give the consumer the choice. 
-
     return applyWritesToItems(writeActions, items as T[], schema, ddl, user, options) as ApplyWritesToItemsResponse<I>;
 }
 
@@ -107,9 +113,15 @@ export function applyWritesToItemsTyped<T extends Record<string, any>, I extends
  * Purity and Referential Comparison:
  * - It defaults to returning a new array and new objects (only if the write actions affect them)
  *      - It supports referential comparison, only altering the array or objects' references **if** the write action affects it
- * - If you pass Immer Draft `items`, use the `mutate` option for a more efficient mutation 
+ * - If you use the `mutate` option on non-Immer `items`, then referential comparison is not guaranteed  
  * 
- * If any action fails, then all fail (unless you use the `allow_partial_success` option, which keeps all actions _up to_ the failing one)
+ * Support for Immer:
+ * - You must use the `mutate` option if you pass an Immer Draft array of `items`
+ * - The `changes` object returned is only available during the `produce` function. It ceases to be accessible afterwards (as Immer cancels the draft objects). See #immer_changes_cancelled_post_produce.
+ * 
+ * Transactional/atomic behaviour
+ * - By default, it completes as many actions as it can, and if any fail it stops doing subsequent actions.
+ * - If you use the `atomic` option, then if any action fails, all fail. 
  * 
  * @param writeActions The actions to perform 
  * @param items The items to perform them on (by default they will not be mutated)
@@ -117,15 +129,17 @@ export function applyWritesToItemsTyped<T extends Record<string, any>, I extends
  * @param ddl The rules for how the write actions will be implemented
  * @param user Required if the `ddl` specifies permissions  
  * @param options Optional:
- *  - allow_partial_success: if an action fails, keep all the actions that worked leading up to it (but none after)
+ *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: specify the conflict resolution strategy for creating an item that already exists in `items` 
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
 export function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResponse<T>  {
+
     return _applyWritesToItems(writeActions, items, schema, ddl, user, options);
 }
 function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): ApplyWritesToItemsResponse<T> {
+
 
     if( writeActions.length===0 ) {
         return {
@@ -135,7 +149,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
         };
     }
     
-    const optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>> = Object.assign(getOptionDefaults<T>(), options);
+    const optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>> = getOptionDefaults<T>(options);
     if( isDraft(items) && !optionsIncDefaults.mutate ) {
         throw new Error("When using Immer drafts you need to use mutate. Immer does not support replacing the array.");
     }
@@ -288,7 +302,6 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                             primary_key: rules.primary_key
                                         })
                                     } else {
-                                        console.log("Run the update?!")
                                         const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
                                         const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
                                         if( schemaOk ) {
@@ -298,7 +311,11 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
 
                                     break;
                                 case 'array_scope':
+                                    console.log("Into array_scope")
                                     if (!mutableUpdatedItem) {
+                                        console.log("ABout to mutate item", isDraft(item));
+                                        console.log("Mutating item", isDraft(item)? current(item) : item)
+                                        console.log("Is item.children a draft?", isDraft(item.children));
                                         mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                     }
                                     // Get all arrays that match the scope, then recurse into applyWritesToItems for them
@@ -307,11 +324,14 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                     for( const scopedArray of scopedArrays ) {
                                         const arrayResponse = _applyWritesToItems(
                                             [scopedArray.writeAction], 
-                                            scopedArray.items, 
+                                            //scopedArray.items, 
+                                            isDraft(scopedArray.items)? current(scopedArray.items) : scopedArray.items, 
                                             scopedArray.schema, 
                                             scopedArray.ddl, 
                                             user,
-                                            Object.assign({}, optionsIncDefaults, {mutate: false}),
+                                            //optionsIncDefaults,
+                                            {...optionsIncDefaults, mutate: false},
+                                            //Object.assign({}, optionsIncDefaults, {mutate: false}),
                                             true
                                             );
 
@@ -320,10 +340,12 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                             failureTracker.mergeUnderAction(action, arrayResponse.failed_actions);
                                         }
 
+                                        console.log('Is returned final_items a draft?', isDraft(arrayResponse.changes.final_items));
                                         setProperty(
                                             mutableUpdatedItem,
                                             scopedArray.path,
                                             arrayResponse.changes.final_items
+                                            //isDraft(arrayResponse.changes.final_items)? current(arrayResponse.changes.final_items) : arrayResponse.changes.final_items
                                         )
                                     
                                     }
@@ -382,7 +404,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
             if( mutatedItemsRollback ) {
                 items = mutatedItemsRollback.rollback();
             }
-            changes = emptyApplyWritesToItemsChanges(items);
+            changes = emptyApplyWritesToItemsChanges(items, referentialComparisonOk);
         } else {
             // Thought: if addedHash/updatedHash/deletedHash/etc ends up reading ahead, it's still possible to generate the output by re-running applyWritesItems with just the actions in successTracker.get 
             changes = generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults, referentialComparisonOk);
@@ -432,8 +454,8 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
     return finalItems;
 }
 
-function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:T[]):ApplyWritesToItemsChanges<T> {
-    return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems, created_at: Date.now(), referential_comparison_ok: true};
+function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:T[], referentialComparisonOk: boolean = true):ApplyWritesToItemsChanges<T> {
+    return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems, created_at: Date.now(), referential_comparison_ok: referentialComparisonOk};
 }
 function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>, referentialComparisonOk:boolean):ApplyWritesToItemsChanges<T> {
 

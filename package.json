@@ -18,6 +18,14 @@
         "./write-actions-old-types": {
             "types": "./dist/index-write-actions-old-types.d.ts",
             "default": "./dist/index-write-actions-old-types.js"
+        },
+        "./objects-delta": {
+            "types": "./dist/index-objects-delta.d.ts",
+            "default": "./dist/index-objects-delta.js"
+        },
+        "./objects-delta-testing": {
+            "types": "./dist/index-objects-delta-testing.d.ts",
+            "default": "./dist/index-objects-delta-testing.js"
         }
     },
     "type": "module",
@@ -67,4 +75,5 @@
     "peerDependencies": {
         "zod": "^3.25.71"
     }
+
 }

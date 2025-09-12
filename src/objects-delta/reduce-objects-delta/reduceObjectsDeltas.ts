@@ -5,17 +5,28 @@ import {  type PrimaryKeyGetter, type PrimaryKeyValue } from '../../utils/getKey
 
 
 
+/**
+ * Reduces an array of object deltas into a single, functionally equivalent delta.
+ * The function applies deltas in chronological order, with the last write winning.
+ *
+ * @param deltas An array of ObjectsDelta or ObjectsDeltaApplicable objects.
+ * @returns A single reduced ObjectsDelta or ObjectsDeltaApplicable.
+ */
 export function reduceObjectsDeltas<T extends Record<string, any>>( 
     deltas: ObjectsDelta<T>[], 
     pk: PrimaryKeyGetter<T> 
 ): ObjectsDelta<T>; 
-
-// Overload for when all deltas are of type ObjectsDeltaApplicable<T> 
+/**
+ * Reduces an array of object deltas into a single, functionally equivalent delta.
+ * The function applies deltas in chronological order, with the last write winning.
+ *
+ * @param deltas An array of ObjectsDelta or ObjectsDeltaApplicable objects.
+ * @returns A single reduced ObjectsDelta or ObjectsDeltaApplicable.
+ */
 export function reduceObjectsDeltas<T extends Record<string, any>>( 
     deltas: ObjectsDeltaApplicable<T>[], 
     pk: PrimaryKeyGetter<T> 
 ): ObjectsDeltaApplicable<T>; 
-
 /**
  * Reduces an array of object deltas into a single, functionally equivalent delta.
  * The function applies deltas in chronological order, with the last write winning.

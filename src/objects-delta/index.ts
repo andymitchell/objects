@@ -6,8 +6,7 @@ import  { constrainDeltaToFilter } from "./constrainDeltaToFilter.ts";
 import  { applyDelta } from "./apply-delta/applyDelta.ts";
 import  { isObjectsDelta, isObjectsDeltaApplicable, ObjectsDeltaApplicableSchema, ObjectsDeltaSchema } from "./schemas.ts";
 import { reduceObjectsDeltas } from "./reduce-objects-delta/reduceObjectsDeltas.ts";
-import  { testReduceObjectDeltas } from "./reduce-objects-delta/testReduceObjectDeltas.ts";
-import  { testApplyDelta } from "./apply-delta/testApplyDelta.ts";
+
 
 
 
@@ -27,8 +26,6 @@ export {
     isObjectsDeltaApplicable,
     isObjectsDeltaFast,
 
-    testApplyDelta,
-    testReduceObjectDeltas,
 }
 
 export type {

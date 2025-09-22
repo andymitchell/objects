@@ -141,7 +141,7 @@ export function applyWritesToItems<T extends Record<string, any>>(writeActions: 
     return _applyWritesToItems(writeActions, items, schema, ddl, user, options);
 }
 function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): ApplyWritesToItemsResponse<T> {
-
+    
 
     if( writeActions.length===0 ) {
         return {
@@ -285,6 +285,8 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                         let mutableUpdatedItem: T | undefined;
                         let deleted = !!deletedHash[pkValue];
 
+                        
+
                         // Check if it's a grow set (otherwise just do the action)
                         const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, item, rules);
                         
@@ -297,6 +299,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                         mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                     }
 
+
                                     const payloadSetsPrimaryKeyAs = rules.primary_key in action.payload.data && (action.payload.data as T)[rules.primary_key];
                                     if( payloadSetsPrimaryKeyAs && payloadSetsPrimaryKeyAs!==pk(mutableUpdatedItem) ) {
                                         failureTracker.report(action, item, {
@@ -305,6 +308,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                         })
                                     } else {
                                         const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
+
                                         const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem); 
                                         if( schemaOk ) {
                                             mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.mutate decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)                                            
@@ -377,7 +381,9 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                 if (addedHash[pkValue]) {
                                     addedHash[pkValue] = mutableUpdatedItem;
                                 } else {
+                                    
                                     updatedHash[pkValue] = mutableUpdatedItem;
+                                    
                                 }
                                 wipItems[i] = mutableUpdatedItem
                             }

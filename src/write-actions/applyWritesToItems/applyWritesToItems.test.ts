@@ -4,8 +4,8 @@ import { z } from "zod";
 import { test } from 'vitest';
 import type { WriteAction, WriteActionPayloadArrayScope } from "../types.js";
 import { assertArrayScope } from "../types.js";
-import type { ApplyWritesToItemsChanges, ApplyWritesToItemsOptions, ApplyWritesToItemsResponse, DDL } from "./types.js";
-import { createDraft, current, finishDraft, original, produce, type Draft } from "immer";
+import type { ApplyWritesToItemsOptions, ApplyWritesToItemsResponse, DDL } from "./types.js";
+import { produce, type Draft } from "immer";
 import type { IUser } from "../auth/types.js";
 import { applyWritesToItems } from "./applyWritesToItems.ts";
 
@@ -17,6 +17,7 @@ const ObjSchema = z.object({
     id: z.string(),
     text: z.string().optional(),
     owner: z.string().optional(),
+    arr_items: z.array(z.string()).optional(),
     children: z.array(
         z.object({
             cid: z.string(),
@@ -335,7 +336,92 @@ describe('applyWritesToItems', () => {
                 });
 
 
+                test(`array updates ok`, () => {
+                    const data1:Obj = JSON.parse(JSON.stringify(obj1)); //structuredClone(obj2);
+                    data1.arr_items = ['1'];
 
+                    const {result} = applyWritesToItemsInTesting(
+                        [
+                            {
+                                type: 'write',
+                                ts: 0,
+                                uuid: '0',
+                                payload: {
+                                    type: 'create',
+                                    data: data1
+                                }
+                            }
+                        ]
+                        ,
+                        [],
+                        ObjSchema,
+                        ddl
+                    );
+
+                    expect(result.status).toBe('ok'); if (result.status !== 'ok') throw new Error("noop");
+                    expect(
+                        result.changes.insert[0]!
+                    ).toEqual(data1);
+
+                    const {result: result2} = applyWritesToItemsInTesting(
+                        [
+                            {
+                                type: 'write',
+                                ts: 0,
+                                uuid: '0',
+                                payload: {
+                                    type: 'update',
+                                    data: {
+                                        arr_items: ['1', '2']
+                                    },
+                                    where: {
+                                        id: data1.id
+                                    }
+                                }
+                            }
+                        ]
+                        ,
+                        result.changes.final_items,
+                        ObjSchema,
+                        ddl
+                    );
+
+                    
+                    const {result: result3} = applyWritesToItemsInTesting(
+                        [
+                            {
+                                type: 'write',
+                                ts: 0,
+                                uuid: '0',
+                                payload: {
+                                    type: 'update',
+                                    data: {
+                                        arr_items: ['z'],
+                                        'owner': 'Bob'
+                                    },
+                                    where: {
+                                        id: data1.id
+                                    }
+                                }
+                            }
+                        ]
+                        ,
+                        result2.changes.final_items,
+                        ObjSchema,
+                        ddl
+                    );
+
+                    expect(result3.status).toBe('ok'); if (result3.status !== 'ok') throw new Error("noop");
+                    expect(
+                        result3.changes.final_items[0]!
+                    ).toEqual({
+                        ...data1,
+                        arr_items: ['z'],
+                        owner: 'Bob'
+                    });
+
+
+                });
 
                 test(`specifies successful_actions`, () => {
 

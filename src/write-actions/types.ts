@@ -2,6 +2,7 @@ import { type ZodIssue } from "zod";
 import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../dot-prop-paths/types.js";
 import type { UpdatingMethod, WhereFilterDefinition } from "../where-filter/types.js"
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
+import type { TreeNode } from "../dot-prop-paths/zod.ts";
 //import type { SerializableCommonError } from "@andyrmitchell/utils/serialize-error";
 
 interface SerializableCommonError {
@@ -104,7 +105,10 @@ export type WriteCommonError =
     {type: 'custom', message?: string} | 
     {
         type: 'schema',
-        issues: ZodIssue[]
+        issues: ZodIssue[],
+        /** The item that was tested in the schema. It should be the same as the reported failed_item, but this removes doubt. */
+        tested_item?: any,
+        serialised_schema?: TreeNode
     } | 
     {
         type: 'missing_key',

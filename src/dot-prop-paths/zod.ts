@@ -60,6 +60,20 @@ export type TreeNode = {
     descended_from_array?: boolean,
     optional_or_nullable?: boolean
 }
+export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
+  z.object({
+    name: z.string(),
+    dotprop_path: z.string(),
+    kind: z.any() as z.ZodType<ZodKind>,
+    children: z.array(TreeNodeSchema),
+    schema: z.any().optional(), // holds a Zod schema instance at runtime
+    nameless_array_element: z.boolean().optional(),
+    parent: TreeNodeSchema.optional(),
+    descended_from_array: z.boolean().optional(),
+    optional_or_nullable: z.boolean().optional(),
+  })
+);
+
 export type TreeNodeMap = Record<DotPropPath, TreeNode>;
 type ConvertSchemaToDotPropPathTreeOptions = {
     exclude_schema_reference?: boolean,

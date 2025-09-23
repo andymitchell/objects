@@ -2,7 +2,7 @@ import z from "zod";
 import { UpdatingMethodSchema, WhereFilterSchema } from "../where-filter/schemas.ts";
 import { isTypeEqual } from "@andyrmitchell/utils";
 import type { WriteAction, FailedWriteAction, FailedWriteActionAffectedItem, WriteActionPayloadArrayScope, WriteActionPayloadUpdate, WriteActionsResponseError, WriteActionsResponseOk, SuccessfulWriteAction, WriteCommonError } from "./types.ts";
-import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod.ts";
+import { getZodSchemaAtSchemaDotPropPath, TreeNodeSchema } from "../dot-prop-paths/zod.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 //import { SerializableCommonErrorSchema } from "@andyrmitchell/utils/serialize-error";
 
@@ -97,7 +97,9 @@ export const WriteCommonErrorSchema = z.discriminatedUnion('type', [
     }).passthrough(),
     z.object({
         type: z.literal('schema'),
-        issues: (z.array(z.any()) as z.ZodType<z.ZodIssue[]>)
+        issues: (z.array(z.any()) as z.ZodType<z.ZodIssue[]>),
+        tested_item: z.any(),
+        serialised_schema: TreeNodeSchema.optional()
     }),
     z.object({
         type: z.literal('missing_key'),

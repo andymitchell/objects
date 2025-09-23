@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath } from "./zod.js";
+import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath, TreeNodeSchema } from "./zod.js";
 
 describe('Zod test', () => {
 
@@ -103,6 +103,8 @@ describe('Zod test', () => {
         })
         //debugger;
         // This result was copied from a run I was happy with. It's here to prevent regressions.
+        const parseResult = TreeNodeSchema.safeParse(result.root);
+        expect(parseResult.success).toBe(true);
         expect(result.root).toEqual({
             "name": "",
             "dotprop_path": "",

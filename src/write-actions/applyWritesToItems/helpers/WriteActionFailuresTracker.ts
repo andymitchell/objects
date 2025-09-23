@@ -3,6 +3,8 @@ import type { WriteAction, FailedWriteAction, FailedWriteActionAffectedItem, Wri
 import type { ListRules } from "../types.js";
 import deepEql from "deep-eql";
 import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.js";
+import { convertSchemaToDotPropPathTree, type TreeNode } from "../../../dot-prop-paths/zod.ts";
+import cloneDeepSafe from "../../../utils/cloneDeepSafe.ts";
 
 
 export default class FailedWriteActionuresTracker<T extends Record<string, any>> {
@@ -89,10 +91,20 @@ export default class FailedWriteActionuresTracker<T extends Record<string, any>>
     testSchema(action:WriteAction<T>, item: T):boolean {
         const result = this.schema.safeParse(item);
         if( !result.success ) {
+
+            let serialisedSchema:TreeNode | undefined;
+            try {
+                const serialisedSchemaResult = cloneDeepSafe(convertSchemaToDotPropPathTree(this.schema));
+
+                serialisedSchema = serialisedSchemaResult.root
+            } catch(e) {}
+
             const {failedAction, failedItem} = this.findActionAndItem(action, item, true);
             this.addErrorDetails(failedAction, failedItem, {
                 type: 'schema',
-                issues: result.error.issues
+                issues: result.error.issues,
+                tested_item: item,
+                serialised_schema: serialisedSchema
             });
         }
         return result.success;

@@ -59,12 +59,12 @@ const obj2: Obj = {
 };
 
 export type ApplyWritesToItemsInTestingFn<T extends Record<string, any>> = (
-  writeActions: WriteAction<T>[],
-  items: T[],
-  schema: z.ZodType<T, any, any>,
-  ddl: DDL<T>,
-  user?: IUser,
-  options?: ApplyWritesToItemsOptions<T>
+    writeActions: WriteAction<T>[],
+    items: T[],
+    schema: z.ZodType<T, any, any>,
+    ddl: DDL<T>,
+    user?: IUser,
+    options?: ApplyWritesToItemsOptions<T>
 ) => {
     /**
      * The result, but in the case of Immer `produce` it has had its `changes.final_items` replaced with the finalised drafts. 
@@ -82,7 +82,7 @@ export type ApplyWritesToItemsInTestingFn<T extends Record<string, any>> = (
     draft_final_items?: Draft<T>[]
 };
 
-function castApplyWritesToItemsInTestingFn<T extends Record<string, any>>(applyWritesToItemsInTesting:ApplyWritesToItemsInTestingFn<any>):ApplyWritesToItemsInTestingFn<T> {
+function castApplyWritesToItemsInTestingFn<T extends Record<string, any>>(applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<any>): ApplyWritesToItemsInTestingFn<T> {
     return applyWritesToItemsInTesting;
 }
 
@@ -101,15 +101,15 @@ type Immer = 'immer' | 'non-immer';
 function testUseCases<
     T extends Record<string, any> = Obj
 >
-(
-    callback:(name: UseCase, mutable: Mutable, immer:Immer, applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T>, useCaseBaseOptions: ApplyWritesToItemsOptions<T>) => void
-) {
+    (
+        callback: (name: UseCase, mutable: Mutable, immer: Immer, applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T>, useCaseBaseOptions: ApplyWritesToItemsOptions<T>) => void
+    ) {
 
     {
-        const useCaseBaseOptions = {mutate: false};
+        const useCaseBaseOptions = { mutate: false };
         // The immutable options
-        const applyWritesToItemsInTesting:ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            const result = applyWritesToItems(writeActions, items, schema, ddl, user, {...useCaseBaseOptions, ...options});
+        const applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
+            const result = applyWritesToItems(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
             return {
                 result
             }
@@ -117,11 +117,11 @@ function testUseCases<
         callback('immutable', 'immutable', 'non-immer', applyWritesToItemsInTesting, useCaseBaseOptions)
     }
     {
-        
+
         // The mutable options
-        const useCaseBaseOptions = {mutate: true};
-        const applyWritesToItemsInTesting:ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            const result = applyWritesToItems(writeActions, items, schema, ddl, user, {...useCaseBaseOptions, ...options});
+        const useCaseBaseOptions = { mutate: true };
+        const applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
+            const result = applyWritesToItems(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
             return {
                 result
             }
@@ -131,26 +131,26 @@ function testUseCases<
     {
 
         // The immer-mutable options
-        const useCaseBaseOptions = {mutate: true};
-        const applyWritesToItemsInTesting:ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            
+        const useCaseBaseOptions = { mutate: true };
+        const applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
+
             let result: ApplyWritesToItemsResponse<T>;
             let draft_items: Draft<T>[];
             let draft_final_items: Draft<T>[];
             const finalItems = produce(items, draft => {
 
                 draft_items = draft;
-                result = applyWritesToItems(writeActions, draft as T[], schema, ddl, user, {...useCaseBaseOptions, ...options})
+                result = applyWritesToItems(writeActions, draft as T[], schema, ddl, user, { ...useCaseBaseOptions, ...options })
 
                 draft_final_items = result.changes.final_items as Draft<T>[];
 
             });
-            if( !result! || !draft_items! || !draft_final_items! ) throw new Error("noop");
+            if (!result! || !draft_items! || !draft_final_items!) throw new Error("noop");
 
             result.changes.final_items = finalItems
-            
-            return {result, draft_final_items, draft_items};
-            
+
+            return { result, draft_final_items, draft_items };
+
         }
         callback('immer-mutable', 'mutable', 'immer', applyWritesToItemsInTesting, useCaseBaseOptions)
     }
@@ -172,7 +172,7 @@ describe('applyWritesToItems', () => {
 
                     const data2 = JSON.parse(JSON.stringify(obj2)); //structuredClone(obj2);
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write',
@@ -211,16 +211,16 @@ describe('applyWritesToItems', () => {
                 });
 
                 test(`update`, (cx) => {
-                    if( name!=='immer-mutable' ) cx.skip();
+                    if (name !== 'immer-mutable') cx.skip();
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
                                     type: 'update',
                                     method: 'merge',
                                     data: {
-                                        
+
                                         text: 'T1'
                                     },
                                     where: {
@@ -237,7 +237,7 @@ describe('applyWritesToItems', () => {
                     );
 
                     expect(result.status).toBe('ok'); if (result.status !== 'ok') throw new Error("noop");
-                    if( immer!=='immer' ) { // With Immer the draft objects added to 'changes' are cancelled #immer_changes_cancelled_post_produce
+                    if (immer !== 'immer') { // With Immer the draft objects added to 'changes' are cancelled #immer_changes_cancelled_post_produce
                         expect(
                             result.changes.update[0]!
                         ).toEqual({ ...obj1, text: 'T1' });
@@ -249,7 +249,7 @@ describe('applyWritesToItems', () => {
                 });
 
                 test(`delete`, () => {
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -277,8 +277,154 @@ describe('applyWritesToItems', () => {
                     ).toEqual(0);
                 });
 
+                test(`array_scoped create (regression on Task)`, (cx) => {
+
+
+
+                    const ThreadIdsSchema = z.object({
+                        //threadID: z.string().nonempty(),
+                        threadIDG3: z.string().optional(),
+                        threadIDG2: z.string().optional(),
+                        standaloneDraftId: z.string().optional(),
+                        standaloneDraftIdLegacy: z.string().optional(),
+                    });
+                    const ThreadIdsWithMessageSchema = z.intersection(ThreadIdsSchema, z.object({
+                        lastMessageID: z.string().optional(),
+                        lastMessageIDLegacy: z.string().optional(),
+                        standaloneDraftId: z.string().optional(),
+                        standaloneDraftIdLegacy: z.string().optional(),
+                        shortID: z.string().optional() // the ID in the hash 
+                    }));
+                    const CvIDSchema = z.intersection(ThreadIdsWithMessageSchema, z.object({
+                    }));
+
+                    const RobustRangeSchema = z.object({
+                        //domIndices: z.string(), 
+                        textRange: z.string(),
+                        charStart: z.string().optional(),
+                        charEnd: z.string().optional(),
+                        //tokens: EncodedTokensSchema.optional()
+                    })
+                    const TaskMutableCoreSchema = z.object({
+                        format: z.number().optional(),
+                        emailCvID: CvIDSchema.optional(),
+                        emailDetails: z.object(
+                            {
+                                rfcMessageId: z.string(),
+                                subject: z.string().optional(),
+                                sentAtTs: z.number(),
+                            }
+                        ).optional(),
+                        highlight: RobustRangeSchema.optional(),
+                        text: z.string().optional(),
+                        complete: z.boolean().optional(),
+                        snoozeUntilTs: z.number().optional(),
+                        archived: z.boolean().optional(),
+                        recipients: z.array(z.string()).optional(),
+                        assigned: z.array(z.string()).optional(),
+                        owner: z.string().optional(),
+                        ownerDetails: z.object(
+                            {
+                                name: z.string().optional(),
+                                avatarURL: z.string().optional()
+                            }
+                        ).optional(),
+                        softDeletedAtTs: z.number().optional(),
+                        supportingContext: z.string().optional(),
+                        suggestion: z.boolean().optional(),
+                        embed: z.boolean().optional(),
+                        draft: z.object({
+                            embedOnConfirm: z.boolean()
+                        }).optional(),
+                        choices: z.array(z.string()).optional(),
+                        draggableSortKey: z.string().optional()
+
+                    });
+                    const TaskSchema = TaskMutableCoreSchema.merge(z.object({
+                        id: z.string(),
+                        creator: z.string(),
+                        createdAtTs: z.number(),
+                        children: z.array(z.object({
+                            id: z.string(),
+                            text: z.string(),
+                            createdAtTs: z.number(),
+                            creator: z.string()
+                        }))
+                    }));
+
+                    type Task = z.infer<typeof TaskSchema>;
+
+                    const obj: Task = {
+                        "emailCvID": {
+                            "threadIDG2": "",
+                            "threadIDG3": "thread-a:r-2254583274219061713",
+                            "lastMessageID": "msg-a:r-3535258334084944016",
+                            "standaloneDraftId": "msg-a:r-3535258334084944016"
+                        },
+                        "text": "wtf <span class=\"_mention_17riv_3\" data-type=\"mention\" data-id=\"bot\" data-label=\"bot\" data-mention-suggestion-char=\"@\">@bot</span>",
+                        "id": "557dd2be-8061-4a43-8beb-6f70c4781f50",
+                        "creator": "branch.attacking.lion@gmail.com",
+                        "createdAtTs": 1758618892440,
+                        "draggableSortKey": "a1",
+                        "children": []
+                    }
+
+
+
+                    const ddl: DDL<Task> = {
+                        version: 1,
+                        lists: {
+                            '.': {
+                                primary_key: 'id'
+                            },
+                            'children': {
+                                primary_key: 'id',
+                            },
+                        },
+                        permissions: {
+                            type: 'none'
+                        }
+                    }
+
+                    const result = applyWritesToItems(
+                        [
+                            {
+                                type: 'write',
+                                ts: 0,
+                                uuid: '0',
+                                payload: {
+                                    type: 'array_scope',
+                                    action: {
+                                        type: 'create',
+                                        data: {
+                                            id: "79aa9af4-aa8f-4494-adbc-14c3046705c1",
+                                            creator: 'bot',
+                                            createdAtTs: Date.now(),
+                                            text: 'You added a name'
+                                        },
+                                    },
+                                    scope: 'children',
+                                    where: {
+                                        id: obj.id
+                                    }
+                                }
+                            }
+                        ],
+                        [
+                            obj
+                        ],
+                        TaskSchema,
+                        ddl
+                    );
+
+                    expect(result.status).toBe('ok'); if (result.status !== 'ok') throw new Error('noop');
+                    const updatedItem = result.changes.final_items[0]!;
+                    expect(updatedItem.children[0]!.text).toBe('You added a name');
+
+                })
+
                 test(`array_scoped create (existing structure in place) `, (cx) => {
-                    
+
 
                     const objWithChildren: Obj = {
                         id: 'p1',
@@ -307,7 +453,7 @@ describe('applyWritesToItems', () => {
                         }
 
                     }
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write',
@@ -337,10 +483,10 @@ describe('applyWritesToItems', () => {
 
 
                 test(`array updates ok`, () => {
-                    const data1:Obj = JSON.parse(JSON.stringify(obj1)); //structuredClone(obj2);
+                    const data1: Obj = JSON.parse(JSON.stringify(obj1)); //structuredClone(obj2);
                     data1.arr_items = ['1'];
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write',
@@ -363,7 +509,7 @@ describe('applyWritesToItems', () => {
                         result.changes.insert[0]!
                     ).toEqual(data1);
 
-                    const {result: result2} = applyWritesToItemsInTesting(
+                    const { result: result2 } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write',
@@ -386,8 +532,8 @@ describe('applyWritesToItems', () => {
                         ddl
                     );
 
-                    
-                    const {result: result3} = applyWritesToItemsInTesting(
+
+                    const { result: result3 } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write',
@@ -425,7 +571,7 @@ describe('applyWritesToItems', () => {
 
                 test(`specifies successful_actions`, () => {
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -479,12 +625,12 @@ describe('applyWritesToItems', () => {
             describe('purity', () => {
 
                 test('never mutates', (cx) => {
-                    if (mutable !== 'immutable' && immer!=='immer') cx.skip(); // Allow immer here: see #immer_mutates_in_produce_but_then_is_immutable
+                    if (mutable !== 'immutable' && immer !== 'immer') cx.skip(); // Allow immer here: see #immer_mutates_in_produce_but_then_is_immutable
 
                     const initialObj1 = structuredClone(obj1);
                     const items = [initialObj1];
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -528,16 +674,16 @@ describe('applyWritesToItems', () => {
                 })
 
                 test('mutates in place', (cx) => {
-                    if (mutable !== 'mutable' ) cx.skip();
+                    if (mutable !== 'mutable') cx.skip();
                     // Immer is counter-intuitive because despite it running as a mutate operation, it's final output behaves with perfect referential comparison; so it needs to be judged as non-mutate. #immer_mutates_in_produce_but_then_is_immutable
-                    if (immer==='immer') cx.skip();
+                    if (immer === 'immer') cx.skip();
 
                     const initialObj1 = structuredClone(obj1);
                     const items = [initialObj1];
 
-                    
 
-                    const {result} = applyWritesToItemsInTesting(
+
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -568,15 +714,15 @@ describe('applyWritesToItems', () => {
 
                     expect(result.status).toBe('ok'); if (result.status !== 'ok') throw new Error("noop");
 
-                    
+
                     expect(items).toBe(result.changes.final_items);
                     const returnedObj1 = result.changes.final_items[0]!;
                     expect(initialObj1.id).toBe(returnedObj1.id);
                     expect(initialObj1).toBe(returnedObj1);
-                    
+
 
                     // Skip this for immer as it freezes the items
-                    if( name!=='immer-mutable' ) {
+                    if (name !== 'immer-mutable') {
                         const testId = 'inboth';
                         items.push({ id: testId });
                         expect(items.find(x => x.id === testId)).toBeDefined();
@@ -592,7 +738,7 @@ describe('applyWritesToItems', () => {
 
                 test(`update break schema`, () => {
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -628,7 +774,7 @@ describe('applyWritesToItems', () => {
                     // Have 2 failing updates, at 1 and 3
                     // Failing update 1 should affect 2 items
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -737,7 +883,7 @@ describe('applyWritesToItems', () => {
                         const originalItems = [
                             structuredClone(obj1)
                         ] as Draft<Obj>[];
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -790,7 +936,7 @@ describe('applyWritesToItems', () => {
 
                         const obj1Ref = originalItems[0]!;
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -841,7 +987,7 @@ describe('applyWritesToItems', () => {
                     });
 
                     test(`handles failure on array_scope, with atomic=false`, (cx) => {
-                        
+
 
                         const originalItems: Obj[] = [
                             {
@@ -851,7 +997,7 @@ describe('applyWritesToItems', () => {
                                 ]
                             }
                         ];
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
@@ -903,7 +1049,7 @@ describe('applyWritesToItems', () => {
 
 
                         // Now check that it failed
-                        if( immer!=='immer' ) { // Immer prevents access to objects after produce finishes. #immer_changes_cancelled_post_produce
+                        if (immer !== 'immer') { // Immer prevents access to objects after produce finishes. #immer_changes_cancelled_post_produce
                             expect(result.changes.update.length).toBe(1);
                             expect(result.changes.update[0]!.id).toBe('1');
                         }
@@ -917,7 +1063,7 @@ describe('applyWritesToItems', () => {
 
                     test(`handles rollback on failure of array_scope, with atomic=true`, (cx) => {
                         //if( name!=='immer-mutable' ) cx.skip()
-                        
+
                         const originalItems: Obj[] = [
                             {
                                 id: '1',
@@ -928,7 +1074,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const originalItemsClone = structuredClone(originalItems);
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
@@ -1003,7 +1149,7 @@ describe('applyWritesToItems', () => {
                         const obj1Ref = originalItems[0]!;
                         const obj2Ref = originalItems[1];
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1032,7 +1178,7 @@ describe('applyWritesToItems', () => {
                             ddl
                         );
 
-                        if (mutable === 'mutable' && immer!=='immer') {
+                        if (mutable === 'mutable' && immer !== 'immer') {
                             // Mutable without immer does not support referential comparison
                             expect(result.changes.referential_comparison_ok).toBe(false);
                         } else {
@@ -1054,7 +1200,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0]!;
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1070,7 +1216,7 @@ describe('applyWritesToItems', () => {
                                         type: 'update',
                                         method: 'merge',
                                         data: {
-                                            
+
                                             // @ts-ignore wilfully breaking schema here 
                                             none_key: 'T1'
                                         },
@@ -1088,7 +1234,7 @@ describe('applyWritesToItems', () => {
                                 atomic: false
                             }
                         );
-                        if (mutable === 'mutable' && immer!=='immer') {
+                        if (mutable === 'mutable' && immer !== 'immer') {
                             // Mutable without immer does not support referential comparison
                             expect(result.changes.referential_comparison_ok).toBe(false);
                         } else {
@@ -1103,7 +1249,7 @@ describe('applyWritesToItems', () => {
                             expect(result.changes.final_items.length).toBe(2);
                         }
 
-                        
+
 
                     });
 
@@ -1117,7 +1263,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0]!;
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1136,7 +1282,7 @@ describe('applyWritesToItems', () => {
                             ObjSchema,
                             ddl
                         );
-                        if (mutable === 'mutable' && immer!=='immer') {
+                        if (mutable === 'mutable' && immer !== 'immer') {
                             // Mutable without immer does not support referential comparison
                             expect(result.changes.referential_comparison_ok).toBe(false);
                         } else {
@@ -1149,20 +1295,20 @@ describe('applyWritesToItems', () => {
                             expect(originalItems[0] === obj1Ref).toBe(true);
                         }
 
-                        
+
 
                     });
 
                     test(`no reference changes with 1 write, 1 fail and atomic=true`, (cx) => {
-                        
-                        
+
+
 
                         const originalItems = [
                             structuredClone(obj1)
                         ];
                         const obj1Ref = originalItems[0]!;
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1195,7 +1341,7 @@ describe('applyWritesToItems', () => {
                                 atomic: true
                             }
                         );
-                        if (mutable === 'mutable' && immer!=='immer') {
+                        if (mutable === 'mutable' && immer !== 'immer') {
                             // Mutable without immer does not support referential comparison
                             expect(result.changes.referential_comparison_ok).toBe(false);
                         } else {
@@ -1209,12 +1355,12 @@ describe('applyWritesToItems', () => {
                             expect(originalItems[0] === obj1Ref).toBe(true);
                         }
 
-                        
+
 
                     });
 
                     test(`no reference changes with 1 write on array_scope (recursed), 1 fail and atomic=true`, (cx) => {
-                        
+
                         const originalItems: Obj[] = [
                             {
                                 id: '1',
@@ -1225,7 +1371,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0];
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
@@ -1269,7 +1415,7 @@ describe('applyWritesToItems', () => {
                             }
 
                         );
-                        if (mutable === 'mutable' && immer!=='immer') {
+                        if (mutable === 'mutable' && immer !== 'immer') {
                             // Mutable without immer does not support referential comparison
                             expect(result.changes.referential_comparison_ok).toBe(false);
                         } else {
@@ -1284,7 +1430,7 @@ describe('applyWritesToItems', () => {
                             expect(originalItems[0] === result.changes.final_items[0]).toBe(true);
                         }
 
-                        
+
 
                     });
 
@@ -1296,7 +1442,7 @@ describe('applyWritesToItems', () => {
             describe('Integrity', () => {
                 test(`cannot dupe primary key`, () => {
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -1335,7 +1481,7 @@ describe('applyWritesToItems', () => {
                 test(`not allowed to change primary key`, (cx) => {
 
                     const originalItems = [structuredClone(obj1)];
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -1392,7 +1538,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Right'
                         }
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1497,7 +1643,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Alice'
                         }
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1536,7 +1682,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Alice'
                         }
 
-                        const {result} = applyWritesToItemsInTesting(
+                        const { result } = applyWritesToItemsInTesting(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1559,7 +1705,7 @@ describe('applyWritesToItems', () => {
 
             describe('permissions', () => {
 
-                
+
 
                 test(`create succeed`, () => {
 
@@ -1595,7 +1741,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         actions,
                         [],
                         ObjSchema,
@@ -1642,7 +1788,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         actions,
                         [],
                         ObjSchema,
@@ -1696,7 +1842,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1817,7 +1963,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1889,7 +2035,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const {result} = applyWritesToItemsInTesting(
+                    const { result } = applyWritesToItemsInTesting(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1909,12 +2055,12 @@ describe('applyWritesToItems', () => {
 
 
 
-            
+
 
 
             describe('config', () => {
                 test('throws error if trying to use immer and immutable', (cx) => {
-                    if( name!=='immutable' ) cx.skip()
+                    if (name !== 'immutable') cx.skip()
                     const originalItems = [structuredClone(obj1), structuredClone(obj2)];
                     const actions: WriteAction<Obj>[] = [
                         {
@@ -1973,7 +2119,7 @@ describe('applyWritesToItems', () => {
 
                     const retypedApplyWritesToItemsInTesting = castApplyWritesToItemsInTestingFn<Regress>(applyWritesToItemsInTesting);
 
-                    const {result} = retypedApplyWritesToItemsInTesting(
+                    const { result } = retypedApplyWritesToItemsInTesting(
                         actions,
                         [],
                         RegressSchema1,
@@ -1986,7 +2132,7 @@ describe('applyWritesToItems', () => {
                     expect(result.status).toBe('ok');
 
 
-                    const {result: result2} = retypedApplyWritesToItemsInTesting(
+                    const { result: result2 } = retypedApplyWritesToItemsInTesting(
                         actions,
                         [],
                         RegressSchema1,
@@ -2013,14 +2159,14 @@ describe('applyWritesToItems', () => {
 
 
 test('Prove Immer flags objects even if no material change #immer_cannot_mutate_in_atomic', () => {
-    const originalItems = [{id: 1, text: 'Bob'}, {id: 2, text: ''}];
+    const originalItems = [{ id: 1, text: 'Bob' }, { id: 2, text: '' }];
     const finalItems = produce(originalItems, draft => {
-        
+
     });
     // The final items have changed
     expect(finalItems).toBe(originalItems);
 
-    const originalItemsFlagged = [{id: 1, text: 'Bob'}, {id: 2, text: ''}];
+    const originalItemsFlagged = [{ id: 1, text: 'Bob' }, { id: 2, text: '' }];
     const finalItemsFlagged = produce(originalItems, draft => {
         draft[1]!.text = 'Alice';
         draft[1]!.text = ''; // Restore

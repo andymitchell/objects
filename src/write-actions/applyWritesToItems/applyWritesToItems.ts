@@ -14,7 +14,7 @@ import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.js";
 import { type Draft, current, isDraft } from "immer";
 import { type IUser } from "../auth/types.js";
 import { checkPermission } from "./helpers/checkPermission.js";
-import {zodToJsonSchema} from "zod-to-json-schema";
+
 
 
 type ObjectCloneMode = 'clone' | 'mutate';
@@ -324,14 +324,10 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                     // Get all arrays that match the scope, then recurse into applyWritesToItems for them
                                     const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
 
-                                    const debugSchemaJson = zodToJsonSchema(schema);
                                     
 
                                     for( const scopedArray of scopedArrays ) {
 
-                                        const debugScopedSchemaJson = zodToJsonSchema(scopedArray.schema);
-
-                                        console.log('Trying to find problem', {debugSchemaJson, debugScopedSchemaJson, item});
 
                                         // #immer_cannot_mutate_in_atomic
                                         // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.

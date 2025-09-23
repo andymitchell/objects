@@ -210,8 +210,10 @@ export function getZodSchemaAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPro
         }
     }
 
-    if( currentSchema instanceof z.ZodOptional ) currentSchema = currentSchema._def.innerType;
-    if( currentSchema instanceof z.ZodArray ) currentSchema = currentSchema.element;
+
+    // Why use instanceof *and* _def.typeName? Because when it's bundled the bundler could potentially have a currentSchema of `z.ZodArray2` (e.g. if multiple zods in the environment), which is all kinds of crazy but the easiest way to make it more robust was to _also_ check on the unofficial `_def.typeName`. 
+    if( currentSchema instanceof z.ZodOptional || currentSchema._def.typeName==='ZodOptional' ) currentSchema = currentSchema._def.innerType;
+    if( currentSchema instanceof z.ZodArray || currentSchema._def.typeName==='ZodArray' ) currentSchema = (currentSchema as z.ZodArray<ZodTypeAny>).element;
 
     return currentSchema;
 

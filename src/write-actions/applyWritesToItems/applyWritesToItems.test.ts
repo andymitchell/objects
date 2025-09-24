@@ -337,7 +337,7 @@ describe('applyWritesToItems', () => {
                 });
 
 
-                test(`array updates ok`, () => {
+                test(`scalar array updates ok`, () => {
                     const data1: Obj = JSON.parse(JSON.stringify(obj1)); //structuredClone(obj2);
                     data1.arr_items = ['1'];
 

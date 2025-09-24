@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathToArraySpreadingArrays, NonArrayProperty, PathValue } from "./types.ts";
+import type { DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathToArraySpreadingArrays, NonObjectArrayProperty, PathValue } from "./types.ts";
 
 it('no test just type errors', () => {
     type Example = {
@@ -92,7 +92,7 @@ it('no test just type errors', () => {
     
     type Update<T> = {
         type: 'update',
-        data: Pick<Partial<T>, NonArrayProperty<T>>
+        data: Pick<Partial<T>, NonObjectArrayProperty<T>>
     };
     const aa: Update<Example> = {
         type: 'update',
@@ -109,6 +109,10 @@ it('no test just type errors', () => {
         data: { family: [] } // Expect Fail
     };
     
+    const ac: Update<Example> = {
+        type: 'update',
+        data: { hobbies: [] }
+    };
 
     const configSchema = z.object({
         name: z.string(),

@@ -109,6 +109,12 @@ export type NonArrayProperty<T> = {
     [P in keyof T]: T[P] extends Array<any> ? never : P
 }[keyof T];
 
+/**
+ * Resolves to a union of keys of T for all properties that are not an array of objects.
+ * This includes non-array properties and arrays of scalars.
+ */
+export type NonObjectArrayProperty<T> = NonArrayProperty<T> | ArrayOfScalarProperties<T>;
+
 
 
 export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`

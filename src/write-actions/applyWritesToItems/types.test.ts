@@ -21,16 +21,20 @@ function typeCheck() {
         version: 1, 
         lists: {
             '.': {
-                primary_key: 'id'
+                primary_key: 'id',
+                order_by: {key: 'id'}
             },
             'children': {
                 primary_key: 'cid',
+                order_by: {key: 'cid'}
             },
             'children.children': {
-                primary_key: 'ccid'
+                primary_key: 'ccid',
+                order_by: {key: 'ccid'}
             },
             'children.children.children': {
-                primary_key: 'cccid'
+                primary_key: 'cccid',
+                order_by: {key: 'cccid'}
             }
         },
         permissions: {
@@ -48,7 +52,8 @@ function typeCheck() {
         version: 1,
         lists: {
             '.': {
-                primary_key: 'whatever'
+                primary_key: 'whatever',
+                order_by: {key: 'whatever'}
             }
         },
         permissions: {
@@ -61,7 +66,8 @@ function typeCheck() {
         lists: {
             '.': {
                 
-                primary_key: 'id'
+                primary_key: 'id',
+                order_by: {key: 'id'}
             }
         },
         permissions: {

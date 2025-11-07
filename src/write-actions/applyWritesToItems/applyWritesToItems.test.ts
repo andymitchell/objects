@@ -37,13 +37,16 @@ const ddl: DDL<Obj> = {
     version: 1,
     lists: {
         '.': {
-            primary_key: 'id'
+            primary_key: 'id',
+            order_by: {key: 'id'}
         },
         'children': {
             primary_key: 'cid',
+            order_by: {key: 'cid'}
         },
         'children.children': {
-            primary_key: 'ccid'
+            primary_key: 'ccid',
+            order_by: {key: 'ccid'}
         }
     },
     permissions: {
@@ -1964,7 +1967,8 @@ describe('applyWritesToItems', () => {
                         version: 1,
                         lists: {
                             '.': {
-                                primary_key: 'id'
+                                primary_key: 'id',
+                                order_by: {key: 'id'}
                             }
                         },
                         permissions: {

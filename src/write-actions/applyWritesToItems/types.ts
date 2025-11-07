@@ -55,8 +55,17 @@ export type ApplyWritesToItemsOptions<T extends Record<string, any> = Record<str
 
 
 export type ListOrdering<T extends Record<string, any> = Record<string, any>> = {
-    order_by_key: IfAny<T, string, PrimaryKeyProperties<T>>,
-    direction: 'asc' | 'desc'
+    /**
+     * The key on the item to sort by 
+     */
+    key: IfAny<T, string, PrimaryKeyProperties<T>>,
+
+    /**
+     * The sort direct
+     * 
+     * Expect to default to 'asc'
+     */
+    direction?: 'asc' | 'desc'
 }
 
 type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
@@ -71,7 +80,7 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
      * It can be used by store implementations to ensure consistent item/pagination order.
      * 
      */
-    order_by?: ListOrdering<T>,
+    order_by: ListOrdering<T>,
 
     pre_triggers?: {
         trigger: (replacement: T, existing?: T) => T // Throws an error if expect halt

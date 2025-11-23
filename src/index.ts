@@ -9,6 +9,7 @@ import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-p
 import cloneDeepSafe from "./utils/cloneDeepSafe.js";
 import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index.ts";
 import { WhereFilter } from "./where-filter/index-old.ts";
+import  { orderList } from "./utils/orderList.ts";
 
 
 export * from "./where-filter/index.ts";
@@ -20,7 +21,8 @@ export {
     safeKeyValue, 
     cloneDeepSafe,
     makePrimaryKeyGetter, 
-    PrimaryKeyValueSchema
+    PrimaryKeyValueSchema,
+    orderList
 };
 export type {PrimaryKeyValue, PrimaryKeyGetter}
 

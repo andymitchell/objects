@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { orderList } from './orderList.ts';
-import type { ListOrdering } from '@andyrmitchell/objects/write-actions';
+import type { ListOrdering } from '../write-actions/applyWritesToItems/types.ts';
+
 
 // Mock Data Type
 type User = {

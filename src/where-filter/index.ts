@@ -5,7 +5,7 @@ import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereCl
 import type { IPropertyMap, PreparedWhereClauseStatement } from './postgresWhereClauseBuilder.ts';
 import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
 import { isLogicFilter, isPartialObjectFilter } from './typeguards.ts';
-import type {  MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparison, WhereFilterDefinition} from './types.ts';
+import type {  MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition} from './types.ts';
 
 export {
     matchJavascriptObject, 
@@ -27,5 +27,5 @@ export type {
     PartialObjectFilter,
     PreparedWhereClauseStatement,
     IPropertyMap,
-    ValueComparison
+    ValueComparisonFlexi
 };

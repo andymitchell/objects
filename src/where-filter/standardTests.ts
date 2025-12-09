@@ -3,10 +3,10 @@ import { z, ZodSchema } from "zod"
 import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test.js"
 import type { MatchJavascriptObject, WhereFilterDefinition } from "./types.ts";
 
-export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(obj: T, filter:WhereFilterDefinition<T>, schema: ZodSchema<T>) => Promise<ReturnType<MatchJavascriptObject> | undefined>;
+export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(obj: T, filter: WhereFilterDefinition<T>, schema: ZodSchema<T>) => Promise<ReturnType<MatchJavascriptObject> | undefined>;
 
 type StandardTestConfig = {
-    test: jest.It, 
+    test: jest.It,
     expect: jest.Expect,
     matchJavascriptObject: MatchJavascriptObjectInTesting
 }
@@ -26,7 +26,7 @@ export const ContactSchema = z.object({
             })
         ])).optional()
     })
-    
+
 })
 
 
@@ -54,13 +54,13 @@ const SpreadNestedSchema = z.object({
 });
 type SpreadNested = z.infer<typeof SpreadNestedSchema>;
 
-export function standardTests(testConfig:StandardTestConfig) {
-    const {test, expect, matchJavascriptObject} = testConfig;
+export function standardTests(testConfig: StandardTestConfig) {
+    const { test, expect, matchJavascriptObject } = testConfig;
 
     describe('Attack handling', () => {
-        for( const dotPath of DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED ) {
+        for (const dotPath of DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED) {
             test(`Attack: ${dotPath}`, async () => {
-            
+
                 const result = await matchJavascriptObject(
                     {
                         contact: {
@@ -73,17 +73,17 @@ export function standardTests(testConfig:StandardTestConfig) {
                     },
                     ContactSchema
                 );
-                
-                if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
+
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
                 expect(result).toBe(false);
-            
+
             });
         }
     })
 
     describe('error handling', () => {
         test('undefined filter', async () => {
-  
+
             await expect(matchJavascriptObject(
                 {
                     contact: {
@@ -95,10 +95,10 @@ export function standardTests(testConfig:StandardTestConfig) {
                 undefined,
                 ContactSchema
             )).rejects.toThrow('filter was not well-defined');
-            
+
         });
     })
-    
+
     test('Match all', async () => {
         const result = await matchJavascriptObject(
             {
@@ -110,14 +110,14 @@ export function standardTests(testConfig:StandardTestConfig) {
             {},
             ContactSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
-    
-    
+
+
+
     test('Match name', async () => {
         const result = await matchJavascriptObject(
             {
@@ -131,11 +131,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
+
 
     test('Ignore wrong name', async () => {
         const result = await matchJavascriptObject(
@@ -150,12 +150,12 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
-    
-    
+
+
+
     test('Match name and emailAddress', async () => {
         const result = await matchJavascriptObject(
             {
@@ -176,11 +176,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
+
 
     test('Do not match name (even though email address ok)', async () => {
         const result = await matchJavascriptObject(
@@ -202,11 +202,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
+
 
     test('Match emailAddress (name irrelevant)', async () => {
         const result = await matchJavascriptObject(
@@ -228,8 +228,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
     test('Match name because NOT being something else', async () => {
@@ -252,70 +252,230 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
-    });
-
-    
-
-    test('Match age in range: passes', async () => {
-        const result = await matchJavascriptObject(
-            {
-                contact: {
-                    name: 'Andy',
-                    age: 100
-                }
-            },
-            {
-                'contact.age': {
-                    'gt': 99,
-                    'lt': 101,
-                }
-            },
-            ContactSchema
-        );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
 
-    test('Match age int range: fails', async () => {
-        const result = await matchJavascriptObject(
-            {
-                contact: {
-                    name: 'Andy',
-                    age: 200
-                }
-            },
-            {
-                'contact.age': {
-                    'gt': 99,
-                    'lt': 101,
-                }
-            },
-            ContactSchema
-        );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
-    });
 
-    test('Do not match age as greater', async () => {
-        const result = await matchJavascriptObject(
-            {
-                contact: {
-                    name: 'Andy',
-                    age: 100
-                }
-            },
-            {
-                'contact.age': {
-                    'gte': 101
-                }
-            },
-            ContactSchema
-        );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+    describe('range', () => {
+
+        describe('numeric', () => {
+
+
+
+            test('Match age in range: passes', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            age: 100
+                        }
+                    },
+                    {
+                        'contact.age': {
+                            'gt': 99,
+                            'lt': 101,
+                        }
+                    },
+                    ContactSchema
+                );
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+                expect(result).toBe(true);
+            });
+
+
+            test('Match age in range: fails', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            age: 200
+                        }
+                    },
+                    {
+                        'contact.age': {
+                            'gt': 99,
+                            'lt': 101,
+                        }
+                    },
+                    ContactSchema
+                );
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+                expect(result).toBe(false);
+            });
+
+            test('Do not match age as greater', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            age: 100
+                        }
+                    },
+                    {
+                        'contact.age': {
+                            'gte': 101
+                        }
+                    },
+                    ContactSchema
+                );
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+                expect(result).toBe(false);
+            });
+        })
+
+
+        describe('string lexicographical', () => {
+
+
+
+            test('Match name in range: passes', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            age: 100
+                        }
+                    },
+                    {
+                        'contact.name': {
+                            'gt': 'A',
+                            'lt': 'B',
+                        }
+                    },
+                    ContactSchema
+                );
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+                expect(result).toBe(true);
+            });
+
+
+            test('Match name in range: fails', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            age: 200
+                        }
+                    },
+                    {
+                        'contact.name': {
+                            'gt': 'B',
+                            'lt': 'C',
+                        }
+                    },
+                    ContactSchema
+                );
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+                expect(result).toBe(false);
+            });
+
+            test('Do not match name as greater', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            age: 100
+                        }
+                    },
+                    {
+                        'contact.name': {
+                            'gte': 'B'
+                        }
+                    },
+                    ContactSchema
+                );
+                if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+                expect(result).toBe(false);
+            });
+
+            test('Lexicographical: "Zebra" is LESS than "apple" (Case Sensitivity)', async () => {
+                // This proves we are using code-points, not dictionary order.
+                // In a phonebook, Apple comes before Zebra.
+                // In ASCII/JS, 'Z'(90) comes before 'a'(97).
+                const result = await matchJavascriptObject(
+                    {
+                        contact: { name: 'Zebra' }
+                    },
+                    {
+                        'contact.name': {
+                            'lt': 'apple', // Should be true because 'Z' < 'a'
+                        }
+                    },
+                    ContactSchema
+                );
+                expect(result).toBe(true);
+            });
+
+            test('Lexicographical: "apple" is GREATER than "Zebra"', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: { name: 'apple' }
+                    },
+                    {
+                        'contact.name': {
+                            'gt': 'Zebra', // Should be true
+                        }
+                    },
+                    ContactSchema
+                );
+                expect(result).toBe(true);
+            });
+
+            test('Lexicographical: "100" is LESS than "2" (String vs Number logic)', async () => {
+                // If this were numeric, 100 > 2.
+                // As strings, '1' comes before '2', so '100' < '2'.
+                const result = await matchJavascriptObject(
+                    {
+                        contact: { name: '100' } // Passed as string
+                    },
+                    {
+                        'contact.name': {
+                            'lt': '2',
+                        }
+                    },
+                    ContactSchema
+                );
+                expect(result).toBe(true);
+            });
+
+            test('Lexicographical: Shorter prefix is LESS than longer word', async () => {
+                // 'Car' < 'Cart'
+                const result = await matchJavascriptObject(
+                    {
+                        contact: { name: 'Car' }
+                    },
+                    {
+                        'contact.name': {
+                            'lt': 'Cart',
+                        }
+                    },
+                    ContactSchema
+                );
+                expect(result).toBe(true);
+            });
+
+            test('Lexicographical: Spaces matter', async () => {
+                // Space (32) is less than 'A' (65)
+                // So 'A B' < 'AB' is FALSE. 
+                // 'AB' (ends) vs 'A ' (next char is space).
+                // Actually: 'A B' vs 'AB' -> 'A'=='A', ' ' vs 'B'. 32 < 66.
+                // So 'A B' is LESS than 'AB'.
+                const result = await matchJavascriptObject(
+                    {
+                        contact: { name: 'A B' }
+                    },
+                    {
+                        'contact.name': {
+                            'lt': 'AB',
+                        }
+                    },
+                    ContactSchema
+                );
+                expect(result).toBe(true);
+            });
+        })
     });
 
     test('compares object: passes', async () => {
@@ -335,11 +495,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
+
     test('compares object: fails', async () => {
 
         const result = await matchJavascriptObject(
@@ -357,10 +517,10 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
+
 
 
     test('Match a typical Formz View', async () => {
@@ -403,11 +563,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             FormzSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
+
 
     test('string contains', async () => {
         const result = await matchJavascriptObject(
@@ -424,8 +584,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
     test('string not contains', async () => {
@@ -443,13 +603,13 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
 
     test('contains used on a number will not return anything', async () => {
-        let result:boolean | undefined = false;
+        let result: boolean | undefined = false;
 
         try {
             result = await matchJavascriptObject(
@@ -467,11 +627,11 @@ export function standardTests(testConfig:StandardTestConfig) {
                 },
                 ContactSchema
             );
-        } catch(e) {
+        } catch (e) {
             // matchJavascriptObject will throw a "A ValueComparisonContains only works on a string" error; but Postgres will just silently fail. So this test simply makes sure it doesn't pass.
         }
 
-		expect(result).toBe(false);
+        expect(result).toBe(false);
     });
 
     test('contains used on a missing property will not return anything (but will not error)', async () => {
@@ -490,8 +650,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
 
@@ -502,7 +662,7 @@ export function standardTests(testConfig:StandardTestConfig) {
                     name: 'Andy',
                     age: 1
                 }
-            }, 
+            },
             {
                 'contact': {
                     name: 'Andy',
@@ -511,8 +671,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     })
 
     test('nesting properties: fails 1', async () => {
@@ -522,7 +682,7 @@ export function standardTests(testConfig:StandardTestConfig) {
                     name: 'Andy',
                     age: 1
                 }
-            }, 
+            },
             {
                 'contact': {
                     name: 'Bob'
@@ -530,8 +690,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     })
 
 
@@ -542,7 +702,7 @@ export function standardTests(testConfig:StandardTestConfig) {
                     name: 'Andy',
                     age: 1
                 }
-            }, 
+            },
             {
                 'contact': {
                     name: 'Andy'
@@ -551,11 +711,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     })
 
-    
+
 
     test('multikey is AND: passes', async () => {
         const result = await matchJavascriptObject(
@@ -571,10 +731,10 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
+
 
     test('multikey is AND: fails', async () => {
         const result = await matchJavascriptObject(
@@ -590,8 +750,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
 
@@ -613,8 +773,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
     test('multikey with logic: fails', async () => {
@@ -635,13 +795,13 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
-    
 
-    
+
+
+
 
     test('array equals true', async () => {
         const result = await matchJavascriptObject(
@@ -656,10 +816,10 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
+
 
     test('array equals false', async () => {
         const result = await matchJavascriptObject(
@@ -674,13 +834,13 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
-    
-    
+
+
+
 
     test('array element compound filter: passes', async () => {
         const result = await matchJavascriptObject(
@@ -695,13 +855,13 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
 
-    
-    
+
+
+
     test('array element compound filter: fails', async () => {
         const result = await matchJavascriptObject(
             {
@@ -715,20 +875,20 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
 
-    
-    
+
+
+
     test('array element compound filter2: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London'}, {city: 'NYC'}]
+                    locations: [{ city: 'London' }, { city: 'NYC' }]
                 }
             },
             {
@@ -745,18 +905,18 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
-    
+
+
     test('array element compound filter2: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                    locations: [{ city: 'Brisbane' }, { city: 'NYC' }]
                 }
             },
             {
@@ -773,20 +933,20 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
-    
-    
+
+
+
 
     test('array element compound filter city+country infer OR: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -797,18 +957,18 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
+
 
     test('array element compound filter city+country infer OR: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -819,45 +979,45 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
 
 
-    
+
+
     test('array element compound filter city+country: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
                 'contact.locations': {
                     AND: [
-                        {city: 'London'},
-                        {country: 'Japan'}
+                        { city: 'London' },
+                        { country: 'Japan' }
                     ]
                 }
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
 
-    
+
+
 
     test('array element compound filter explicit AND behaves like elem_match: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane', country: 'Aus'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'Brisbane', country: 'Aus' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -874,11 +1034,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
+
 
 
     test('array element compound filter explict AND behaves like elem_match: fails', async () => {
@@ -886,7 +1046,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane', country: 'Aus'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'Brisbane', country: 'Aus' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -903,19 +1063,19 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
-    
-    
+
+
+
     test('array element compound filter explicit OR: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                    locations: [{ city: 'Brisbane' }, { city: 'NYC' }]
                 }
             },
             {
@@ -932,18 +1092,18 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
+
 
     test('array element compound filter explicit OR: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                    locations: [{ city: 'Brisbane' }, { city: 'NYC' }]
                 }
             },
             {
@@ -960,18 +1120,18 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
-    
-    
+
+
+
     test('array element compound filter NOT: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                    locations: [{ city: 'Brisbane' }, { city: 'NYC' }]
                 }
             },
             {
@@ -988,8 +1148,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
 
@@ -999,7 +1159,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                    locations: [{ city: 'Brisbane' }, { city: 'NYC' }]
                 }
             },
             {
@@ -1013,8 +1173,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
 
@@ -1023,7 +1183,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'Brisbane'}, {city: 'NYC'}]
+                    locations: [{ city: 'Brisbane' }, { city: 'NYC' }]
                 }
             },
             {
@@ -1040,15 +1200,15 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
-    
 
-    
-    
+
+
+
+
 
 
     test('array element elem_match (must be all in one element) city+country: passes', async () => {
@@ -1056,61 +1216,61 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
                 'contact.locations': {
                     elem_match: {
                         AND: [
-                            {city: 'London'},
-                            {country: 'UK'}
+                            { city: 'London' },
+                            { country: 'UK' }
                         ]
                     }
                 }
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
 
-    
+
+
 
     test('array element elem_match (must be all in one element) city+country: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
                 'contact.locations': {
                     elem_match: {
                         AND: [
-                            {city: 'London'},
-                            {country: 'US'}
+                            { city: 'London' },
+                            { country: 'US' }
                         ]
                     }
                 }
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
+
 
     test('array element elem_match (must be all in one element) city+country infer AND: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -1123,8 +1283,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
     test('array element elem_match (must be all in one element) city+country infer AND: fails', async () => {
@@ -1132,7 +1292,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -1145,68 +1305,68 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
+
 
     test('array element elem_match (must be all in one element) city+country infer AND and contains: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
                 'contact.locations': {
                     elem_match: {
-                        city: {contains: 'Lon'},
+                        city: { contains: 'Lon' },
                         country: 'UK'
                     }
                 }
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
-    
+
+
 
     test('array element elem_match (must be all in one element) city+country infer AND and contains: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK'}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
                 'contact.locations': {
                     elem_match: {
-                        city: {contains: 'NY'},
+                        city: { contains: 'NY' },
                         country: 'UK'
                     }
                 }
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
-    
+
+
 
     test('array element elem_match (must be all in one element) number: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [1,2,3]
+                    locations: [1, 2, 3]
                 }
             },
             {
@@ -1216,8 +1376,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
     test('array element elem_match (must be all in one element) number: fails', async () => {
@@ -1225,7 +1385,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: [1,2,3]
+                    locations: [1, 2, 3]
                 }
             },
             {
@@ -1235,8 +1395,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
 
@@ -1245,7 +1405,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: ['NYC','London','Tokyo']
+                    locations: ['NYC', 'London', 'Tokyo']
                 }
             },
             {
@@ -1255,8 +1415,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
     test('array element elem_match (must be all in one element) string: fails', async () => {
@@ -1264,7 +1424,7 @@ export function standardTests(testConfig:StandardTestConfig) {
             {
                 contact: {
                     name: 'Andy',
-                    locations: ['NYC','London','Tokyo']
+                    locations: ['NYC', 'London', 'Tokyo']
                 }
             },
             {
@@ -1274,16 +1434,16 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
+
     test('array nesting: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK', flights: ['today', 'tomorrow']}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK', flights: ['today', 'tomorrow'] }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -1293,20 +1453,20 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
 
-    
+
+
 
     test('array nesting: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
                     name: 'Andy',
-                    locations: [{city: 'London', country: 'UK', flights: ['today', 'tomorrow']}, {city: 'NYC', country: 'US'}]
+                    locations: [{ city: 'London', country: 'UK', flights: ['today', 'tomorrow'] }, { city: 'NYC', country: 'US' }]
                 }
             },
             {
@@ -1316,11 +1476,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
-    
-    
+
+
 
     test('array spread-nesting: passes', async () => {
 
@@ -1353,11 +1513,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
-    
+
     test('array spread-nesting: fails', async () => {
 
 
@@ -1392,11 +1552,11 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
-    
+
 
     test('array spread-nesting where first path is not the target: passes', async () => {
 
@@ -1429,8 +1589,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
 
@@ -1469,8 +1629,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
 
 
@@ -1508,8 +1668,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
 
@@ -1554,10 +1714,10 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     });
-    
+
 
     test('array spread-nesting multi criteria compound filter (within 1 array): fails', async () => {
 
@@ -1600,13 +1760,13 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             SpreadNestedSchema
         );
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     });
 
 
     test('appropriately handles undefined values [regression]', async () => {
-        
+
 
         const result = await matchJavascriptObject(
             {
@@ -1617,19 +1777,19 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             {
                 OR: [
-                    {'contact.name': undefined}
+                    { 'contact.name': undefined }
                 ]
             },
             ContactSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     })
 
 
     test('handles {OR: []} - match nothing because no conditions exist to succeed [regression]', async () => {
-        
+
 
         const result = await matchJavascriptObject(
             {
@@ -1643,13 +1803,13 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(false);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(false);
     })
 
     test('handles {AND: []} - match everything because no conditions exist to fail [regression]', async () => {
-        
+
 
         const result = await matchJavascriptObject(
             {
@@ -1663,8 +1823,8 @@ export function standardTests(testConfig:StandardTestConfig) {
             },
             ContactSchema
         );
-        
-        if(result===undefined) {console.warn('Skipping'); return;} // indicates not supported 
-		expect(result).toBe(true);
+
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        expect(result).toBe(true);
     })
 }

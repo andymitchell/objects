@@ -1,7 +1,7 @@
 
 
 import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValueIncDiscrimatedUnions } from '../dot-prop-paths/types.js';
-import type { ValueComparisonNumericOperators, WhereFilterLogicOperators } from './consts.ts';
+import type { ValueComparisonRangeOperators, WhereFilterLogicOperators } from './consts.ts';
 
 
 import type { ObjOrDraft } from "./matchJavascriptObject.js";
@@ -11,11 +11,15 @@ import type { ObjOrDraft } from "./matchJavascriptObject.js";
 export type WhereFilterLogicOperatorsTyped = typeof WhereFilterLogicOperators[number];
 
 
-export type ValueComparisonNumericOperatorsTyped = typeof ValueComparisonNumericOperators[number];
-export type ValueComparisonNumeric = Partial<Record<ValueComparisonNumericOperatorsTyped, number>>;
+export type ValueComparisonRangeOperatorsTyped = typeof ValueComparisonRangeOperators[number];
+export type ValueComparisonRangeNumeric = Partial<Record<ValueComparisonRangeOperatorsTyped, number>>;
 export type ValueComparisonContains = { contains: string };
-export type ValueComparison<T = any> = (T extends string? ValueComparisonContains : T extends number? ValueComparisonNumeric : never) | T;
-export type ArrayValueComparisonElemMatch<T = any>  = {elem_match: T extends Record<string, any>? WhereFilterDefinition<T> : ValueComparison<T>};
+export type ValueComparisonRangeString = Partial<Record<ValueComparisonRangeOperatorsTyped, string>>;
+export type ValueComparisonString = ValueComparisonRangeString | ValueComparisonContains;
+export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never);
+export type ValueComparisonRangeFlexi<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never) | T;
+export type ValueComparisonFlexi<T = any> = (T extends string? ValueComparisonString : T extends number? ValueComparisonRangeNumeric : never) | T;
+export type ArrayValueComparisonElemMatch<T = any>  = {elem_match: T extends Record<string, any>? WhereFilterDefinition<T> : ValueComparisonFlexi<T>};
 export type ArrayValueComparison<T = any> = ArrayValueComparisonElemMatch<T>;
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
@@ -28,7 +32,7 @@ export type ArrayFilter<T extends []> = ArrayElementFilter<T[number]> | T;
 export type PartialObjectFilter<T extends Record<string, any>> = Partial<{
     [P in DotPropPathsIncArrayUnion<T>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
         ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>>
-        : ValueComparison<PathValueIncDiscrimatedUnions<T, P>>
+        : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>>
 }>;
 
 

@@ -1,13 +1,13 @@
 
 import { z } from "zod";
-import type {  ValueComparisonNumericOperatorsTyped, WhereFilterDefinition } from "./types.js";
+import type {  ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
 import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterArray, isWhereFilterDefinition } from './schemas.ts';
 import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
 import isPlainObject from "../utils/isPlainObject.js";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.js";
-import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
-import { ValueComparisonNumericOperators, WhereFilterLogicOperators } from "./consts.ts";
+import {isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "./typeguards.ts";
+import { ValueComparisonRangeOperators, WhereFilterLogicOperators } from "./consts.ts";
 import { safeJson } from "./safeJson.ts";
 
 /*
@@ -202,17 +202,22 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
 
             const placeholder = this.generatePlaceholder(`%${filter.contains}%`, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder}`); // TODO Like ValueComparisonNumericOperatorsSqlFunctions, this should be a dialect pack 
-        } else if( isValueComparisonNumeric(filter) ) {            
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodNumber']);
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder}`); // TODO Like ValueComparisonRangeOperatorsSqlFunctions, this should be a dialect pack 
+        } else if( isValueComparisonRange(filter) ) {            
 
-            const operators = ValueComparisonNumericOperators
-                .filter((x):x is ValueComparisonNumericOperatorsTyped => x in filter && filter[x]!==undefined && filter[x]!==null)
+            // Range comparison can be string or filter, so we need to determinate what we're dealing with to set the SQL straight. 
+            // E.g. if the filter is {gt: 'A'}, this will be 'string'. If the filter is {gt: 1}, this will be 'number'.
+            const firstFilterValueType = typeof (Object.values(filter)[0]);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType==='string'? 'ZodString' :'ZodNumber']);
+
+            const operators = ValueComparisonRangeOperators
+                .filter((x):x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x]!==undefined && filter[x]!==null)
                 .map(x => {
                     const placeholder = this.generatePlaceholder(filter[x]!, statementArguments);
-                    return ValueComparisonNumericOperatorsSqlFunctions[x](sqlIdentifier, placeholder);
+                    return ValueComparisonRangeOperatorsSqlFunctions[x](sqlIdentifier, placeholder);
                 });
-            return optionalWrapper(sqlIdentifier, operators.length>1? `(${operators.join(' AND ')})` : operators[0]!);
+            const result = optionalWrapper(sqlIdentifier, operators.length>1? `(${operators.join(' AND ')})` : operators[0]!);
+            return result;
         
         } else if( isValueComparisonScalar(filter) ) {
             
@@ -370,10 +375,10 @@ function isPreparedStatementArgument(x: any): x is PreparedStatementArgument {
 
 
 
-type ValueComparisonNumericOperatorSqlTyped = {
-    [K in typeof ValueComparisonNumericOperators[number]]: (sqlKey:string, parameterizedQueryPlaceholder:string) => string; 
+type ValueComparisonRangeNumericOperatorSqlTyped = {
+    [K in typeof ValueComparisonRangeOperators[number]]: (sqlKey:string, parameterizedQueryPlaceholder:string) => string; 
 };
-const ValueComparisonNumericOperatorsSqlFunctions:ValueComparisonNumericOperatorSqlTyped = {
+const ValueComparisonRangeOperatorsSqlFunctions:ValueComparisonRangeNumericOperatorSqlTyped = {
     'gt': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} > ${parameterizedQueryPlaceholder}`,
     'lt': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} < ${parameterizedQueryPlaceholder}`,
     'gte': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} >= ${parameterizedQueryPlaceholder}`,

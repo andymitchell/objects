@@ -14,6 +14,67 @@ it('it correctly identifies the available keys, and their type, and there is no 
 
 })
 
+describe('comparison operators', () => {
+    type NormalType = { id: string, ts: number };
+
+    describe('gte', () => {
+        it('handles gte [number]', () => {
+            const a:WhereFilterDefinition<NormalType> = {
+                ts: {
+                    gte: 1
+                }
+            }
+
+            const b:WhereFilterDefinition<NormalType> = {
+                ts: {
+                    // @ts-expect-error
+                    gte: 'a'
+                }
+            }
+
+            const c:WhereFilterDefinition<NormalType> = {
+                id: {
+                    // @ts-expect-error
+                    gte: 1                
+                }
+            }
+        })
+
+        it('handles gte [string]', () => {
+            const a:WhereFilterDefinition<NormalType> = {
+                id: {
+                    gte: 'a'
+                }
+            }
+
+            const b:WhereFilterDefinition<NormalType> = {
+                id: {
+                    // @ts-expect-error
+                    gte: 1
+                }
+            }
+        })
+    })
+    
+    describe('contains', () => {
+        it('handles contains [string]', () => {
+            const a:WhereFilterDefinition<NormalType> = {
+                id: {
+                    contains: 'i'
+                }
+            }
+
+            const b:WhereFilterDefinition<NormalType> = {
+                id: {
+                    // @ts-expect-error
+                    contains: 1
+                }
+            }
+        
+        })
+    })
+})
+
 it('it correctly identifies the available keys, and their type, but there is a type-error because the object property has the wrong the type', () => {
 
     type NormalType = { name: '2' };

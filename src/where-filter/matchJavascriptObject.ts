@@ -1,11 +1,11 @@
 import type { Draft } from "immer";
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
-import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ValueComparison, WhereFilterDefinition } from "./types.js";
+import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from "./schemas.ts";
-import {isLogicFilter, isValueComparisonNumeric, isValueComparisonScalar } from "./typeguards.ts";
-import { ValueComparisonNumericOperators } from "./consts.ts";
+import {isLogicFilter, isValueComparisonRangeFlexi, isValueComparisonScalar } from "./typeguards.ts";
+import { ValueComparisonRangeOperators } from "./consts.ts";
 import { safeJson } from "./safeJson.ts";
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
@@ -155,16 +155,18 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
 }
 
 
-type ValueComparisonNumericOperatorJavascriptFunctionsTyped = {
-    [K in typeof ValueComparisonNumericOperators[number]]: (value:number, filterValue: number) => boolean; 
+
+type CompareFunction = <T extends number | string>(value: T, filterValue: T) => boolean;
+type ValueComparisonFlexiOperatorJavascriptFunctionsTyped = {
+    [K in typeof ValueComparisonRangeOperators[number]]: CompareFunction;
 };
-const ValueComparisonNumericOperatorsJavascriptFunctions:ValueComparisonNumericOperatorJavascriptFunctionsTyped = {
+const ValueComparisonRangeOperatorsJavascriptFunctions:ValueComparisonFlexiOperatorJavascriptFunctionsTyped = {
     'gt': (value, filterValue) => value>filterValue,
     'lt': (value, filterValue) => value<filterValue,
     'gte': (value, filterValue) => value>=filterValue,
     'lte': (value, filterValue) => value<=filterValue,
 }
-function compareValue(value: any, filterValue: ValueComparison):boolean {
+function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
     const filterValueIsPlainObject = isPlainObject(filterValue);
 
     
@@ -175,17 +177,24 @@ function compareValue(value: any, filterValue: ValueComparison):boolean {
             } else if( value!==undefined ) {
                 throw new Error("A ValueComparisonContains only works on a string");
             }
-        } else if( isValueComparisonNumeric(filterValue, true) ) {
-            if( typeof value==='number' ) {
-                return ValueComparisonNumericOperators.filter(x => x in filterValue).every(x => {
+        } else if( isValueComparisonRangeFlexi(filterValue, true) ) {
+            if( typeof value === 'number' || typeof value === 'string' ) {
+                return ValueComparisonRangeOperators.filter(x => x in filterValue).every(x => {
                     const filterValueForX = filterValue[x];
-                    return typeof filterValueForX==='number' && ValueComparisonNumericOperatorsJavascriptFunctions[x](value, filterValueForX)
+
+                    // Critical Check: Ensure we aren't comparing a String to a Number
+                    if (typeof filterValueForX !== typeof value) {
+                         throw new Error(`Cannot compare value of type ${typeof value} with filter of type ${typeof filterValueForX}`);
+                    }
+
+
+                    return ValueComparisonRangeOperatorsJavascriptFunctions[x](value, filterValueForX)
                 });
             } else if (!value) {
                 // like SQL, we want to test against empty/null and simply return false
                 return false;
             } else {
-                throw new Error("A ValueComparisonContains only works on a number");
+                throw new Error("A ValueComparisonContains (gt, lt, etc.) only works on a number or string");
             }
         } else {
             return deepEql(value, filterValue);

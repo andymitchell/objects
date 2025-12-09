@@ -18,15 +18,15 @@ type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Dept
 }[keyof T] : '';
 
 declare const WhereFilterLogicOperators: readonly ["AND", "OR", "NOT"];
-declare const ValueComparisonNumericOperators: readonly ["lt", "gt", "lte", "gte"];
+declare const ValueComparisonRangeOperators: readonly ["lt", "gt", "lte", "gte"];
 
 type WhereFilterLogicOperatorsTyped = typeof WhereFilterLogicOperators[number];
-type ValueComparisonNumericOperatorsTyped = typeof ValueComparisonNumericOperators[number];
-type ValueComparisonNumeric = Partial<Record<ValueComparisonNumericOperatorsTyped, number>>;
+type ValueComparisonRangeOperatorsTyped = typeof ValueComparisonRangeOperators[number];
+type ValueComparisonRangeNumeric = Partial<Record<ValueComparisonRangeOperatorsTyped, number>>;
 type ValueComparisonContains = {
     contains: string;
 };
-type ValueComparison<T = any> = (T extends string ? ValueComparisonContains : T extends number ? ValueComparisonNumeric : never) | T;
+type ValueComparison<T = any> = (T extends string ? ValueComparisonContains : T extends number ? ValueComparisonRangeNumeric : never) | T;
 type ArrayValueComparisonElemMatch<T = any> = {
     elem_match: T extends Record<string, any> ? WhereFilterDefinition<T> : ValueComparison<T>;
 };

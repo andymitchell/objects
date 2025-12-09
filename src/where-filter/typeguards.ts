@@ -1,7 +1,7 @@
 import isPlainObject from "../utils/isPlainObject.ts";
-import { ValueComparisonNumericOperators, WhereFilterLogicOperators } from "./consts.ts";
+import { ValueComparisonRangeOperators, WhereFilterLogicOperators } from "./consts.ts";
 import { safeJson } from "./safeJson.ts";
-import type {  LogicFilter, PartialObjectFilter, ValueComparisonNumeric, WhereFilterDefinition } from "./types.ts";
+import type {  LogicFilter, PartialObjectFilter, ValueComparisonFlexi, ValueComparisonRange, ValueComparisonRangeFlexi, ValueComparisonRangeNumeric, WhereFilterDefinition } from "./types.ts";
 
 export function isLogicFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<T>):filter is LogicFilter<T> {
     return WhereFilterLogicOperators.some(type => {
@@ -27,9 +27,22 @@ export function getValidFilterType(filter:WhereFilterDefinition<any>, debugPath?
     }
 }
 
-export function isValueComparisonNumeric(x:unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonNumeric {
+export function isValueComparisonRangeNumeric(x:unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonRangeNumeric {
     
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonNumericOperators.some(op => op in (x as object));
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
+}
+
+export function isValueComparisonRange(x: unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonRange {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
+}
+
+export function isValueComparisonRangeFlexi(x: unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonRangeFlexi {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
+}
+export function isValueComparisonFlexi(x:unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonFlexi {
+    
+    // TODO Support 'contains' for full accuracy
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
 }
 export function isValueComparisonScalar(x:unknown): x is string | number | boolean {
     return typeof x==='string' || typeof x==='number' || typeof x==='boolean';

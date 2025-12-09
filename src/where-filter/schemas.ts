@@ -1,7 +1,7 @@
 import { z, ZodNumber, ZodOptional, type ZodSchema, type ZodTypeDef } from "zod";
 import type {  ArrayValueComparisonElemMatch, ValueComparisonContains, WhereFilterDefinition } from "./types.ts";
 import isPlainObject from "../utils/isPlainObject.js";
-import { ValueComparisonNumericOperators } from "./consts.ts";
+import { ValueComparisonRangeOperators } from "./consts.ts";
 
 export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef, any> = z.lazy(() =>
     z.union([
@@ -20,9 +20,9 @@ export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef
 
 export const UpdatingMethodSchema = z.enum(['merge', 'assign']);
 
-const ValueComparisonNumericSchemaPartial: Record<string, ZodOptional<ZodNumber>> = {};
-ValueComparisonNumericOperators.forEach(operator => ValueComparisonNumericSchemaPartial[operator] = z.number().optional());
-const ValueComparisonNumericSchema = z.object(ValueComparisonNumericSchemaPartial);
+const ValueComparisonRangeNumericSchemaPartial: Record<string, ZodOptional<ZodNumber>> = {};
+ValueComparisonRangeOperators.forEach(operator => ValueComparisonRangeNumericSchemaPartial[operator] = z.number().optional());
+const ValueComparisonRangeNumericSchema = z.object(ValueComparisonRangeNumericSchemaPartial);
 const ValueComparisonContainsSchema = z.object({
     contains: z.union([z.string(), z.number()]),
 });
@@ -37,7 +37,7 @@ const ValueComparisonSchema = z.union([
     ValueComparisonScalarSchema,
     ValueComparisonContainsSchema,
     //ValueComparisonArrayContainsSchema,
-    ValueComparisonNumericSchema,
+    ValueComparisonRangeNumericSchema,
 ]);
 
 const ArrayValueComparisonElemMatchSchema = z.object({

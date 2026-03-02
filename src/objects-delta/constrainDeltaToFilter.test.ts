@@ -24,7 +24,7 @@ describe('constrainDeltaToFilter', () => {
 
     const filterActive: WhereFilterDefinition<Item> = { status: 'active' };
     const filterCategoryA: WhereFilterDefinition<Item> = { category: 'A' };
-    const filterValueGt25: WhereFilterDefinition<Item> = { value: { gte: 25 } };
+    const filterValueGt25: WhereFilterDefinition<Item> = { value: { $gte: 25 } };
 
     describe('using ObjectsDelta', () => {
 

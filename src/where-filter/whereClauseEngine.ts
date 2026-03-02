@@ -40,7 +40,7 @@ export function buildWhereClause<T extends Record<string, any> = any>(filter: Wh
 }
 
 /**
- * Recursive engine: normalises multi-key filters into AND, handles AND/OR/NOT logic,
+ * Recursive engine: normalises multi-key filters into $and, handles $and/$or/$nor logic,
  * and delegates single-key property filters to the IPropertyMap dialect layer.
  */
 export function whereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap: IPropertyMap<T>): string {
@@ -50,7 +50,7 @@ export function whereClauseBuilder<T extends Record<string, any> = any>(filter: 
         return '';
     } else if (keys.length > 1) {
         filter = {
-            AND: keys.map(key => ({ [key]: filter[key] }))
+            $and: keys.map(key => ({ [key]: filter[key] }))
         }
     }
 
@@ -62,13 +62,14 @@ export function whereClauseBuilder<T extends Record<string, any> = any>(filter: 
             if (isWhereFilterArray(filterType)) {
                 let subClauseString = '';
                 const subClauses = [...filterType].map(subFilter => whereClauseBuilder(subFilter, statementArguments, propertySqlMap));
-                if (type === 'NOT') {
+                if (type === '$nor') {
                     subClauseString = `NOT (${subClauses.join(' OR ')})`;
                 } else if (subClauses.length > 0) {
                     if (typeof subClauses[0] !== 'string') throw new Error("subClauses[0] was empty");
-                    subClauseString = subClauses.length === 1 ? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
+                    const sqlKeyword = type === '$and' ? 'AND' : 'OR';
+                    subClauseString = subClauses.length === 1 ? subClauses[0] : `(${subClauses.join(` ${sqlKeyword} `)})`;
                 } else {
-                    if (type === 'AND') {
+                    if (type === '$and') {
                         subClauseString = '1 = 1';
                     } else {
                         subClauseString = '1 = 0';

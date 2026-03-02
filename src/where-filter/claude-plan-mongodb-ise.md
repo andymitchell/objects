@@ -291,103 +291,281 @@ Per Phase 1 resolution: keep `{$elemMatch: scalar}` as a non-MongoDB extension. 
 
 # [x] Phase 3
 
-Add aliases for all our current MongoDB equivalent functionality (see `Mapping: Current Syntax → MongoDB Aliases`). All 628 tests pass (7 skipped).
+Plan a breaking change to rename our current terms (AND/NOT/OR, {gt}, {lte}, etc) to their Mongo form. 
 
-**What was done:**
+You'll need to rewrite the types, then the matching functions (matchJavascriptObject and the pg/sqlite), then the tests - for the most part just using string replacement I hope. 
 
-**Strategy: Early Normalization** — A `normalizeWhereFilter` function recursively converts all MongoDB aliases to canonical form at the entry points (`matchJavascriptObject` and `buildWhereClause`). This means all downstream runtime code (logic evaluation, range comparison, SQL generation) is unchanged — it only ever sees canonical operators.
+Do not add/remove or change the intent of tests. This is simply replacing the terms.
 
-**Files created:**
-- `normalizeWhereFilter.ts` — Recursive normalization: `$and→AND`, `$or→OR`, `$nor→NOT`, `$gt→gt`, `$lt→lt`, `$gte→gte`, `$lte→lte`. Uses `Object.defineProperty` for safe property assignment (avoids `__proto__` prototype pollution) and `Object.hasOwn` for safe alias map lookups (avoids prototype chain leakage from `__proto__`/`constructor` keys).
+Also you will not alias. We're dropping the current terms. 
 
-**Files modified:**
-- `consts.ts` — Added `LogicAliasToCanonical`, `RangeAliasToCanonical` mapping objects, and `WhereFilterLogicOperatorsWithAliases`/`ValueComparisonRangeOperatorsWithAliases` arrays for typeguards.
-- `types.ts` — Added `MongoLogicAlias` (`$and|$or|$nor`) and `MongoRangeAlias` (`$gt|$lt|$gte|$lte`) types. Extended `LogicFilter`, `ValueComparisonRangeNumeric`, and `ValueComparisonRangeString` to accept aliases.
-- `schemas.ts` — Extended Zod `WhereFilterSchema` to accept `$and/$or/$nor` in the logic object branch. Extended `ValueComparisonRangeNumericSchema` to accept `$gt/$lt/$gte/$lte`.
-- `typeguards.ts` — Updated `isLogicFilter` and all `isValueComparisonRange*` guards to use `WithAliases` arrays, so external code calling typeguards on un-normalized data gets correct results.
-- `matchJavascriptObject.ts` — Calls `normalizeWhereFilter(filter)` after validation, before `_matchJavascriptObject`.
-- `whereClauseEngine.ts` — Calls `normalizeWhereFilter(filter)` after validation, before `whereClauseBuilder`.
+For our extensions, rename them to use the $ prefix to match Mongo style, e.g. {contains} becomes {$contains}. 
 
-# [ ] Phase 3a
+Output the plan as the body of 'Phase 3a'.
 
-**Goal:** Verify that every MongoDB alias produces identical results to its canonical form, without duplicating the full test matrix.
+# [x] Phase 3a
 
-**Approach: Pairwise equivalence tests.** For each alias pair, run a representative test case with both forms and assert identical results. This gives thorough coverage (~20 tests) with zero maintenance burden from duplication.
+All 628 tests pass (7 skipped). Breaking rename of all operators to MongoDB form. No aliases — old names are dropped entirely. Extensions get `$` prefix.
 
-**Where:** Add a new `describe('MongoDB aliases')` block at the end of `standardTests.ts`. Since `standardTests` is invoked by all 3 test files (matchJavascriptObject, postgres, sqlite), alias equivalence is automatically verified across all engines.
+## Rename Map
 
-**Tests to add:**
+| Current | New (MongoDB) | Category |
+|---------|---------------|----------|
+| `AND` | `$and` | Logic operator |
+| `OR` | `$or` | Logic operator |
+| `NOT` | `$nor` | Logic operator (our NOT = MongoDB's $nor: "none must match") |
+| `gt` | `$gt` | Range operator |
+| `lt` | `$lt` | Range operator |
+| `gte` | `$gte` | Range operator |
+| `lte` | `$lte` | Range operator |
+| `contains` | `$contains` | Extension (not MongoDB, keep with $ prefix) |
 
-### Logic operator aliases (6 tests)
+## Step 1: Update consts.ts
 
-Each pair (`AND`↔`$and`, `OR`↔`$or`, `NOT`↔`$nor`) gets a "passes" and "fails" test:
-
+Change the two const arrays:
 ```ts
-// $and alias
-test('$and: passes', () => {
-    expect(match(obj, { $and: [{ 'contact.name': 'Andy' }, { 'contact.emailAddress': 'andy@andy.com' }] }))
-        .toEqual(match(obj, { AND: [{ 'contact.name': 'Andy' }, { 'contact.emailAddress': 'andy@andy.com' }] }));
-});
-test('$and: fails', () => {
-    expect(match(obj, { $and: [{ 'contact.name': 'Andy' }, { 'contact.name': 'Bob' }] }))
-        .toEqual(match(obj, { AND: [{ 'contact.name': 'Andy' }, { 'contact.name': 'Bob' }] }));
-});
-// Same pattern for $or and $nor
+// Before:
+export const WhereFilterLogicOperators = ['AND', 'OR', 'NOT'] as const;
+export const ValueComparisonRangeOperators = ['lt', 'gt', 'lte', 'gte'] as const;
+
+// After:
+export const WhereFilterLogicOperators = ['$and', '$or', '$nor'] as const;
+export const ValueComparisonRangeOperators = ['$lt', '$gt', '$lte', '$gte'] as const;
 ```
 
-### Range operator aliases (8 tests)
+All downstream types (`WhereFilterLogicOperatorsTyped`, `ValueComparisonRangeOperatorsTyped`) and typeguard functions (`isLogicFilter`, `isValueComparisonRange*`) derive from these consts, so they update automatically.
 
-Each pair (`gt`↔`$gt`, `lt`↔`$lt`, `gte`↔`$gte`, `lte`↔`$lte`) gets a "passes" and "fails" test:
+## Step 2: Update types.ts
 
-```ts
-// $gt alias
-test('$gt: passes', () => {
-    expect(match(obj, { 'contact.age': { $gt: 25 } }))
-        .toEqual(match(obj, { 'contact.age': { gt: 25 } }));
-});
-test('$gt: fails', () => {
-    expect(match(obj, { 'contact.age': { $gt: 100 } }))
-        .toEqual(match(obj, { 'contact.age': { gt: 100 } }));
-});
-// Same pattern for $lt, $gte, $lte
-```
+1. Rename `ValueComparisonContains`:
+   ```ts
+   // Before:
+   export type ValueComparisonContains = { contains: string };
+   // After:
+   export type ValueComparisonContains = { $contains: string };
+   ```
 
-### Combined range aliases (2 tests)
+2. Update all documentation examples and comments:
+   - `AND` → `$and`, `OR` → `$or`, `NOT` → `$nor`
+   - `{ gte: 18 }` → `{ $gte: 18 }`, `{ gt: 10, lte: 100 }` → `{ $gt: 10, $lte: 100 }`, etc.
+   - `{ contains: 'And' }` → `{ $contains: 'And' }`
 
-Multiple aliases used together in one filter:
+No structural changes needed — `LogicFilter` and `ValueComparisonRange*` types derive from the consts automatically.
 
-```ts
-test('$gte + $lt combined', () => {
-    expect(match(obj, { 'contact.age': { $gte: 18, $lt: 100 } }))
-        .toEqual(match(obj, { 'contact.age': { gte: 18, lt: 100 } }));
-});
-```
+## Step 3: Update schemas.ts
 
-### Nested aliases (4 tests)
+1. Logic filter schema keys:
+   ```ts
+   // Before:
+   z.object({
+       OR: z.array(WhereFilterSchema).optional(),
+       AND: z.array(WhereFilterSchema).optional(),
+       NOT: z.array(WhereFilterSchema).optional(),
+   })
+   // After:
+   z.object({
+       $or: z.array(WhereFilterSchema).optional(),
+       $and: z.array(WhereFilterSchema).optional(),
+       $nor: z.array(WhereFilterSchema).optional(),
+   })
+   ```
 
-Aliases used inside `$elemMatch` and nested logic:
+2. Contains schema:
+   ```ts
+   // Before:
+   const ValueComparisonContainsSchema = z.object({
+       contains: z.union([z.string(), z.number()]),
+   });
+   // After:
+   const ValueComparisonContainsSchema = z.object({
+       $contains: z.union([z.string(), z.number()]),
+   });
+   ```
 
-```ts
-// Range alias inside $elemMatch on scalar array
-test('$gt inside $elemMatch on scalar array', () => {
-    expect(match(locObj, { 'contact.locations': { $elemMatch: { $gt: 5 } } }))
-        .toEqual(match(locObj, { 'contact.locations': { $elemMatch: { gt: 5 } } }));
-});
+3. `isValueComparisonContains` typeguard:
+   ```ts
+   // Before:
+   return (alreadyProvedIsPlainObject || isPlainObject(x)) && "contains" in x;
+   // After:
+   return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$contains" in x;
+   ```
 
-// Logic alias inside $elemMatch on object array
-test('$and inside $elemMatch on object array', () => {
-    expect(match(locObj, { 'contact.locations': { $elemMatch: { $and: [{city: 'London'}, {country: 'UK'}] } } }))
-        .toEqual(match(locObj, { 'contact.locations': { $elemMatch: { AND: [{city: 'London'}, {country: 'UK'}] } } }));
-});
+## Step 4: Update typeguards.ts
 
-// Deeply nested: $or containing $gt
-test('$or containing $gte', () => {
-    expect(match(obj, { $or: [{ 'contact.age': { $gte: 100 } }, { 'contact.name': 'Andy' }] }))
-        .toEqual(match(obj, { OR: [{ 'contact.age': { gte: 100 } }, { 'contact.name': 'Andy' }] }));
-});
-```
+1. Error message on line 21:
+   ```ts
+   // Before:
+   "A WhereFilter must have a single key, or be a recursive with OR/AND/NOT arrays."
+   // After:
+   "A WhereFilter must have a single key, or be a recursive with $or/$and/$nor arrays."
+   ```
 
-**Total: ~20 tests**, covering all 7 alias pairs with pass/fail, combined usage, and nesting. No combinatorial explosion. Each test verifies alias↔canonical equivalence, not the underlying logic (which is already covered by the existing 100+ tests per engine).
+2. The TODO comment on line 44 referencing `contains` → `$contains`.
+
+No other changes needed — all operator checks derive from the const arrays.
+
+## Step 5: Update matchJavascriptObject.ts
+
+1. Multi-key normalization (line 117-118):
+   ```ts
+   // Before:
+   filter = { AND: keys.map(key => ({[key]: filter[key]})) }
+   // After:
+   filter = { $and: keys.map(key => ({[key]: filter[key]})) }
+   ```
+
+2. Logic operator access (lines 125-127):
+   ```ts
+   // Before:
+   const passOr = !Array.isArray(filter.OR) || filter.OR.some(subMatcher);
+   const passAnd = !Array.isArray(filter.AND) || filter.AND.every(subMatcher);
+   const passNot = !Array.isArray(filter.NOT) || !filter.NOT.some(subMatcher);
+   // After:
+   const passOr = !Array.isArray(filter.$or) || filter.$or.some(subMatcher);
+   const passAnd = !Array.isArray(filter.$and) || filter.$and.every(subMatcher);
+   const passNor = !Array.isArray(filter.$nor) || !filter.$nor.some(subMatcher);
+   return passOr && passAnd && passNor;
+   ```
+
+3. Spread array OR (line 141):
+   ```ts
+   // Before:
+   OR: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
+   // After:
+   $or: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
+   ```
+
+4. Range operator function map (lines 163-168):
+   ```ts
+   // Before:
+   { 'gt': ..., 'lt': ..., 'gte': ..., 'lte': ... }
+   // After:
+   { '$gt': ..., '$lt': ..., '$gte': ..., '$lte': ... }
+   ```
+
+5. Contains access (line 176):
+   ```ts
+   // Before:
+   return value.indexOf(filterValue.contains) > -1;
+   // After:
+   return value.indexOf(filterValue.$contains) > -1;
+   ```
+
+6. Update comments throughout (AND/OR/NOT references, `gt`, `lt`, `contains`).
+
+## Step 6: Update whereClauseEngine.ts
+
+**Critical issue**: The current code uses logic operator names directly as SQL keywords (`subClauses.join(` ${type} `)` where `type` is `'AND'` or `'OR'`). After renaming to `$and`/`$or`, we need a mapping.
+
+1. Add a SQL keyword mapping:
+   ```ts
+   const logicOperatorSqlKeyword: Record<string, string> = {
+       '$and': 'AND',
+       '$or': 'OR',
+       '$nor': 'NOT', // used in the special NOT (...) case
+   };
+   ```
+
+2. Update multi-key normalization:
+   ```ts
+   // Before:
+   AND: keys.map(key => ({ [key]: filter[key] }))
+   // After:
+   $and: keys.map(key => ({ [key]: filter[key] }))
+   ```
+
+3. Update logic handling:
+   ```ts
+   // Before:
+   if (type === 'NOT') { ... }
+   // After:
+   if (type === '$nor') { ... }
+   ```
+   ```ts
+   // Before:
+   subClauseString = subClauses.length === 1 ? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
+   // After:
+   const sqlKeyword = logicOperatorSqlKeyword[type]!;
+   subClauseString = subClauses.length === 1 ? subClauses[0] : `(${subClauses.join(` ${sqlKeyword} `)})`;
+   ```
+   ```ts
+   // Before:
+   if (type === 'AND') { subClauseString = '1 = 1'; }
+   // After:
+   if (type === '$and') { subClauseString = '1 = 1'; }
+   ```
+
+4. The final `andClauses.join(' AND ')` on line 81 stays unchanged — that's SQL syntax, not a JSON key.
+
+5. Update the JSDoc comment on line 43.
+
+## Step 7: Update postgresWhereClauseBuilder.ts
+
+1. Contains access:
+   ```ts
+   // Before:
+   this.generatePlaceholder(`%${filter.contains}%`, statementArguments)
+   // After:
+   this.generatePlaceholder(`%${filter.$contains}%`, statementArguments)
+   ```
+
+2. Range operator SQL mapping (lines 365-370):
+   ```ts
+   // Before:
+   { 'gt': ..., 'lt': ..., 'gte': ..., 'lte': ... }
+   // After:
+   { '$gt': ..., '$lt': ..., '$gte': ..., '$lte': ... }
+   ```
+
+3. Any inline SQL fragments using `AND`, `OR`, `NOT` are SQL keywords and stay unchanged.
+
+4. Update comments referencing `contains`, `range`, etc.
+
+## Step 8: Update sqliteWhereClauseBuilder.ts
+
+Same changes as Step 7 (postgres), mirrored for SQLite:
+1. `filter.contains` → `filter.$contains`
+2. Range operator SQL mapping keys: `'gt'` → `'$gt'`, etc.
+3. SQL keyword strings (`AND`, `OR`, `NOT`) stay unchanged.
+4. Update comments.
+
+## Step 9: Update combineWriteActionsWhereFilters.ts (write-actions)
+
+1. Line 51: `{AND: [x.payload.where, subResult.filter]}` → `{$and: [...]}`
+2. Line 72: `OR: filtersForExisting` → `$or: filtersForExisting`
+
+## Step 10: Update test files (string replacement only, no intent changes)
+
+### standardTests.ts
+Replace all operator keys in filter definitions:
+- `AND:` → `$and:` (all occurrences in filter objects)
+- `OR:` → `$or:` (all occurrences in filter objects)
+- `NOT:` → `$nor:` (all occurrences in filter objects)
+- `'gt':` / `gt:` → `'$gt':` / `$gt:`
+- `'lt':` / `lt:` → `'$lt':` / `$lt:`
+- `'gte':` / `gte:` → `'$gte':` / `$gte:`
+- `'lte':` / `lte:` → `'$lte':` / `$lte:`
+- `contains:` → `$contains:`
+
+Test descriptions (string labels) should also update to reference the new names where they mention the operator name, e.g. "multikey is AND" → "multikey is $and". But do NOT change descriptions where AND/OR/NOT refer to the logical concept rather than the operator name.
+
+### types.test.ts
+- `gte:` → `$gte:`
+- `contains:` → `$contains:`
+- `AND:` / `{AND:` → `$and:` / `{$and:`
+- `a['OR']` → `a['$or']`
+- Descriptions referencing operator names
+
+### combineWriteActionsWhereFilters.test.ts
+- `AND:` → `$and:`
+- `OR:` → `$or:`
+
+### postgresWhereClauseBuilder.test.ts / sqliteWhereClauseBuilder.test.ts
+- Any filter definitions using old operator names need updating.
+
+## Step 11: Verify
+
+Run the full test suite. All tests should pass with the new operator names. No tests should be added or removed — this is purely a rename.
 
 # [ ] Phase 4
 

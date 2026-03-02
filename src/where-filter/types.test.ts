@@ -17,57 +17,57 @@ it('it correctly identifies the available keys, and their type, and there is no 
 describe('comparison operators', () => {
     type NormalType = { id: string, ts: number };
 
-    describe('gte', () => {
-        it('handles gte [number]', () => {
+    describe('$gte', () => {
+        it('handles $gte [number]', () => {
             const a:WhereFilterDefinition<NormalType> = {
                 ts: {
-                    gte: 1
+                    $gte: 1
                 }
             }
 
             const b:WhereFilterDefinition<NormalType> = {
                 ts: {
                     // @ts-expect-error
-                    gte: 'a'
+                    $gte: 'a'
                 }
             }
 
             const c:WhereFilterDefinition<NormalType> = {
                 id: {
                     // @ts-expect-error
-                    gte: 1                
+                    $gte: 1                
                 }
             }
         })
 
-        it('handles gte [string]', () => {
+        it('handles $gte [string]', () => {
             const a:WhereFilterDefinition<NormalType> = {
                 id: {
-                    gte: 'a'
+                    $gte: 'a'
                 }
             }
 
             const b:WhereFilterDefinition<NormalType> = {
                 id: {
                     // @ts-expect-error
-                    gte: 1
+                    $gte: 1
                 }
             }
         })
     })
     
-    describe('contains', () => {
-        it('handles contains [string]', () => {
+    describe('$contains', () => {
+        it('handles $contains [string]', () => {
             const a:WhereFilterDefinition<NormalType> = {
                 id: {
-                    contains: 'i'
+                    $contains: 'i'
                 }
             }
 
             const b:WhereFilterDefinition<NormalType> = {
                 id: {
                     // @ts-expect-error
-                    contains: 1
+                    $contains: 1
                 }
             }
         
@@ -389,7 +389,7 @@ it('handles complex discriminated unions with possibly infinite recursion [regre
     // @ts-expect-error wrong type
     logStorage.get<LogEntry<MessagingError>>({'context.message.id': '1'});
 
-    logStorage.get<LogEntry<MessagingError>>({AND: [
+    logStorage.get<LogEntry<MessagingError>>({$and: [
         {
             'context.message.direction': 'request'
         },
@@ -399,7 +399,7 @@ it('handles complex discriminated unions with possibly infinite recursion [regre
     ]});
 
 
-    logStorage.get<LogEntry<MessagingError>>({AND: [
+    logStorage.get<LogEntry<MessagingError>>({$and: [
         {
             'context.message.direction': 'request'
         },
@@ -448,8 +448,8 @@ describe('Receive filter parameter in a function', () => {
             if (isPartialObjectFilter(a)) {
                 a['name'];
             }
-            if (isLogicFilter(a) && a['OR']) {
-                a['OR'].some;
+            if (isLogicFilter(a) && a['$or']) {
+                a['$or'].some;
             }
         }
 

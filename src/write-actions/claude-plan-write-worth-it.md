@@ -113,6 +113,12 @@ A Zod schema is required. After every create or update, the resulting object is 
 | **Sequential ordering** | Actions applied in order, later ones see earlier results | Multiple statements in a single transaction — natural fit. |
 
 
+## Return type of applyWritesToItems
+_To be filled in_
+
+## List of general important tests from applyWritesToItems.test.ts
+_To be filled in_
+
 # Decision: Is it possible, is it worth?
 
 ## Feasibility: is it possible
@@ -176,40 +182,9 @@ SQL flow: `Single UPDATE/INSERT/DELETE statement`
 8. WHERE clause is already solved -- high reuse, low maintenance.
 9. Path conversion utilities already exist -- reusable.
 
+# TDD Testing Plan
 
-# Plan
-
-_Check the Phases off as you go. Stop after each phase to ask me whether to continue to the next phase. If you create files as part of completing a Phase, update the Phase with links to them and explain what they contain (so a future LLM can resume)._
-
-# [x] Phase 1
-
-Infer the spec for a `WriteAction` from the type - specifically the CRUD options it has. Also infer how a schema is defined for an object store (especially the `DDL` type in @./applyWritesToItems/types.ts) - as a lot of the Write Action work is in vetting that it can be safely applied to an object of a certain schema/shape.
-
-You can ask me questions about how it works if there's uncertainty or ambiguity.
-
-Output the analyse to 'How Write Actions Currently Work' in this document.
-
-
-# [x] Phase 2
-
-Remember, the intention here is to work on a table that has a JSON column representing the object to filter and mutate: `UPDATE colJson SET ... WHERE ...` (possibly with UPSERT mechanics; possibly multi step/line SQL statements)
-
-Implement a plan to create a new converter - I imagine a function that will take a `WriteAction`, maybe a schema for the object, and the JSON column of the target table. There will be one for pg and one for sqlite.
-
-Output the plan in Phase 3 below ('Implementation Plan').
-
-Then update `Decision: Is it possible, it is worth?` above:
-* `Feasibility: is it possible`:
-    Was the plan possible to implement? It may simply not be technically possible to transpile a `WriteAction` (especially array_scope) into SQL.
-* `Performance gain over 'query to read objects > update in JS context > write back to the DB'`:
-    My current solution is to use a WhereFilterDefinition to read from the db table to get all the objects; bring them into a JS context and run applyWritesToItems on it; then write the changed items back to the table. Obviously this pure SQL mode would be faster if possible, but can you assess how much?
-* `Likely maintenance burdens`:
-    If this is feasible, is it going to be a pain to maintain? Identify potential issues.
-
-
-# [ ] Phase 3: Implementation Plan
-
-## Recommendation
+# Implementation Plan
 
 **Implement a "lite" version** covering create/update/delete without array_scope. This captures ~80% of the performance benefit with ~30% of the complexity. array_scope can be added later if needed, or can continue to use the existing JS path (hybrid approach).
 
@@ -328,3 +303,96 @@ src/write-actions/
 - For each payload type x dialect: generate SQL, run it against a real test DB, compare result to `applyWritesToItems` on the same input
 - Use the existing test fixtures from the write-actions test suite
 - Property-based tests: random WriteActions + random data, verify SQL result matches JS result
+
+
+# Plan
+
+_Check the Phases off as you go. Stop after each phase to ask me whether to continue to the next phase. If you create files as part of completing a Phase, update the Phase with links to them and explain what they contain (so a future LLM can resume)._
+
+# [x] Phase 1
+
+Infer the spec for a `WriteAction` from the type - specifically the CRUD options it has. Also infer how a schema is defined for an object store (especially the `DDL` type in @./applyWritesToItems/types.ts) - as a lot of the Write Action work is in vetting that it can be safely applied to an object of a certain schema/shape.
+
+You can ask me questions about how it works if there's uncertainty or ambiguity.
+
+Output the analyse to 'How Write Actions Currently Work' in this document.
+
+
+# [x] Phase 2
+
+Remember, the intention here is to work on a table that has a JSON column representing the object to filter and mutate: `UPDATE colJson SET ... WHERE ...` (possibly with UPSERT mechanics; possibly multi step/line SQL statements)
+
+Implement a plan to create a new converter - I imagine a function that will take a `WriteAction`, maybe a schema for the object, and the JSON column of the target table. There will be one for pg and one for sqlite.
+
+Output the plan in Phase 3 below ('Implementation Plan').
+
+Then update `Decision: Is it possible, it is worth?` above:
+* `Feasibility: is it possible`:
+    Was the plan possible to implement? It may simply not be technically possible to transpile a `WriteAction` (especially array_scope) into SQL.
+* `Performance gain over 'query to read objects > update in JS context > write back to the DB'`:
+    My current solution is to use a WhereFilterDefinition to read from the db table to get all the objects; bring them into a JS context and run applyWritesToItems on it; then write the changed items back to the table. Obviously this pure SQL mode would be faster if possible, but can you assess how much?
+* `Likely maintenance burdens`:
+    If this is feasible, is it going to be a pain to maintain? Identify potential issues.
+
+
+# [ ] Phase 3
+
+Do additional research to support the implementation. 
+
+## Step 1
+Review how @../where-filter/standardTests.ts are used to test multiple implementations (e.g. matchJavascriptObject, pg, etc). This same mechanism will be used. 
+
+## Step 2 
+
+Update `How Write Actions Currently Work` in this document with new sections that detail: 
+* `Return type of applyWritesToItems`: The return format of `applyWritesToItems` (with the intention that all the pg/sqlite functions will use this return format)
+* `List of general important tests from applyWritesToItems.test.ts`: Everything important that is tested in `applyWritesToItems.test.ts`, but only choose tests that would broadly make sense to the current TS implementation AND a pg/sql implementation (lowest common denominator - so no 'immer' tests). It should be a succinct conscise list that gives just enough detail to be recreated in new tests.
+
+
+# [ ] Phase 4
+
+Rewrite the implementation plan. 
+
+Keep most of it, but ammend: 
+* There will be a standalone function `canApplyWriteActionsToSql` that accept a set of write actions, and validate that they fit the 'lite' version. If they include any unsupported properties whatsoever, they're rejected. It will return an overall success/fail, but also specify the failed write actions with a reason (this is a reusable type). 
+* `writeActionToSql` will begin with running `canApplyWriteActionsToSql` and halt if not, returning the same failure type that indicates which actions could not work 
+* Create a helper function, that's db agnostic (using an executing callback per sql line), to find which write action fails. It will be used by the consumer when the generated SQL fails in the Transaction to then re-run it action by action to find which failed - it would return the failed WriteActions along with the SQL error details. Challenge me on this! If the transaction can tell you which specific SQL line failed then great, just use that instead and skip this. 
+* There will be a new function `applyWritesToSql` that is db-agnostic. It will generate SQL that's executed via a callback passed to the function. If it fails, it uses the helper function to rerun and identify which entry failed. It will share the same result type as `applyWritesToItems` (other than the variant to allow it to say which it couldn't run due to `canApplyWriteActionsToSql`)
+
+And the structure will be different: 
+* The new db stuff will be isolated in its own directory: ./applyWritesToItems/sql 
+* There's no separate 'tests' directory, each function has its own colated .test.ts file 
+* standardTests will be added to ./applyWritesToItems directory 
+
+Don't execute - just rewrite the `Implementation Plan` of this document. 
+
+
+# [ ] Phase 5
+
+We're going to do TDD for this. Create a plan in `TDD Testing Plan`. 
+
+## standardTests
+
+Generate its own version of `standardTests.ts` seen in where-filter; that will be used by `applyWritesToItems` and both dialects of `applyWritesToSql`. It will work the same way, with each apply function setting up the tests (e.g. a sqlite table) and for each test (e.g. setting initial data in a fresh table), then executing the test on the function and assessing whether when run (directly in the case of applyWritesToItems; or have SQL executed in the case of writeActionToSql), the data source (table, raw JS) has been correctly modified. 
+
+Crucially this is a major step because you must create a hierarchial test file (using nested `describe` blocks) that exhaustively covers the entire spec for WriteActions. Do this in order: 
+* Identify the high level parts of the spec, and the intent. It should be something a developer understands and can quickly see "oh this maps to how I'd understand the layout of the spec, and it captures the intent of every part of it". 
+* Fill in what needs to be tested within each part of the spec, covering everything (all input/output permutations and edge cases - i.e. do testing best practice).
+
+Additionally, include any tests you missed that were found in `List of general important tests from applyWritesToItems.test.ts`. 
+
+Be sure to broadly split the file into the 'lite' version of Write Actions (that all the functions must support), and then the full version (currently only supported by `applyWritesToItems` - tests for `writeActionToSql` will be able to skip this). 
+
+## DB specific tests
+
+applyWritesToSql.pg.test.ts (and sqlite version) can have its own dbStandardTests in addition to standardTests for any tests that specifically stress test a database (vs. vanilla `applyWritesToItems`)
+
+
+---
+
+Output the plan to `TDD Testing Plan`. 
+
+
+# [ ] Phase 6
+
+Do red/green TDD, implementing the basic structure with stub functions then fully implementing the tests; before continuing to the function implementation/fixing stage until tests pass. 

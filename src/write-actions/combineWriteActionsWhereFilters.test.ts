@@ -67,7 +67,7 @@ describe('combineWriteActionsWhereFilters', () => {
 
     test('combineWriteActionsWhereFilters basic update', () => {
         const where:WhereFilterDefinition<Obj> = {
-            OR: [
+            $or: [
                 {id: '1'},
                 {id: '2'}
             ]
@@ -95,7 +95,7 @@ describe('combineWriteActionsWhereFilters', () => {
 
     test('combineWriteActionsWhereFilters basic delete', () => {
         const where:WhereFilterDefinition<Obj> = {
-            OR: [
+            $or: [
                 {id: '1'},
                 {id: '2'}
             ]
@@ -119,7 +119,7 @@ describe('combineWriteActionsWhereFilters', () => {
 
     test('combineWriteActionsWhereFilters exclude delete', () => {
         const where:WhereFilterDefinition<Obj> = {
-            OR: [
+            $or: [
                 {id: '1'},
                 {id: '2'}
             ]
@@ -142,13 +142,13 @@ describe('combineWriteActionsWhereFilters', () => {
 
     test('combineWriteActionsWhereFilters 2x update', () => {
         const where1:WhereFilterDefinition<Obj> = {
-            OR: [
+            $or: [
                 {id: '1'},
                 {id: '2'}
             ]
         }
         const where2:WhereFilterDefinition<Obj> = {
-            OR: [
+            $or: [
                 {id: '3'},
                 {id: '4'}
             ]
@@ -184,7 +184,7 @@ describe('combineWriteActionsWhereFilters', () => {
 
         expect(result.status).toBe('ok');if(result.status!=='ok') throw new Error('noop');
         expect(result.filter).toEqual({
-            OR: [
+            $or: [
                 where1,
                 where2
             ]
@@ -193,7 +193,7 @@ describe('combineWriteActionsWhereFilters', () => {
     
     test('combineWriteActionsWhereFilters array scope create', () => {        
         const shouldBe:WhereFilterDefinition<Obj> = {
-            AND: [
+            $and: [
                 {
                     id: '1'
                 },
@@ -238,9 +238,9 @@ describe('combineWriteActionsWhereFilters', () => {
 
     test('combineWriteActionsWhereFilters array scope update', () => {        
         const shouldBe:WhereFilterDefinition<Obj> = {
-            "OR": [
+            "$or": [
                 {
-                    "AND": [
+                    "$and": [
                         {
                             "id": "1"
                         },
@@ -254,7 +254,7 @@ describe('combineWriteActionsWhereFilters', () => {
                     ]
                 },
                 {
-                    "AND": [
+                    "$and": [
                         {
                             "id": "2"
                         },

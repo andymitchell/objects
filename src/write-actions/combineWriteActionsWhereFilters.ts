@@ -48,7 +48,7 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
             const scoped = getArrayScopeSchemaAndDDL<T>(x, schema, ddl);
             const subResult = combineWriteActionsWhereFilters(scoped.schema, scoped.ddl, [scoped.writeAction], includeDelete, (scope? scope+'.' : '')+x.payload.scope);
             if( subResult.status!=='ok' ) return subResult;
-            return {AND: [x.payload.where, subResult.filter]};
+            return {$and: [x.payload.where, subResult.filter]};
         } else if( x.payload.type==='update' || (x.payload.type==='delete') && includeDelete) {
             return scope? {[scope]: {$elemMatch: x.payload.where}} : x.payload.where;
         }
@@ -69,7 +69,7 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
 
     
     const whereFilterForExisting:WhereFilterDefinition<T> | undefined = filtersForExisting.length>1 ? {
-        OR: filtersForExisting
+        $or: filtersForExisting
     } : filtersForExisting[0]
 
     

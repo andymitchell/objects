@@ -165,7 +165,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                AND: [
+                $and: [
                     {
                         'contact.name': 'Andy'
                     },
@@ -191,7 +191,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                AND: [
+                $and: [
                     {
                         'contact.name': 'Bob'
                     },
@@ -217,7 +217,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                OR: [
+                $or: [
                     {
                         'contact.name': 'Andy',
                     },
@@ -232,7 +232,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(true);
     });
 
-    test('Match name because NOT being something else', async () => {
+    test('Match name because $nor being something else', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -241,7 +241,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                NOT: [
+                $nor: [
                     {
                         'contact.name': 'Bob',
                     },
@@ -274,8 +274,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.age': {
-                            'gt': 99,
-                            'lt': 101,
+                            '$gt': 99,
+                            '$lt': 101,
                         }
                     },
                     ContactSchema
@@ -295,8 +295,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.age': {
-                            'gt': 99,
-                            'lt': 101,
+                            '$gt': 99,
+                            '$lt': 101,
                         }
                     },
                     ContactSchema
@@ -315,7 +315,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.age': {
-                            'gte': 101
+                            '$gte': 101
                         }
                     },
                     ContactSchema
@@ -340,8 +340,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'gt': 'A',
-                            'lt': 'B',
+                            '$gt': 'A',
+                            '$lt': 'B',
                         }
                     },
                     ContactSchema
@@ -361,8 +361,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'gt': 'B',
-                            'lt': 'C',
+                            '$gt': 'B',
+                            '$lt': 'C',
                         }
                     },
                     ContactSchema
@@ -381,7 +381,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'gte': 'B'
+                            '$gte': 'B'
                         }
                     },
                     ContactSchema
@@ -400,7 +400,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'lt': 'apple', // Should be true because 'Z' < 'a'
+                            '$lt': 'apple', // Should be true because 'Z' < 'a'
                         }
                     },
                     ContactSchema
@@ -415,7 +415,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'gt': 'Zebra', // Should be true
+                            '$gt': 'Zebra', // Should be true
                         }
                     },
                     ContactSchema
@@ -432,7 +432,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'lt': '2',
+                            '$lt': '2',
                         }
                     },
                     ContactSchema
@@ -448,7 +448,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'lt': 'Cart',
+                            '$lt': 'Cart',
                         }
                     },
                     ContactSchema
@@ -468,7 +468,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     {
                         'contact.name': {
-                            'lt': 'AB',
+                            '$lt': 'AB',
                         }
                     },
                     ContactSchema
@@ -539,9 +539,9 @@ export function standardTests(testConfig: StandardTestConfig) {
                 "softDeletedAtTs": undefined
             },
             {
-                "AND": [
+                "$and": [
                     {
-                        "OR": [
+                        "$or": [
                             {
                                 "emailCvID.threadIDG3": "thread-a:r-8214939282543103627"
                             },
@@ -551,10 +551,10 @@ export function standardTests(testConfig: StandardTestConfig) {
                         ]
                     },
                     {
-                        "NOT": [
+                        "$nor": [
                             {
                                 "softDeletedAtTs": {
-                                    "gt": 0
+                                    "$gt": 0
                                 }
                             }
                         ]
@@ -569,7 +569,7 @@ export function standardTests(testConfig: StandardTestConfig) {
     });
 
 
-    test('string contains', async () => {
+    test('string $contains', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -579,7 +579,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.name': {
-                    contains: 'And'
+                    $contains: 'And'
                 }
             },
             ContactSchema
@@ -588,7 +588,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(true);
     });
 
-    test('string not contains', async () => {
+    test('string not $contains', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -598,7 +598,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.name': {
-                    contains: 'Wrong'
+                    $contains: 'Wrong'
                 }
             },
             ContactSchema
@@ -608,7 +608,7 @@ export function standardTests(testConfig: StandardTestConfig) {
     });
 
 
-    test('contains used on a number will not return anything', async () => {
+    test('$contains used on a number will not return anything', async () => {
         let result: boolean | undefined = false;
 
         try {
@@ -622,7 +622,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 {
                     'contact.age': {
                         // @ts-ignore
-                        contains: '100'
+                        $contains: '100'
                     }
                 },
                 ContactSchema
@@ -634,7 +634,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(false);
     });
 
-    test('contains used on a missing property will not return anything (but will not error)', async () => {
+    test('$contains used on a missing property will not return anything (but will not error)', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -645,7 +645,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             {
                 // @ts-ignore
                 'contact.unknown_property': {
-                    contains: 'Wrong'
+                    $contains: 'Wrong'
                 }
             },
             ContactSchema
@@ -717,7 +717,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('multikey is AND: passes', async () => {
+    test('multikey is $and: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -736,7 +736,7 @@ export function standardTests(testConfig: StandardTestConfig) {
     });
 
 
-    test('multikey is AND: fails', async () => {
+    test('multikey is $and: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -765,7 +765,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                'OR': [{
+                '$or': [{
                     'contact.name': 'Andy',
                     'contact.age': 100
                 }],
@@ -787,7 +787,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                'OR': [{
+                '$or': [{
                     'contact.name': 'Andy',
                     'contact.age': 100
                 }],
@@ -893,7 +893,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    OR: [
+                    $or: [
                         {
                             'city': 'London'
                         },
@@ -921,7 +921,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    OR: [
+                    $or: [
                         {
                             'city': 'London'
                         },
@@ -941,7 +941,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter city+country infer OR: passes', async () => {
+    test('array element compound filter city+country infer $or: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -963,7 +963,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter city+country infer OR: fails', async () => {
+    test('array element compound filter city+country infer $or: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -997,7 +997,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    AND: [
+                    $and: [
                         { city: 'London' },
                         { country: 'Japan' }
                     ]
@@ -1012,7 +1012,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter explicit AND behaves like $elemMatch: passes', async () => {
+    test('array element compound filter explicit $and behaves like $elemMatch: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1022,7 +1022,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    AND: [
+                    $and: [
                         {
                             'city': 'Brisbane'
                         },
@@ -1041,7 +1041,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter explict AND behaves like $elemMatch: fails', async () => {
+    test('array element compound filter explicit $and behaves like $elemMatch: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1051,7 +1051,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    AND: [
+                    $and: [
                         {
                             'city': 'Brisbane'
                         },
@@ -1070,7 +1070,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter explicit OR: passes', async () => {
+    test('array element compound filter explicit $or: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1080,7 +1080,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    OR: [
+                    $or: [
                         {
                             'city': 'Brisbane'
                         },
@@ -1098,7 +1098,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter explicit OR: fails', async () => {
+    test('array element compound filter explicit $or: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1108,7 +1108,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    OR: [
+                    $or: [
                         {
                             'city': 'Tokyo'
                         },
@@ -1126,7 +1126,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter NOT: passes', async () => {
+    test('array element compound filter $nor: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1136,7 +1136,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    NOT: [
+                    $nor: [
                         {
                             'city': 'London'
                         },
@@ -1154,7 +1154,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter NOT partial (allowed because NYC ok): passes', async () => {
+    test('array element compound filter $nor partial (allowed because NYC ok): passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1164,7 +1164,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    NOT: [
+                    $nor: [
                         {
                             'city': 'Brisbane'
                         }
@@ -1178,7 +1178,7 @@ export function standardTests(testConfig: StandardTestConfig) {
     });
 
 
-    test('array element compound filter NOT: fails', async () => {
+    test('array element compound filter $nor: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1188,7 +1188,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    NOT: [
+                    $nor: [
                         {
                             'city': 'Brisbane'
                         },
@@ -1222,7 +1222,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             {
                 'contact.locations': {
                     $elemMatch: {
-                        AND: [
+                        $and: [
                             { city: 'London' },
                             { country: 'UK' }
                         ]
@@ -1250,7 +1250,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             {
                 'contact.locations': {
                     $elemMatch: {
-                        AND: [
+                        $and: [
                             { city: 'London' },
                             { country: 'US' }
                         ]
@@ -1265,7 +1265,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element $elemMatch (must be all in one element) city+country infer AND: passes', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer $and: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1287,7 +1287,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(true);
     });
 
-    test('array element $elemMatch (must be all in one element) city+country infer AND: fails', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer $and: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1311,7 +1311,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element $elemMatch (must be all in one element) city+country infer AND and contains: passes', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer $and and $contains: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1322,7 +1322,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             {
                 'contact.locations': {
                     $elemMatch: {
-                        city: { contains: 'Lon' },
+                        city: { $contains: 'Lon' },
                         country: 'UK'
                     }
                 }
@@ -1336,7 +1336,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element $elemMatch (must be all in one element) city+country infer AND and contains: fails', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer $and and $contains: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1347,7 +1347,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             {
                 'contact.locations': {
                     $elemMatch: {
-                        city: { contains: 'NY' },
+                        city: { $contains: 'NY' },
                         country: 'UK'
                     }
                 }
@@ -1448,60 +1448,60 @@ export function standardTests(testConfig: StandardTestConfig) {
 
         // 4a. Scalar arrays — operator expressions (previously broken, now fixed)
 
-        test('scalar array + range operators (gte+lt): passes when element in range', async () => {
+        test('scalar array + range operators ($gte+$lt): passes when element in range', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [75, 82, 90] } },
-                { 'contact.locations': { $elemMatch: { gte: 80, lt: 85 } } },
+                { 'contact.locations': { $elemMatch: { $gte: 80, $lt: 85 } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
             expect(result).toBe(true);
         });
 
-        test('scalar array + range operators (gte+lt): fails when no element in range', async () => {
+        test('scalar array + range operators ($gte+$lt): fails when no element in range', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [75, 90] } },
-                { 'contact.locations': { $elemMatch: { gte: 80, lt: 85 } } },
+                { 'contact.locations': { $elemMatch: { $gte: 80, $lt: 85 } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
             expect(result).toBe(false);
         });
 
-        test('scalar array + single range operator (gt): passes', async () => {
+        test('scalar array + single range operator ($gt): passes', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [1, 3, 10] } },
-                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                { 'contact.locations': { $elemMatch: { $gt: 5 } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
             expect(result).toBe(true);
         });
 
-        test('scalar array + single range operator (gt): fails', async () => {
+        test('scalar array + single range operator ($gt): fails', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [1, 3, 4] } },
-                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                { 'contact.locations': { $elemMatch: { $gt: 5 } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
             expect(result).toBe(false);
         });
 
-        test('scalar array + contains operator: passes', async () => {
+        test('scalar array + $contains operator: passes', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                { 'contact.locations': { $elemMatch: { contains: 'Lon' } } },
+                { 'contact.locations': { $elemMatch: { $contains: 'Lon' } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
             expect(result).toBe(true);
         });
 
-        test('scalar array + contains operator: fails', async () => {
+        test('scalar array + $contains operator: fails', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: ['Paris', 'NYC'] } },
-                { 'contact.locations': { $elemMatch: { contains: 'Lon' } } },
+                { 'contact.locations': { $elemMatch: { $contains: 'Lon' } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
@@ -1572,10 +1572,10 @@ export function standardTests(testConfig: StandardTestConfig) {
             expect(result).toBe(false);
         });
 
-        test('object array + field filter with contains: passes', async () => {
+        test('object array + field filter with $contains: passes', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                { 'contact.locations': { $elemMatch: { city: { contains: 'Lon' } } } },
+                { 'contact.locations': { $elemMatch: { city: { $contains: 'Lon' } } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
@@ -1587,7 +1587,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         test('object array + nested range operator: passes', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                { 'contact.locations': { $elemMatch: { city: { contains: 'Lon' }, country: 'UK' } } },
+                { 'contact.locations': { $elemMatch: { city: { $contains: 'Lon' }, country: 'UK' } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
@@ -1597,7 +1597,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         test('object array + nested range operator: fails (no single element matches both)', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                { 'contact.locations': { $elemMatch: { city: { contains: 'NY' }, country: 'UK' } } },
+                { 'contact.locations': { $elemMatch: { city: { $contains: 'NY' }, country: 'UK' } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
@@ -1609,7 +1609,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         test('empty array: always fails', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [] } },
-                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                { 'contact.locations': { $elemMatch: { $gt: 5 } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
@@ -1619,7 +1619,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         test('single-element array: passes when element matches', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy', locations: [10] } },
-                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                { 'contact.locations': { $elemMatch: { $gt: 5 } } },
                 ContactSchema
             );
             if (result === undefined) { console.warn('Skipping'); return; }
@@ -1977,7 +1977,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                OR: [
+                $or: [
                     { 'contact.name': undefined }
                 ]
             },
@@ -1989,7 +1989,7 @@ export function standardTests(testConfig: StandardTestConfig) {
     })
 
 
-    test('handles {OR: []} - match nothing because no conditions exist to succeed [regression]', async () => {
+    test('handles {$or: []} - match nothing because no conditions exist to succeed [regression]', async () => {
 
 
         const result = await matchJavascriptObject(
@@ -2000,7 +2000,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                OR: []
+                $or: []
             },
             ContactSchema
         );
@@ -2009,7 +2009,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(false);
     })
 
-    test('handles {AND: []} - match everything because no conditions exist to fail [regression]', async () => {
+    test('handles {$and: []} - match everything because no conditions exist to fail [regression]', async () => {
 
 
         const result = await matchJavascriptObject(
@@ -2020,7 +2020,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }
             },
             {
-                AND: []
+                $and: []
             },
             ContactSchema
         );

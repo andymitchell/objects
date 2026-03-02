@@ -13,19 +13,19 @@ import { safeJson } from "./safeJson.ts";
 
 # This is largely inspired by Mongo. 
 
-## If multiple criteria are on a filter it's an AND... 
-e.g. {name: 'Bob', age: 1}, it implicitly infers its an AND across the criteria. 
+## If multiple criteria are on a filter it's a $and...
+e.g. {name: 'Bob', age: 1}, it implicitly infers its a $and across the criteria. 
 
 ## It gets a little hard to think about around arrays. 
 Use $elemMatch on an array search to define the characteristics that must be found under one element. Otherwise, it does a compound search that accepts multiple elements fulfilling the criteria.
 E.g. for an array 'children' [{name: 'Bob', age: 20}, name: 'Alice', age: 1], and filter {'children': {name: 'Bob', age: 1}}, it would pass.
 But if you used {'children': {$elemMatch: {name: 'Bob', age: 1}}}, then it would fail.
 
-This is counter-intuitive partly because the normal behaviour for multiple criteria is to use AND, except in compound filters.
+This is counter-intuitive partly because the normal behaviour for multiple criteria is to use $and, except in compound filters.
 
-If you use AND/OR/NOT in your compound filters, they behave atomically on each element, equivelent to $elemMatch. 
+If you use $and/$or/$nor in your compound filters, they behave atomically on each element, equivelent to $elemMatch.
 
-## Spreading arrays will use a generous OR 
+## Spreading arrays will use a generous $or
 E.g. suppose you have {children: {grandchildren: {name: string}[]}[]}. I.e. arrays as elements of parent arrays. 
 A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse each leaf array (in this case, potentially multiple 'grandchildren' arrays). But the compound filter must pass within the context of one array. 
 
@@ -45,7 +45,7 @@ export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
  *
  * @example
  * const user = { name: 'Alice', age: 30 };
- * const filter = { age: { gte: 18 } };
+ * const filter = { age: { $gte: 18 } };
  * matchJavascriptObject(user, filter); // true
  */
 const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean => {
@@ -75,7 +75,7 @@ export default matchJavascriptObject;
  * @returns {BasicMatchJavascriptObject<T>} - A function that takes an object and returns true if it matches the filter.
  *
  * @example
- * const filter = { age: { gte: 18 } };
+ * const filter = { age: { $gte: 18 } };
  * const isAdult = compileMatchJavascriptObject(filter);
  *
  * isAdult({ name: 'Alice', age: 30 }); // true
@@ -96,7 +96,7 @@ export const compileMatchJavascriptObject = <T extends Record<string, any>>(filt
  *
  * @example
  * const users = [{ name: 'Alice', age: 30 }, { name: 'Bob', age: 16 }];
- * const filter = { age: { gte: 18 } };
+ * const filter = { age: { $gte: 18 } };
  * filterJavascriptObjects(users, filter); // [{ name: 'Alice', age: 30 }]
  */
 export function filterJavascriptObjects<T extends {} = {}>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<T>):ObjOrDraft<T>[] {
@@ -113,19 +113,19 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
         return true;
         
     } else if( keys.length>1 ) {
-        // If there's more than 1 key on the filter, split it formally into an AND 
+        // If there's more than 1 key on the filter, split it formally into a $and
         filter = {
-            AND: keys.map(key => ({[key]: filter[key]}))
+            $and: keys.map(key => ({[key]: filter[key]}))
         }
     }
 
     if( isLogicFilter(filter) ) {
         // Treat it as recursive
         const subMatcher = (subFilter:WhereFilterDefinition) => _matchJavascriptObject(object, subFilter, [...debugPath, subFilter]);
-        const passOr = !Array.isArray(filter.OR) || filter.OR.some(subMatcher);
-        const passAnd = !Array.isArray(filter.AND) || filter.AND.every(subMatcher);
-        const passNot = !Array.isArray(filter.NOT) || !filter.NOT.some(subMatcher);
-        return passOr && passAnd && passNot;
+        const passOr = !Array.isArray(filter.$or) || filter.$or.some(subMatcher);
+        const passAnd = !Array.isArray(filter.$and) || filter.$and.every(subMatcher);
+        const passNor = !Array.isArray(filter.$nor) || !filter.$nor.some(subMatcher);
+        return passOr && passAnd && passNor;
     } else {
         // Test a single dotprop 
 
@@ -138,7 +138,7 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
             const spreadArrays = getPropertySpreadingArrays(object, dotpropKey);
             if( spreadArrays && spreadArrays.length && !(spreadArrays.length===1 && spreadArrays[0]!.value===undefined) ) {
                 const orFilter:WhereFilterDefinition = {
-                    OR: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
+                    $or: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
                 }
                 return _matchJavascriptObject(object, orFilter, [...debugPath, dotpropFilter])
             }
@@ -161,10 +161,10 @@ type ValueComparisonFlexiOperatorJavascriptFunctionsTyped = {
     [K in typeof ValueComparisonRangeOperators[number]]: CompareFunction;
 };
 const ValueComparisonRangeOperatorsJavascriptFunctions:ValueComparisonFlexiOperatorJavascriptFunctionsTyped = {
-    'gt': (value, filterValue) => value>filterValue,
-    'lt': (value, filterValue) => value<filterValue,
-    'gte': (value, filterValue) => value>=filterValue,
-    'lte': (value, filterValue) => value<=filterValue,
+    '$gt': (value, filterValue) => value>filterValue,
+    '$lt': (value, filterValue) => value<filterValue,
+    '$gte': (value, filterValue) => value>=filterValue,
+    '$lte': (value, filterValue) => value<=filterValue,
 }
 function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
     const filterValueIsPlainObject = isPlainObject(filterValue);
@@ -173,7 +173,7 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
     if( filterValueIsPlainObject ) {
         if( isValueComparisonContains(filterValue, true) ) {
             if( typeof value==='string' ) {
-                return value.indexOf(filterValue.contains)>-1;
+                return value.indexOf(filterValue.$contains)>-1;
             } else if( value!==undefined ) {
                 throw new Error("A ValueComparisonContains only works on a string");
             }
@@ -198,7 +198,7 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
                 // like SQL, we want to test against empty/null and simply return false
                 return false;
             } else {
-                throw new Error("A ValueComparisonContains (gt, lt, etc.) only works on a number or string");
+                throw new Error("A ValueComparisonContains ($gt, $lt, etc.) only works on a number or string");
             }
         } else {
             return deepEql(value, filterValue);
@@ -219,7 +219,7 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
         // In a $elemMatch, one item in the 'value' array must match all the criteria.
         // Use element-type-based branching: the runtime type of each array element
         // determines the code path, not the filter shape. This fixes the ambiguity
-        // where operator objects like {gt: 5} would incorrectly pass isWhereFilterDefinition.
+        // where operator objects like {$gt: 5} would incorrectly pass isWhereFilterDefinition.
         return value.some(element => {
             if( isPlainObject(element) ) {
                 // Object element: apply as WhereFilterDefinition

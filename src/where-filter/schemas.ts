@@ -11,9 +11,9 @@ export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef
             WhereFilterSchema
         ])),
         z.object({
-            OR: z.array(WhereFilterSchema).optional(),
-            AND: z.array(WhereFilterSchema).optional(),
-            NOT: z.array(WhereFilterSchema).optional(),
+            $or: z.array(WhereFilterSchema).optional(),
+            $and: z.array(WhereFilterSchema).optional(),
+            $nor: z.array(WhereFilterSchema).optional(),
         }),
     ])
 );
@@ -24,7 +24,7 @@ const ValueComparisonRangeNumericSchemaPartial: Record<string, ZodOptional<ZodNu
 ValueComparisonRangeOperators.forEach(operator => ValueComparisonRangeNumericSchemaPartial[operator] = z.number().optional());
 const ValueComparisonRangeNumericSchema = z.object(ValueComparisonRangeNumericSchemaPartial);
 const ValueComparisonContainsSchema = z.object({
-    contains: z.union([z.string(), z.number()]),
+    $contains: z.union([z.string(), z.number()]),
 });
 /*
 const ValueComparisonArrayContainsSchema = z.object({
@@ -55,7 +55,7 @@ export function isWhereFilterArray(x:unknown): x is WhereFilterDefinition<any>[]
 
 export function isValueComparisonContains(x:unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonContains {
     // @ts-ignore
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "contains" in x;
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$contains" in x;
 }
 
 export function isArrayValueComparisonElemMatch(x: unknown): x is ArrayValueComparisonElemMatch {

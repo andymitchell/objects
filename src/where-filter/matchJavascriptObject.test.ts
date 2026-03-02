@@ -21,7 +21,7 @@ describe('testMatchJavascriptObject', () => {
 
 
     test('compiling', () => {
-        const customMatchJavascriptObject = compileMatchJavascriptObject({age: {gte: 18}} as const);
+        const customMatchJavascriptObject = compileMatchJavascriptObject({age: {$gte: 18}} as const);
 
         expect(customMatchJavascriptObject({age: 18})).toBe(true);
         expect(customMatchJavascriptObject({age: 17})).toBe(false);

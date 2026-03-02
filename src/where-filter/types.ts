@@ -13,7 +13,7 @@ export type WhereFilterLogicOperatorsTyped = typeof WhereFilterLogicOperators[nu
 
 export type ValueComparisonRangeOperatorsTyped = typeof ValueComparisonRangeOperators[number];
 export type ValueComparisonRangeNumeric = Partial<Record<ValueComparisonRangeOperatorsTyped, number>>;
-export type ValueComparisonContains = { contains: string };
+export type ValueComparisonContains = { $contains: string };
 export type ValueComparisonRangeString = Partial<Record<ValueComparisonRangeOperatorsTyped, string>>;
 export type ValueComparisonString = ValueComparisonRangeString | ValueComparisonContains;
 export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never);
@@ -66,13 +66,13 @@ export type LogicFilter<T extends Record<string, any>> = {
  *
  * ```ts
  * { 'contact.name': 'Andy' }
- * { 'contact.age': { gte: 18 } }
+ * { 'contact.age': { $gte: 18 } }
  * ```
  *
- * **Implicit AND**: When multiple keys are present, all must match (treated as AND).
+ * **Implicit $and**: When multiple keys are present, all must match (treated as $and).
  * ```ts
  * { 'contact.name': 'Andy', 'contact.age': 100 }
- * // equivalent to: { AND: [{ 'contact.name': 'Andy' }, { 'contact.age': 100 }] }
+ * // equivalent to: { $and: [{ 'contact.name': 'Andy' }, { 'contact.age': 100 }] }
  * ```
  *
  * ### 2. Logic Filter
@@ -82,13 +82,13 @@ export type LogicFilter<T extends Record<string, any>> = {
  *
  * | Operator | Semantics                                      |
  * |----------|-------------------------------------------------|
- * | `AND`    | All sub-filters must match (`every`)            |
- * | `OR`     | At least one sub-filter must match (`some`)     |
- * | `NOT`    | No sub-filter must match (negated `some`)       |
+ * | `$and`   | All sub-filters must match (`every`)            |
+ * | `$or`    | At least one sub-filter must match (`some`)     |
+ * | `$nor`   | No sub-filter must match (negated `some`)       |
  *
  * Multiple operators on one object are ANDed together:
  * ```ts
- * { AND: [...], NOT: [...] }  // both the AND and NOT clauses must pass
+ * { $and: [...], $nor: [...] }  // both the $and and $nor clauses must pass
  * ```
  *
  * ---
@@ -98,10 +98,10 @@ export type LogicFilter<T extends Record<string, any>> = {
  * |------|---------|-----------|
  * | **Exact scalar** | `'Andy'`, `100`, `true` | Strict equality (`===`) for string, number, boolean |
  * | **Deep object equality** | `{ name: 'Andy', age: 30 }` | Deep equality (all keys must match) |
- * | **Range operators** | `{ gt: 10, lte: 100 }` | `gt`, `lt`, `gte`, `lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic / JS code-point order, case-sensitive). |
- * | **Contains** | `{ contains: 'And' }` | Substring match. String values only (throws on numbers). |
+ * | **Range operators** | `{ $gt: 10, $lte: 100 }` | `$gt`, `$lt`, `$gte`, `$lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic / JS code-point order, case-sensitive). |
+ * | **$contains** | `{ $contains: 'And' }` | Substring match. String values only (throws on numbers). |
  *
- * **Nullish behaviour**: Range/contains on `undefined`/`null` returns `false` (like SQL NULL).
+ * **Nullish behaviour**: Range/$contains on `undefined`/`null` returns `false` (like SQL NULL).
  *
  * **Type safety**: Range comparison throws if the filter type differs from the value type
  * (e.g. comparing a number value against a string filter).
@@ -133,11 +133,11 @@ export type LogicFilter<T extends Record<string, any>> = {
  * ```
  *
  * ### Logic filter on array elements (atomic per element, like `$elemMatch`)
- * When using AND/OR/NOT inside an array filter, each element is tested atomically
+ * When using $and/$or/$nor inside an array filter, each element is tested atomically
  * against the full logic filter. The criteria must be satisfied within a single element.
  * ```ts
  * // locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
- * { 'contact.locations': { AND: [{ city: 'London' }, { country: 'US' }] } }
+ * { 'contact.locations': { $and: [{ city: 'London' }, { country: 'US' }] } }
  * // → false: no single element has both city=London and country=US
  * ```
  *
@@ -149,7 +149,7 @@ export type LogicFilter<T extends Record<string, any>> = {
  *
  * // For scalar arrays — value is a scalar or value comparison:
  * { 'contact.locations': { $elemMatch: 2 } }
- * { 'contact.locations': { $elemMatch: { contains: 'Lon' } } }
+ * { 'contact.locations': { $elemMatch: { $contains: 'Lon' } } }
  * ```
  *
  * ---
@@ -157,7 +157,7 @@ export type LogicFilter<T extends Record<string, any>> = {
  *
  * When a dot-notation path crosses through multiple arrays
  * (e.g. `'children.grandchildren'` where both are arrays), intermediate arrays are expanded
- * and combined with **OR semantics**. The compound filter must pass within the context of
+ * and combined with **$or semantics**. The compound filter must pass within the context of
  * one leaf array.
  * ```ts
  * // children: [{ grandchildren: [{name: 'Rita'}] }, { grandchildren: [{name: 'Bob'}] }]
@@ -171,8 +171,8 @@ export type LogicFilter<T extends Record<string, any>> = {
  * | Filter | Result | Reason |
  * |--------|--------|--------|
  * | `{}` | matches all | No conditions to fail |
- * | `{ OR: [] }` | matches nothing | No conditions to succeed (`some` on empty = false) |
- * | `{ AND: [] }` | matches all | No conditions to fail (`every` on empty = true) |
+ * | `{ $or: [] }` | matches nothing | No conditions to succeed (`some` on empty = false) |
+ * | `{ $and: [] }` | matches all | No conditions to fail (`every` on empty = true) |
  * | `{ 'x': undefined }` | `false` | Undefined filter value never matches |
  *
  * ---
@@ -186,9 +186,9 @@ export type LogicFilter<T extends Record<string, any>> = {
  * const filterByNestedChildName = { 'person.child.name': 'Alice' };
  *
  * @example
- * // Logic operator (OR)
+ * // Logic operator ($or)
  * const logicalFilter = {
- *   OR: [
+ *   $or: [
  *     { isPriority: true },
  *     { status: 'completed' }
  *   ]
@@ -196,11 +196,11 @@ export type LogicFilter<T extends Record<string, any>> = {
  *
  * @example
  * // Range comparison
- * const numericFilter = { 'person.age': { gt: 30 } };
+ * const numericFilter = { 'person.age': { $gt: 30 } };
  *
  * @example
  * // Substring match
- * const containsFilter = { 'person.name': { contains: 'And' } };
+ * const containsFilter = { 'person.name': { $contains: 'And' } };
  *
  * @example
  * // $elemMatch on an array of objects

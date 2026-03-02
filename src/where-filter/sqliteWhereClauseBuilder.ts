@@ -113,7 +113,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                 if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
                 if (isArrayValueComparisonElemMatch(filter)) {
                     // Check for scalar value comparisons first to avoid the ambiguity
-                    // where operator objects like {gt: 5} pass isWhereFilterDefinition.
+                    // where operator objects like {$gt: 5} pass isWhereFilterDefinition.
                     const elemVal = filter.$elemMatch;
                     if (isValueComparisonScalar(elemVal) || isValueComparisonContains(elemVal) || isValueComparisonRange(elemVal)) {
                         // Scalar value comparison
@@ -171,7 +171,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
 
     /**
      * Emits a leaf-level SQL comparison for a single value.
-     * contains → LIKE, range → >/</>=/<= , scalar → =, object/array → json()=json(?), undefined → IS NULL.
+     * $contains → LIKE, range → >/</>=/<= , scalar → =, object/array → json()=json(?), undefined → IS NULL.
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
     protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean): string {
@@ -187,7 +187,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
         if (isValueComparisonContains(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
 
-            const placeholder = this.generatePlaceholder(`%${filter.contains}%`, statementArguments);
+            const placeholder = this.generatePlaceholder(`%${filter.$contains}%`, statementArguments);
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder}`);
         } else if (isValueComparisonRange(filter)) {
 
@@ -319,8 +319,8 @@ type ValueComparisonRangeOperatorSqlTyped = {
     [K in typeof ValueComparisonRangeOperators[number]]: (sqlKey: string, parameterizedQueryPlaceholder: string) => string;
 };
 const ValueComparisonRangeOperatorsSqlFunctions: ValueComparisonRangeOperatorSqlTyped = {
-    'gt': (sqlKey, placeholder) => `${sqlKey} > ${placeholder}`,
-    'lt': (sqlKey, placeholder) => `${sqlKey} < ${placeholder}`,
-    'gte': (sqlKey, placeholder) => `${sqlKey} >= ${placeholder}`,
-    'lte': (sqlKey, placeholder) => `${sqlKey} <= ${placeholder}`,
+    '$gt': (sqlKey, placeholder) => `${sqlKey} > ${placeholder}`,
+    '$lt': (sqlKey, placeholder) => `${sqlKey} < ${placeholder}`,
+    '$gte': (sqlKey, placeholder) => `${sqlKey} >= ${placeholder}`,
+    '$lte': (sqlKey, placeholder) => `${sqlKey} <= ${placeholder}`,
 }

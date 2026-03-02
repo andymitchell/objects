@@ -139,7 +139,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                 if( !sa ) throw new Error("Could not locate array in path: "+dotpropPath);
                 if( isArrayValueComparisonElemMatch(filter) ) {
                     // Check for scalar value comparisons first to avoid the ambiguity
-                    // where operator objects like {gt: 5} pass isWhereFilterDefinition.
+                    // where operator objects like {$gt: 5} pass isWhereFilterDefinition.
                     const elemVal = filter.$elemMatch;
                     if( isValueComparisonScalar(elemVal) || isValueComparisonContains(elemVal) || isValueComparisonRange(elemVal) ) {
                         // Scalar value comparison — output_identifier extracts text via #>> '{}',
@@ -216,7 +216,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
     }
 
     /**
-     * Emits a leaf-level SQL comparison for a single value (contains → LIKE, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
+     * Emits a leaf-level SQL comparison for a single value ($contains → LIKE, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
     protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
@@ -232,12 +232,12 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         if( isValueComparisonContains(filter) ) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
 
-            const placeholder = this.generatePlaceholder(`%${filter.contains}%`, statementArguments);
+            const placeholder = this.generatePlaceholder(`%${filter.$contains}%`, statementArguments);
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder}`); // TODO Like ValueComparisonRangeOperatorsSqlFunctions, this should be a dialect pack 
         } else if( isValueComparisonRange(filter) ) {            
 
             // Range comparison can be string or filter, so we need to determinate what we're dealing with to set the SQL straight. 
-            // E.g. if the filter is {gt: 'A'}, this will be 'string'. If the filter is {gt: 1}, this will be 'number'.
+            // E.g. if the filter is {$gt: 'A'}, this will be 'string'. If the filter is {$gt: 1}, this will be 'number'.
             const firstFilterValueType = typeof (Object.values(filter)[0]);
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType==='string'? 'ZodString' :'ZodNumber']);
 
@@ -363,8 +363,8 @@ type ValueComparisonRangeNumericOperatorSqlTyped = {
     [K in typeof ValueComparisonRangeOperators[number]]: (sqlKey:string, parameterizedQueryPlaceholder:string) => string; 
 };
 const ValueComparisonRangeOperatorsSqlFunctions:ValueComparisonRangeNumericOperatorSqlTyped = {
-    'gt': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} > ${parameterizedQueryPlaceholder}`,
-    'lt': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} < ${parameterizedQueryPlaceholder}`,
-    'gte': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} >= ${parameterizedQueryPlaceholder}`,
-    'lte': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} <= ${parameterizedQueryPlaceholder}`,
+    '$gt': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} > ${parameterizedQueryPlaceholder}`,
+    '$lt': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} < ${parameterizedQueryPlaceholder}`,
+    '$gte': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} >= ${parameterizedQueryPlaceholder}`,
+    '$lte': (sqlKey, parameterizedQueryPlaceholder) => `${sqlKey} <= ${parameterizedQueryPlaceholder}`,
 }

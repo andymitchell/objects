@@ -18,7 +18,7 @@ export function getValidFilterType(filter:WhereFilterDefinition<any>, debugPath?
             return 'logic';
         } else {
             if( Object.keys(filter).length!==1 ) {
-                throw new Error("A WhereFilter must have a single key, or be a recursive with OR/AND/NOT arrays. Path: "+safeJson(debugPath || [filter]));
+                throw new Error("A WhereFilter must have a single key, or be a recursive with $or/$and/$nor arrays. Path: "+safeJson(debugPath || [filter]));
             }
             return 'value';
         }
@@ -41,7 +41,7 @@ export function isValueComparisonRangeFlexi(x: unknown, alreadyProvedIsPlainObje
 }
 export function isValueComparisonFlexi(x:unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonFlexi {
     
-    // TODO Support 'contains' for full accuracy
+    // TODO Support '$contains' for full accuracy
     return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
 }
 export function isValueComparisonScalar(x:unknown): x is string | number | boolean {

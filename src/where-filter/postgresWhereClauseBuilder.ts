@@ -138,21 +138,35 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                 sa = spreadJsonbArrays(this.sqlColumnName, path);
                 if( !sa ) throw new Error("Could not locate array in path: "+dotpropPath);
                 if( isArrayValueComparisonElemMatch(filter) ) {
-                    if( isWhereFilterDefinition(filter.elem_match) ) {
-                        // Recurse
-                        const subPropertyMap = new PropertyMapSchema(treeNode.schema!, sa.output_column, true);
-                        const result = whereClauseBuilder(filter.elem_match, statementArguments, subPropertyMap);
-                        //return result;
-                        subClause = result;
-
-                        //throw new Error("Not figured out. Presume need to pass the identifier to override this.sqlColumnName, but what about dotPropPath scoping?");
-                    } else {
-                        const testArrayContainsString = typeof filter.elem_match==='string';
+                    // Check for scalar value comparisons first to avoid the ambiguity
+                    // where operator objects like {gt: 5} pass isWhereFilterDefinition.
+                    const elemVal = filter.$elemMatch;
+                    if( isValueComparisonScalar(elemVal) || isValueComparisonContains(elemVal) || isValueComparisonRange(elemVal) ) {
+                        // Scalar value comparison — output_identifier extracts text via #>> '{}',
+                        // but numeric comparisons need an explicit ::numeric cast.
+                        const testArrayContainsString = typeof elemVal==='string';
+                        // generateComparison accepts WhereFilterDefinition<T> but handles all value
+                        // types at runtime (scalar, contains, range). Cast needed here.
                         if( testArrayContainsString ) {
-                            return this.generateComparison(dotpropPath, filter.elem_match, statementArguments, undefined, testArrayContainsString);
+                            return this.generateComparison(dotpropPath, elemVal as WhereFilterDefinition<T>, statementArguments, undefined, testArrayContainsString);
                         } else {
-                            subClause = this.generateComparison(dotpropPath, filter.elem_match, statementArguments, sa.output_column);
+                            // Determine if numeric cast is needed for range operators
+                            let customId = sa.output_identifier;
+                            if( isValueComparisonRange(elemVal) ) {
+                                const firstVal = Object.values(elemVal)[0];
+                                if( typeof firstVal === 'number' ) {
+                                    customId = `(${sa.output_identifier})::numeric`;
+                                }
+                            } else if( typeof elemVal === 'number' ) {
+                                customId = `(${sa.output_identifier})::numeric`;
+                            }
+                            subClause = this.generateComparison(dotpropPath, elemVal as WhereFilterDefinition<T>, statementArguments, customId);
                         }
+                    } else if( isWhereFilterDefinition(elemVal) ) {
+                        // Object array: recurse with sub-PropertyMap
+                        const subPropertyMap = new PropertyMapSchema(treeNode.schema!, sa.output_column, true);
+                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap);
+                        subClause = result;
                     }
                 } else {
                     // Compound filter: break it apart and each one must match something

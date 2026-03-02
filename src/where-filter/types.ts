@@ -19,7 +19,7 @@ export type ValueComparisonString = ValueComparisonRangeString | ValueComparison
 export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never);
 export type ValueComparisonRangeFlexi<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never) | T;
 export type ValueComparisonFlexi<T = any> = (T extends string? ValueComparisonString : T extends number? ValueComparisonRangeNumeric : never) | T;
-export type ArrayValueComparisonElemMatch<T = any>  = {elem_match: T extends Record<string, any>? WhereFilterDefinition<T> : ValueComparisonFlexi<T>};
+export type ArrayValueComparisonElemMatch<T = any>  = {$elemMatch: T extends Record<string, any>? WhereFilterDefinition<T> : ValueComparisonFlexi<T>};
 export type ArrayValueComparison<T = any> = ArrayValueComparisonElemMatch<T>;
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
@@ -132,7 +132,7 @@ export type LogicFilter<T extends Record<string, any>> = {
  * // → true: 'London' found in element 0, 'US' found in element 1
  * ```
  *
- * ### Logic filter on array elements (atomic per element, like `elem_match`)
+ * ### Logic filter on array elements (atomic per element, like `$elemMatch`)
  * When using AND/OR/NOT inside an array filter, each element is tested atomically
  * against the full logic filter. The criteria must be satisfied within a single element.
  * ```ts
@@ -141,15 +141,15 @@ export type LogicFilter<T extends Record<string, any>> = {
  * // → false: no single element has both city=London and country=US
  * ```
  *
- * ### `elem_match` (explicit single-element matching)
+ * ### `$elemMatch` (explicit single-element matching)
  * Requires that **one** array element satisfies all criteria.
  * ```ts
  * // For object arrays — value is a WhereFilterDefinition applied to each element:
- * { 'contact.locations': { elem_match: { city: 'London', country: 'UK' } } }
+ * { 'contact.locations': { $elemMatch: { city: 'London', country: 'UK' } } }
  *
  * // For scalar arrays — value is a scalar or value comparison:
- * { 'contact.locations': { elem_match: 2 } }
- * { 'contact.locations': { elem_match: { contains: 'Lon' } } }
+ * { 'contact.locations': { $elemMatch: 2 } }
+ * { 'contact.locations': { $elemMatch: { contains: 'Lon' } } }
  * ```
  *
  * ---
@@ -203,10 +203,10 @@ export type LogicFilter<T extends Record<string, any>> = {
  * const containsFilter = { 'person.name': { contains: 'And' } };
  *
  * @example
- * // elem_match on an array of objects
+ * // $elemMatch on an array of objects
  * const elemMatchFilter = {
  *   'contact.locations': {
- *     elem_match: { city: 'London', country: 'UK' }
+ *     $elemMatch: { city: 'London', country: 'UK' }
  *   }
  * };
  *

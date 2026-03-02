@@ -158,7 +158,7 @@ describe('TODO - desirable features', () => {
 
         type Obj = {name: string};
         const b: WhereFilterDefinition<Obj[]> = {
-            // It finds no dot prop: but I'd expect a top level elem_match on it 
+            // It finds no dot prop: but I'd expect a top level $elemMatch on it 
         }
 
     })
@@ -166,7 +166,7 @@ describe('TODO - desirable features', () => {
     it('handles an object or array union', () => {
         type Obj = {name: string};
         const b: WhereFilterDefinition<{objects: Obj | Obj[]}> = {
-            // Finds no dot-prop, but I'd expect it offer both object or elem_match for array. And to handle both. 
+            // Finds no dot-prop, but I'd expect it offer both object or $elemMatch for array. And to handle both. 
         }
     })
 

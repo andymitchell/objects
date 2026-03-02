@@ -17,13 +17,13 @@ import { safeJson } from "./safeJson.ts";
 e.g. {name: 'Bob', age: 1}, it implicitly infers its an AND across the criteria. 
 
 ## It gets a little hard to think about around arrays. 
-Use elem_match on an array search to define the characteristics that must be found under one element. Otherwise, it does a compound search that accepts multiple elements fulfilling the criteria. 
-E.g. for an array 'children' [{name: 'Bob', age: 20}, name: 'Alice', age: 1], and filter {'children': {name: 'Bob', age: 1}}, it would pass. 
-But if you used {'children': {elem_match: {name: 'Bob', age: 1}}}, then it would fail. 
+Use $elemMatch on an array search to define the characteristics that must be found under one element. Otherwise, it does a compound search that accepts multiple elements fulfilling the criteria.
+E.g. for an array 'children' [{name: 'Bob', age: 20}, name: 'Alice', age: 1], and filter {'children': {name: 'Bob', age: 1}}, it would pass.
+But if you used {'children': {$elemMatch: {name: 'Bob', age: 1}}}, then it would fail.
 
-This is counter-intuitive partly because the normal behaviour for multiple criteria is to use AND, except in compound filters. 
+This is counter-intuitive partly because the normal behaviour for multiple criteria is to use AND, except in compound filters.
 
-If you use AND/OR/NOT in your compound filters, they behave atomically on each element, equivelent to elem_match. 
+If you use AND/OR/NOT in your compound filters, they behave atomically on each element, equivelent to $elemMatch. 
 
 ## Spreading arrays will use a generous OR 
 E.g. suppose you have {children: {grandchildren: {name: string}[]}[]}. I.e. arrays as elements of parent arrays. 
@@ -212,13 +212,19 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
         // Two arrays = straight comparison
         return deepEql(value, filterValue);
     } else if( isArrayValueComparisonElemMatch(filterValue) ) {
-        // In an elem_match, one item in the 'value' array must match all the criteria
-        if( isWhereFilterDefinition(filterValue.elem_match) ) {
-            return value.some(x => _matchJavascriptObject(x, filterValue.elem_match, [...debugPath, filterValue.elem_match]))
-        } else {
-            // It's a value comparison
-            return value.some(x => compareValue(x, filterValue.elem_match))
-        }
+        // In a $elemMatch, one item in the 'value' array must match all the criteria.
+        // Use element-type-based branching: the runtime type of each array element
+        // determines the code path, not the filter shape. This fixes the ambiguity
+        // where operator objects like {gt: 5} would incorrectly pass isWhereFilterDefinition.
+        return value.some(element => {
+            if( isPlainObject(element) ) {
+                // Object element: apply as WhereFilterDefinition
+                return _matchJavascriptObject(element, filterValue.$elemMatch, [...debugPath, filterValue.$elemMatch]);
+            } else {
+                // Scalar element: apply as value comparison
+                return compareValue(element, filterValue.$elemMatch);
+            }
+        });
     } else {
         // it's a compound. every filter item must be satisfied by at least one element of the array 
         if( isPlainObject(filterValue) ) {

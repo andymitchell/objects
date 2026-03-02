@@ -1012,7 +1012,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter explicit AND behaves like elem_match: passes', async () => {
+    test('array element compound filter explicit AND behaves like $elemMatch: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1041,7 +1041,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element compound filter explict AND behaves like elem_match: fails', async () => {
+    test('array element compound filter explict AND behaves like $elemMatch: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1211,7 +1211,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element elem_match (must be all in one element) city+country: passes', async () => {
+    test('array element $elemMatch (must be all in one element) city+country: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1221,7 +1221,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: {
+                    $elemMatch: {
                         AND: [
                             { city: 'London' },
                             { country: 'UK' }
@@ -1239,7 +1239,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element elem_match (must be all in one element) city+country: fails', async () => {
+    test('array element $elemMatch (must be all in one element) city+country: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1249,7 +1249,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: {
+                    $elemMatch: {
                         AND: [
                             { city: 'London' },
                             { country: 'US' }
@@ -1265,7 +1265,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element elem_match (must be all in one element) city+country infer AND: passes', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer AND: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1275,7 +1275,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: {
+                    $elemMatch: {
                         city: 'London',
                         country: 'UK'
                     }
@@ -1287,7 +1287,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(true);
     });
 
-    test('array element elem_match (must be all in one element) city+country infer AND: fails', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer AND: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1297,7 +1297,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: {
+                    $elemMatch: {
                         city: 'London',
                         country: 'US'
                     }
@@ -1311,7 +1311,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element elem_match (must be all in one element) city+country infer AND and contains: passes', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer AND and contains: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1321,7 +1321,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: {
+                    $elemMatch: {
                         city: { contains: 'Lon' },
                         country: 'UK'
                     }
@@ -1336,7 +1336,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element elem_match (must be all in one element) city+country infer AND and contains: fails', async () => {
+    test('array element $elemMatch (must be all in one element) city+country infer AND and contains: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1346,7 +1346,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: {
+                    $elemMatch: {
                         city: { contains: 'NY' },
                         country: 'UK'
                     }
@@ -1361,7 +1361,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
 
 
-    test('array element elem_match (must be all in one element) number: passes', async () => {
+    test('array element $elemMatch (must be all in one element) number: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1371,7 +1371,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: 2
+                    $elemMatch: 2
                 }
             },
             ContactSchema
@@ -1380,7 +1380,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(true);
     });
 
-    test('array element elem_match (must be all in one element) number: fails', async () => {
+    test('array element $elemMatch (must be all in one element) number: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1390,7 +1390,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: 5
+                    $elemMatch: 5
                 }
             },
             ContactSchema
@@ -1400,7 +1400,7 @@ export function standardTests(testConfig: StandardTestConfig) {
     });
 
 
-    test('array element elem_match (must be all in one element) string: passes', async () => {
+    test('array element $elemMatch (must be all in one element) string: passes', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1410,7 +1410,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: 'NYC'
+                    $elemMatch: 'NYC'
                 }
             },
             ContactSchema
@@ -1419,7 +1419,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(true);
     });
 
-    test('array element elem_match (must be all in one element) string: fails', async () => {
+    test('array element $elemMatch (must be all in one element) string: fails', async () => {
         const result = await matchJavascriptObject(
             {
                 contact: {
@@ -1429,14 +1429,215 @@ export function standardTests(testConfig: StandardTestConfig) {
             },
             {
                 'contact.locations': {
-                    elem_match: 'Paris'
+                    $elemMatch: 'Paris'
                 }
             },
             ContactSchema
         );
-        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported
         expect(result).toBe(false);
     });
+
+
+    // --- $elemMatch element-type branching tests ---
+    // These verify the element-type-based branching fix: the runtime type of each
+    // array element determines the code path (object → _matchJavascriptObject,
+    // scalar → compareValue), not the filter shape.
+
+    describe('$elemMatch element-type branching', () => {
+
+        // 4a. Scalar arrays — operator expressions (previously broken, now fixed)
+
+        test('scalar array + range operators (gte+lt): passes when element in range', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [75, 82, 90] } },
+                { 'contact.locations': { $elemMatch: { gte: 80, lt: 85 } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('scalar array + range operators (gte+lt): fails when no element in range', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [75, 90] } },
+                { 'contact.locations': { $elemMatch: { gte: 80, lt: 85 } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('scalar array + single range operator (gt): passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [1, 3, 10] } },
+                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('scalar array + single range operator (gt): fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [1, 3, 4] } },
+                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('scalar array + contains operator: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $elemMatch: { contains: 'Lon' } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('scalar array + contains operator: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['Paris', 'NYC'] } },
+                { 'contact.locations': { $elemMatch: { contains: 'Lon' } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        // 4b. Scalar arrays — plain scalar (non-MongoDB extension)
+
+        test('scalar array + plain number: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [1, 2, 3] } },
+                { 'contact.locations': { $elemMatch: 2 } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('scalar array + plain number: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [1, 3, 5] } },
+                { 'contact.locations': { $elemMatch: 2 } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('scalar array + plain string: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $elemMatch: 'NYC' } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('scalar array + plain string: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'Paris'] } },
+                { 'contact.locations': { $elemMatch: 'NYC' } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        // 4c. Object arrays — WhereFilterDefinition (existing behaviour, verify still works)
+
+        test('object array + field filter: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                { 'contact.locations': { $elemMatch: { city: 'London', country: 'UK' } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('object array + field filter: fails (no single element matches both)', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                { 'contact.locations': { $elemMatch: { city: 'London', country: 'US' } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('object array + field filter with contains: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                { 'contact.locations': { $elemMatch: { city: { contains: 'Lon' } } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        // 4d. Object arrays — nested operator expressions
+
+        test('object array + nested range operator: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                { 'contact.locations': { $elemMatch: { city: { contains: 'Lon' }, country: 'UK' } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('object array + nested range operator: fails (no single element matches both)', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                { 'contact.locations': { $elemMatch: { city: { contains: 'NY' }, country: 'UK' } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        // 4e. Edge cases
+
+        test('empty array: always fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [] } },
+                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('single-element array: passes when element matches', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [10] } },
+                { 'contact.locations': { $elemMatch: { gt: 5 } } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('mixed array (objects + scalars) with scalar match: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [{ city: 'London' }, 'hello', 42] } },
+                { 'contact.locations': { $elemMatch: 'hello' } },
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+    });
+
 
     test('array nesting: passes', async () => {
         const result = await matchJavascriptObject(

@@ -43,14 +43,14 @@ export default function combineWriteActionsWhereFilters<T extends Record<string,
             const existingKeyValue:WhereFilterDefinition<T> = {
                 [key]: pkValue
             }
-            return scope? {[scope]: {elem_match: existingKeyValue}} : existingKeyValue;
+            return scope? {[scope]: {$elemMatch: existingKeyValue}} : existingKeyValue;
         } else if( x.payload.type==='array_scope' ) {
             const scoped = getArrayScopeSchemaAndDDL<T>(x, schema, ddl);
             const subResult = combineWriteActionsWhereFilters(scoped.schema, scoped.ddl, [scoped.writeAction], includeDelete, (scope? scope+'.' : '')+x.payload.scope);
             if( subResult.status!=='ok' ) return subResult;
             return {AND: [x.payload.where, subResult.filter]};
         } else if( x.payload.type==='update' || (x.payload.type==='delete') && includeDelete) {
-            return scope? {[scope]: {elem_match: x.payload.where}} : x.payload.where;
+            return scope? {[scope]: {$elemMatch: x.payload.where}} : x.payload.where;
         }
     }).filter((x):x is WhereFilterDefinition<T> => !!x);
     if( errorResponse ) return errorResponse;

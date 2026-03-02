@@ -112,19 +112,25 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                 sa = spreadJsonArraysSqlite(this.sqlColumnName, path);
                 if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
                 if (isArrayValueComparisonElemMatch(filter)) {
-                    if (isWhereFilterDefinition(filter.elem_match)) {
-                        // Recurse with sub-PropertyMap scoped to array element schema
-                        const subPropertyMap = new SqlitePropertyMapSchema(treeNode.schema!, sa.output_column, true);
-                        const result = whereClauseBuilder(filter.elem_match, statementArguments, subPropertyMap);
-                        subClause = result;
-                    } else {
-                        const testArrayContainsString = typeof filter.elem_match === 'string';
+                    // Check for scalar value comparisons first to avoid the ambiguity
+                    // where operator objects like {gt: 5} pass isWhereFilterDefinition.
+                    const elemVal = filter.$elemMatch;
+                    if (isValueComparisonScalar(elemVal) || isValueComparisonContains(elemVal) || isValueComparisonRange(elemVal)) {
+                        // Scalar value comparison
+                        const testArrayContainsString = typeof elemVal === 'string';
+                        // generateComparison accepts WhereFilterDefinition<T> but handles all value
+                        // types at runtime (scalar, contains, range). Cast needed here.
                         if (testArrayContainsString) {
                             // For scalar string containment: EXISTS (SELECT 1 FROM json_each(...) WHERE value = ?)
-                            return this.generateComparison(dotpropPath, filter.elem_match, statementArguments, undefined, testArrayContainsString);
+                            return this.generateComparison(dotpropPath, elemVal as WhereFilterDefinition<T>, statementArguments, undefined, testArrayContainsString);
                         } else {
-                            subClause = this.generateComparison(dotpropPath, filter.elem_match, statementArguments, sa.output_column);
+                            subClause = this.generateComparison(dotpropPath, elemVal as WhereFilterDefinition<T>, statementArguments, sa.output_column);
                         }
+                    } else if (isWhereFilterDefinition(elemVal)) {
+                        // Object array: recurse with sub-PropertyMap scoped to array element schema
+                        const subPropertyMap = new SqlitePropertyMapSchema(treeNode.schema!, sa.output_column, true);
+                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap);
+                        subClause = result;
                     }
                 } else {
                     // Compound filter: break it apart and each one must match something

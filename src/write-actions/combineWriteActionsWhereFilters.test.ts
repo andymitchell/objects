@@ -199,7 +199,7 @@ describe('combineWriteActionsWhereFilters', () => {
                 },
                 {
                     children: {
-                        elem_match: {
+                        $elemMatch: {
                             'cid': 'c1'
                         }
                     }
@@ -246,7 +246,7 @@ describe('combineWriteActionsWhereFilters', () => {
                         },
                         {
                             "children": {
-                                "elem_match": {
+                                "$elemMatch": {
                                     "cid": "c1"
                                 }
                             }
@@ -260,7 +260,7 @@ describe('combineWriteActionsWhereFilters', () => {
                         },
                         {
                             "children": {
-                                "elem_match": {
+                                "$elemMatch": {
                                     "cid": "c2"
                                 }
                             }

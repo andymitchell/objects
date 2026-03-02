@@ -41,7 +41,7 @@ const ValueComparisonSchema = z.union([
 ]);
 
 const ArrayValueComparisonElemMatchSchema = z.object({
-    elem_match: z.union([ValueComparisonSchema, WhereFilterSchema]),
+    $elemMatch: z.union([ValueComparisonSchema, WhereFilterSchema]),
 });
 const ArrayValueComparisonSchema = ArrayValueComparisonElemMatchSchema;
 

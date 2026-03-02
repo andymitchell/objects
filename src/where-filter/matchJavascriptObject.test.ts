@@ -16,7 +16,8 @@ describe('testMatchJavascriptObject', () => {
     standardTests({
         test,
         expect,
-        matchJavascriptObject
+        matchJavascriptObject,
+        implementationName: 'javascript'
     })
 
 

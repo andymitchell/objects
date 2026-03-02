@@ -265,6 +265,9 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
         if( isValueComparisonScalar(filterValue) ) {
             return value===filterValue;
         }
+        if( filterValue === null ) {
+            return value === null || value === undefined;
+        }
     }
     return false;
 }
@@ -280,8 +283,8 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
         // $nin on array: no element may be in the list
         return !filterValue.$nin.some(v => value.includes(v));
     } else if (isArrayValueComparisonAll(filterValue)) {
-        // $all: array must contain all specified values
-        return filterValue.$all.every(v => value.includes(v));
+        // $all: array must contain all specified values (deep equality for objects)
+        return filterValue.$all.every(v => value.some(el => deepEql(el, v)));
     } else if (isArrayValueComparisonSize(filterValue)) {
         // $size: array must have exactly N elements
         return value.length === filterValue.$size;

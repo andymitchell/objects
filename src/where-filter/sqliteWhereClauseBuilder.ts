@@ -343,6 +343,10 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodArray']);
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             return optionalWrapper(sqlIdentifier, `json(${sqlIdentifier}) = json(${placeholder})`);
+        } else if (filter === null) {
+            // Explicit null filter → match SQL NULL (no optionalWrapper — IS NOT NULL guard would contradict)
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            return `${sqlIdentifier} IS NULL`;
         } else if (filter === undefined) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IS NULL`);

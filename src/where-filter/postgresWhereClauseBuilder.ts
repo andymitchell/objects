@@ -140,11 +140,13 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                 const saResolved = sa;
                 // $in on array: at least one element must be in the list
                 if (isValueComparisonIn(filter)) {
+                    if (filter.$in.length === 0) return '1 = 0';
                     const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
                     return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
                 // $nin on array: no element may be in the list
                 if (isValueComparisonNin(filter)) {
+                    if (filter.$nin.length === 0) return '1 = 1';
                     const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
                     return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
@@ -289,12 +291,14 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         }
         // $in
         if (isValueComparisonIn(filter)) {
+            if (filter.$in.length === 0) return '1 = 0';
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
             const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IN (${placeholders.join(', ')})`);
         }
         // $nin
         if (isValueComparisonNin(filter)) {
+            if (filter.$nin.length === 0) return '1 = 1';
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
             const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
             return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} NOT IN (${placeholders.join(', ')})`);
@@ -373,6 +377,10 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             //debugger;
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
+        } else if( filter === null ) {
+            // Explicit null filter → match SQL NULL (no optionalWrapper — IS NOT NULL guard would contradict)
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            return `${sqlIdentifier} IS NULL`;
         } else if( filter===undefined ) {
             // Want it to return nothing (same as matchJavascriptObject), so treat it as a null
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);

@@ -143,6 +143,8 @@ _To be filled in_
 - Detailed error reporting (`WriteCommonError` with schema issues, affected items, blocked-by chains). SQL gives success/failure per statement, not per-item granularity.
 - Pre-triggers (JS callbacks).
 
+**WHERE filter compatibility**: The where-filter system already uses error-as-value (`PreparedWhereClauseResult`) to signal when a dialect can't handle an operator (e.g. `$regex` on SQLite). Write-action SQL generation reuses `buildWhereClause` for update/delete WHERE conditions, so unsupported operators are caught at SQL-generation time — not at execution time. The write-action system propagates these errors as `{ success: false, errors: [{ whereClauseErrors }] }`, giving callers a typed signal to fall back to the JS path. This is a strength: the existing where-filter capability-gap infrastructure means write-action SQL generation gets dialect awareness "for free".
+
 **Verdict**: create/update/delete are feasible. Single-level array_scope is feasible but complex. Nested array_scope is at the boundary of practicality. Full behavioural parity with `applyWritesToItems` is **not possible** due to schema validation and custom strategies.
 
 ## Performance gain over 'query to read objects > update in JS context > write back to the DB'
@@ -179,7 +181,7 @@ SQL flow: `Single UPDATE/INSERT/DELETE statement`
 7. **Dialect divergence**: Postgres JSONB and SQLite JSON have different capabilities and gotchas. Maintaining two parallel implementations that behave identically is ongoing work.
 
 **Low risk items:**
-8. WHERE clause is already solved -- high reuse, low maintenance.
+8. WHERE clause is already solved -- high reuse, low maintenance. The error-as-value pattern (`PreparedWhereClauseResult`) means dialect capability gaps are handled gracefully — the write-action system inherits this for free without needing its own operator-support detection logic.
 9. Path conversion utilities already exist -- reusable.
 
 # TDD Testing Plan
@@ -201,27 +203,42 @@ function writeActionToSql<T extends Record<string, any>>(
     tableName: string,
     jsonColumnName: string,
     user?: IUser
-): PreparedWriteStatement[]
+): WriteActionToSqlResult
 ```
 
-Returns an array of `PreparedWriteStatement` objects (one per WriteAction), each containing:
+Returns an error-as-value discriminated union (mirroring `PreparedWhereClauseResult` from where-filter):
 ```ts
+type WriteActionToSqlResult =
+    | { success: true; statements: PreparedWriteStatement[] }
+    | { success: false; errors: WriteActionSqlError[] }
+
 type PreparedWriteStatement = {
     sql: string,
     arguments: PreparedStatementArgument[],
-    /** WriteActions that could not be converted to SQL (e.g. array_scope).
-     *  The caller should fall back to JS-based applyWritesToItems for these. */
-    unsupported?: boolean,
     writeActionUuid: string
 }
+
+/** Describes why a write action could not be compiled to SQL. */
+type WriteActionSqlError = {
+    writeActionUuid: string;
+    message: string;
+    /** When caused by an unsupported WHERE filter operator, includes the dialect errors. */
+    whereClauseErrors?: WhereClauseError[];
+}
 ```
+
+The `success: false` path covers two failure categories:
+1. **Structural rejection** — detected by `canApplyWriteActionsToSql` (e.g. array_scope, custom strategy).
+2. **Dialect capability gap** — detected by `buildWhereClause` when compiling the update/delete WHERE filter (e.g. `$regex` on SQLite). The original `WhereClauseError[]` from the where-filter system is included in `whereClauseErrors` for full context.
 
 ### Dialect engine (shared logic)
 
 Similar to `whereClauseEngine.ts`, create a `writeClauseEngine.ts` that contains the dialect-agnostic recursive logic:
 - Iterates WriteActions
 - Dispatches to dialect-specific SQL generators per payload type
+- For update/delete: calls `buildWhereClause` with the dialect's `IPropertyMap` to compile the WHERE filter. If `buildWhereClause` returns `{ success: false }`, the engine collects the errors and returns `{ success: false }` at the top level — **no partial SQL is generated**.
 - Handles permission checks as additional WHERE conditions
+- Accumulates errors in a shared `WriteActionSqlError[]` array (same pattern as `WhereClauseError[]` accumulation in `whereClauseBuilder`)
 
 Dialect-specific implementations provide an `IWritePropertyMap` interface:
 ```ts
@@ -232,18 +249,20 @@ interface IWritePropertyMap<T extends Record<string, any>> {
     generateInsert(data: T, statementArguments: PreparedStatementArgument[]): string;
     /** Generate a DELETE statement */
     generateDelete(whereClause: string): string;
-    /** Generate array_scope SQL (or return undefined if unsupported) */
-    generateArrayScope?(scope: string, action: WriteActionPayload, whereClause: string, statementArguments: PreparedStatementArgument[]): string | undefined;
+    /** The IPropertyMap for WHERE clause generation (passed to buildWhereClause) */
+    getWherePropertyMap(): IPropertyMap<T>;
 }
 ```
+
+Note: `generateArrayScope` is removed — array_scope is rejected upfront by `canApplyWriteActionsToSql`.
 
 ### File structure
 
 ```
 src/write-actions/
   writeActionToSql/
-    writeClauseEngine.ts          # Shared logic: iterate actions, dispatch, permissions
-    types.ts                      # PreparedWriteStatement, IWritePropertyMap
+    writeClauseEngine.ts          # Shared logic: iterate actions, dispatch, permissions, error accumulation
+    types.ts                      # PreparedWriteStatement, WriteActionToSqlResult, WriteActionSqlError, IWritePropertyMap
     postgresWriteBuilder.ts       # Pg-specific: jsonb_set chains, INSERT, DELETE
     sqliteWriteBuilder.ts         # Sqlite-specific: json_set chains, INSERT, DELETE
     flattenDataToLeafPaths.ts     # Utility: flatten {a: {b: 1}} to [['a','b', 1]]
@@ -263,6 +282,7 @@ src/write-actions/
 
 #### update (assign)
 - Flatten `data` to top-level keys only
+- Compile `where` via `buildWhereClause` with dialect's `IPropertyMap`. If result is `{ success: false }`, propagate `WhereClauseError[]` into a `WriteActionSqlError` and abort.
 - **Pg**: `UPDATE {table} SET {jsonCol} = jsonb_set(jsonb_set({jsonCol}, '{key1}', $1::jsonb), '{key2}', $2::jsonb) WHERE ...`
 - For key deletion: chain `{jsonCol} #- '{key}'`
 - **Sqlite**: `UPDATE {table} SET {jsonCol} = json_set({jsonCol}, '$.key1', ?, '$.key2', ?) WHERE ...`
@@ -270,19 +290,19 @@ src/write-actions/
 
 #### update (merge)
 - Flatten `data` recursively to dot-prop leaf paths via `flattenDataToLeafPaths`
+- Compile `where` via `buildWhereClause` (same error-as-value handling as assign)
 - Same as assign but paths are deep: `'{contact,name}'` (pg) / `'$.contact.name'` (sqlite)
 - Validate each path against TreeNodeMap (reuse existing infrastructure)
 - Arrays in data are set wholesale (a leaf path to an array sets the whole array, matching `mergeWith` behaviour)
 
 #### delete
+- Compile `where` via `buildWhereClause` with dialect's `IPropertyMap`. If result is `{ success: false }`, propagate errors and abort.
 - **Pg**: `DELETE FROM {table} WHERE ...`
 - **Sqlite**: `DELETE FROM {table} WHERE ...`
 - Reuse existing WHERE clause builders directly
 
-#### array_scope (deferred / fallback)
-- Return `{ unsupported: true }` initially
-- Caller falls back to the existing JS path for these actions
-- Can be implemented later if demand justifies the complexity
+#### array_scope
+- Rejected upfront by `canApplyWriteActionsToSql`. Never reaches SQL generation.
 
 ### Permission handling
 - For `basic_ownership_property` with `property_type: 'id'`: add `AND {jsonCol}->>'ownerPath' = $userIdParam` to the WHERE clause
@@ -357,28 +377,57 @@ Rewrite the implementation plan.
 
 Keep most of it, but amend with the following decisions:
 
-### `canApplyWriteActionsToSql` — gate function
+### `canApplyWriteActionsToSql` — gate function (structural check only)
 * Standalone function that accepts a set of write actions and validates they fit the 'lite' version (create/update/delete only, LWW strategy only, supported permission types only).
 * If they include any unsupported feature (array_scope, custom write strategies, pre-triggers, `attempt_recover_duplicate_create: 'if-identical'`, unsupported permission types), the entire batch is rejected.
 * There is NO hybrid/partial execution — either all actions pass or none run as SQL.
 * Returns an overall success/fail, plus specifies which write actions failed with a reason (reusable `FailedWriteAction` type).
 * Enforced at BOTH the type level (a `WriteActionPayloadLite<T>` type that excludes `array_scope`) AND runtime (`canApplyWriteActionsToSql` checks at runtime). The type provides compile-time safety for callers who know they're on the SQL path; the runtime check is the definitive guard gate since `writeActionToSql` accepts the full `WriteAction<T>` union.
+* **Important**: This is a _structural_ check only — it validates write action shape/features but does NOT validate whether the WHERE filters within update/delete actions are compatible with the target SQL dialect. Dialect-specific filter support (e.g. `$regex` unsupported on SQLite) is discovered during SQL generation in `writeActionToSql`, following the same error-as-value pattern used by `buildWhereClause` in the where-filter system.
 
-### `writeActionToSql` — SQL generator
-* Begins by running `canApplyWriteActionsToSql`; halts and returns the same failure type if validation fails.
-* Generates `PreparedWriteStatement[]` — no `unsupported` field on statements (since all-or-nothing validation already passed).
+### `writeActionToSql` — SQL generator (error-as-value)
+* Begins by running `canApplyWriteActionsToSql`; halts and returns a failure result if structural validation fails.
+* For update/delete actions, calls `buildWhereClause` (from the where-filter system) to compile the `where: WhereFilterDefinition` into SQL. If `buildWhereClause` returns `{ success: false }` (e.g. because the filter uses `$regex` on SQLite, or any other dialect-unsupported operator), the entire batch fails — consistent with the all-or-nothing approach.
+* Returns a **discriminated union result type**, mirroring the `PreparedWhereClauseResult` pattern from where-filter:
+  ```ts
+  type WriteActionToSqlResult =
+      | { success: true; statements: PreparedWriteStatement[] }
+      | { success: false; errors: WriteActionSqlError[] }
+
+  type WriteActionSqlError = {
+      writeActionUuid: string;
+      message: string;
+      /** When the failure is caused by an unsupported WHERE filter, includes the original WhereClauseError(s). */
+      whereClauseErrors?: WhereClauseError[];
+  }
+  ```
+* No `unsupported` field on individual statements (since all-or-nothing validation already passed when `success: true`).
+* This means a caller can distinguish three failure scenarios:
+  1. Structural rejection (from `canApplyWriteActionsToSql`): write action uses array_scope, custom strategy, etc.
+  2. Dialect capability gap (from `buildWhereClause`): WHERE filter uses an operator the target SQL dialect doesn't support.
+  3. Execution failure (from `applyWritesToSql`): SQL ran but the DB returned an error.
 
 ### Error identification — use the transaction error directly
 * No separate "re-run to find failures" helper. SQL transactions already report which statement failed. Since statements are executed sequentially within a transaction, the first error halts execution — the failing statement index maps directly to the failing `WriteAction`. Subsequent actions are marked `blocked_by_action_uuid` (same pattern as `applyWritesToItems`).
 
 ### `applyWritesToSql` — db-agnostic execution wrapper
 * Generates SQL via `writeActionToSql`, executes it via a callback (one call per statement within a transaction).
-* On transaction error: identifies the failing WriteAction from the statement index, marks subsequent actions as blocked, returns error response.
+* **Pre-execution failures** (error-as-value, no SQL is sent to DB):
+  - If `writeActionToSql` returns `{ success: false }`, the wrapper returns the error result immediately. This covers both structural rejection (unsupported write action features) and dialect capability gaps (unsupported WHERE filter operators).
+  - The caller receives a typed error result they can inspect without try/catch, and can fall back to the JS `applyWritesToItems` path if desired.
+* **Execution failures** (SQL ran but DB returned error):
+  - Identifies the failing WriteAction from the statement index, marks subsequent actions as `blocked_by_action_uuid`, returns error response.
 * Shares the same response type as `applyWritesToItems`, with these modifications:
   - `referential_comparison_ok` is REMOVED from the response type entirely (from both `applyWritesToItems` and `applyWritesToSql`) — it's a JS runtime concept with no SQL equivalent.
   - `final_items` is OPTIONAL in the response type. `applyWritesToSql` accepts a config param `includeFinalItems?: boolean` (default false). When true, it does a final SELECT to retrieve the affected rows. When false (the common case for performance), `final_items` is omitted. This avoids negating the performance gain of pure SQL.
   - `affected_items` uses RETURNING clause (supported in both Postgres and SQLite 3.35+, which we assume as minimum).
-* Can also return the `canApplyWriteActionsToSql` failure variant if validation fails (before any SQL is generated).
+* The full return type is a three-way discriminated union:
+  ```ts
+  type ApplyWritesToSqlResult<T> =
+      | { status: 'ok'; changes: ...; successful_actions: ... }                     // all SQL executed successfully
+      | { status: 'error'; changes: ...; successful_actions: ...; failed_actions: ... } // SQL execution error
+      | { status: 'unsupported'; errors: WriteActionSqlError[] }                     // pre-execution rejection (structural or dialect gap)
+  ```
 
 ### File structure
 * New SQL code lives in: `./applyWritesToItems/sql/`
@@ -415,9 +464,23 @@ The goal is to match the **spirit of the spec**, not to enumerate every permutat
    - **Lite Write Actions** (create/update/delete — all implementations must support these)
    - **Full Write Actions** (array_scope, custom strategies, etc. — only `applyWritesToItems` supports these; SQL tests skip this section)
 
+### Handling dialect capability gaps in standardTests
+
+Follow the same pattern as `where-filter/standardTests.ts`: the test adapter function for each SQL dialect should handle `{ status: 'unsupported' }` results by returning `undefined`, which the shared test helper (`expectOrAcknowledgeUnsupported`) treats as "acknowledged, skip this test". This means:
+- A standardTest that uses a WHERE filter with `$regex` will naturally pass for Postgres (which supports it) and be skipped for SQLite (which rejects it at SQL generation time).
+- The test suite never sees a thrown exception for capability gaps — only error-as-value results that the adapter translates to `undefined`.
+- Validation errors (malformed filters) should still be re-thrown as exceptions so error-handling tests work correctly.
+
+This mirrors exactly how `sqliteWhereClauseBuilder.test.ts` distinguishes capability gaps from validation errors when consuming `PreparedWhereClauseResult`.
+
 ## DB specific tests
 
 `applyWritesToSql.pg.test.ts` (and sqlite version) can have its own `dbStandardTests` in addition to `standardTests` for any tests that specifically stress-test a database (vs. vanilla `applyWritesToItems`).
+
+These should include explicit tests for the `{ status: 'unsupported' }` path:
+- Update with `$regex` WHERE filter on SQLite → `{ status: 'unsupported', errors: [{ whereClauseErrors: [...] }] }`
+- Delete with `$regex` WHERE filter on SQLite → same
+- Verify Postgres handles the same filters successfully
 
 ---
 
@@ -437,15 +500,17 @@ Do red/green TDD. Work in this order:
 
 ### Sub-phase 6.2: SQL generation (`writeActionToSql`)
 1. Implement `flattenDataToLeafPaths` utility + tests
-2. Implement `writeClauseEngine.ts` — shared logic: iterate actions, dispatch per payload type, inject permission WHERE conditions
+2. Implement `writeClauseEngine.ts` — shared logic: iterate actions, dispatch per payload type, call `buildWhereClause` for update/delete, inject permission WHERE conditions, accumulate errors
 3. Implement `sqliteWriteBuilder.ts` — json_set/json_remove chains for update, INSERT for create, DELETE for delete
 4. Implement `postgresWriteBuilder.ts` — jsonb_set chains for update, INSERT for create, DELETE for delete
 5. Tests for each builder: verify generated SQL + arguments for each payload type
+6. Tests for WHERE clause error propagation: verify that an update/delete with a dialect-unsupported filter operator (e.g. `$regex` on SQLite) returns `{ success: false }` with `whereClauseErrors` populated
 
 ### Sub-phase 6.3: Execution wrapper (`applyWritesToSql`)
-1. Implement `applyWritesToSql` — calls `canApplyWriteActionsToSql`, generates SQL via `writeActionToSql`, executes via callback, handles transaction errors (maps statement index to WriteAction), supports `includeFinalItems` config
+1. Implement `applyWritesToSql` — calls `writeActionToSql` (which internally runs `canApplyWriteActionsToSql` + `buildWhereClause`). If `writeActionToSql` returns `{ success: false }`, return `{ status: 'unsupported', errors }` immediately (no SQL sent to DB). Otherwise execute via callback, handle transaction errors (maps statement index to WriteAction), support `includeFinalItems` config.
 2. Wire up `RETURNING` for `affected_items`
 3. Integration tests against real SQLite (and Postgres if available)
+4. Tests for the `unsupported` path: verify that a write action with a dialect-incompatible WHERE filter returns `{ status: 'unsupported' }` without touching the database
 
 ### Sub-phase 6.4: Shared standardTests
 1. Run `standardTests` against `applyWritesToItems` — verify existing behaviour matches

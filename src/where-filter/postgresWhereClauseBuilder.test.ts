@@ -35,7 +35,7 @@ describe('postgres where clause builder', () => {
 
             await db.exec(`CREATE TABLE IF NOT EXISTS ${schemaScope('test_table_123')} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
 
-            await db.query(`INSERT INTO ${schemaScope('test_table_123')} (recordColumn) VALUES('${JSON.stringify(object)}'::jsonb)`);
+            await db.query(`INSERT INTO ${schemaScope('test_table_123')} (recordColumn) VALUES($1::jsonb)`, [JSON.stringify(object)]);
 
             let clause:PreparedWhereClauseResult | undefined;
             try {
@@ -149,7 +149,8 @@ describe('postgres where clause builder', () => {
     standardTests({
         test,
         expect,
-        matchJavascriptObject:matchJavascriptObjectInDb
+        matchJavascriptObject:matchJavascriptObjectInDb,
+        implementationName: 'postgres'
     })
     
     

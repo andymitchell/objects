@@ -89,7 +89,7 @@ export function whereClauseBuilder<T extends Record<string, any> = any>(filter: 
                 let subClauseString = '';
                 const subClauses = [...filterType].map(subFilter => whereClauseBuilder(subFilter, statementArguments, propertySqlMap, errors, rootFilter));
                 if (type === '$nor') {
-                    subClauseString = `NOT (${subClauses.join(' OR ')})`;
+                    subClauseString = subClauses.length === 0 ? '1 = 1' : `NOT (${subClauses.join(' OR ')})`;
                 } else if (subClauses.length > 0) {
                     if (typeof subClauses[0] !== 'string') throw new Error("subClauses[0] was empty");
                     const sqlKeyword = type === '$and' ? 'AND' : 'OR';

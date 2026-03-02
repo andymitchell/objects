@@ -62,7 +62,8 @@ describe('sqlite where clause builder', () => {
     standardTests({
         test,
         expect,
-        matchJavascriptObject: matchJavascriptObjectInDb
+        matchJavascriptObject: matchJavascriptObjectInDb,
+        implementationName: 'sqlite'
     })
 
 

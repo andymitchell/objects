@@ -48,12 +48,134 @@ export type LogicFilter<T extends Record<string, any>> = {
 }
 
 /**
- * Defines a query for filtering objects, similar to a WHERE clause in database queries.
- * It allows for filtering based on an object's properties, including those that are nested.
+ * Defines a serialisable JSON query for filtering plain JavaScript objects, similar to a
+ * WHERE clause in database queries. Loosely inspired by MongoDB query syntax.
  *
- * You can define a filter in two primary ways:
- * 1.  **Partial Object Filter**: Specify the properties and the values you want to match. Use dot notation to access nested properties.
- * 2.  **Logic Filter**: Combine multiple filters using logical operators like `AND`, `OR`, and `NOT`.
+ * Use `matchJavascriptObject(object, filter)` to evaluate a filter against an object, or
+ * `compileMatchJavascriptObject(filter)` to create a reusable matcher function.
+ *
+ * ---
+ * ## Spec
+ *
+ * A `WhereFilterDefinition` is one of two forms:
+ *
+ * ### 1. Partial Object Filter
+ *
+ * An object whose keys are **property paths** and whose values are **value comparisons**.
+ * Use dot notation for nested properties.
+ *
+ * ```ts
+ * { 'contact.name': 'Andy' }
+ * { 'contact.age': { gte: 18 } }
+ * ```
+ *
+ * **Implicit AND**: When multiple keys are present, all must match (treated as AND).
+ * ```ts
+ * { 'contact.name': 'Andy', 'contact.age': 100 }
+ * // equivalent to: { AND: [{ 'contact.name': 'Andy' }, { 'contact.age': 100 }] }
+ * ```
+ *
+ * ### 2. Logic Filter
+ *
+ * An object with one or more logic operator keys, each containing an array of
+ * sub-filters (WhereFilterDefinition[]).
+ *
+ * | Operator | Semantics                                      |
+ * |----------|-------------------------------------------------|
+ * | `AND`    | All sub-filters must match (`every`)            |
+ * | `OR`     | At least one sub-filter must match (`some`)     |
+ * | `NOT`    | No sub-filter must match (negated `some`)       |
+ *
+ * Multiple operators on one object are ANDed together:
+ * ```ts
+ * { AND: [...], NOT: [...] }  // both the AND and NOT clauses must pass
+ * ```
+ *
+ * ---
+ * ## Value Comparisons (scalar properties)
+ *
+ * | Form | Example | Behaviour |
+ * |------|---------|-----------|
+ * | **Exact scalar** | `'Andy'`, `100`, `true` | Strict equality (`===`) for string, number, boolean |
+ * | **Deep object equality** | `{ name: 'Andy', age: 30 }` | Deep equality (all keys must match) |
+ * | **Range operators** | `{ gt: 10, lte: 100 }` | `gt`, `lt`, `gte`, `lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic / JS code-point order, case-sensitive). |
+ * | **Contains** | `{ contains: 'And' }` | Substring match. String values only (throws on numbers). |
+ *
+ * **Nullish behaviour**: Range/contains on `undefined`/`null` returns `false` (like SQL NULL).
+ *
+ * **Type safety**: Range comparison throws if the filter type differs from the value type
+ * (e.g. comparing a number value against a string filter).
+ *
+ * ---
+ * ## Array Filtering
+ *
+ * When the resolved property is an array, there are several matching modes:
+ *
+ * ### Exact array match
+ * Pass an array literal; uses deep equality.
+ * ```ts
+ * { 'contact.locations': ['London', 'NYC'] }
+ * ```
+ *
+ * ### Scalar element match (implicit `indexOf`)
+ * Pass a scalar; returns true if any element equals it.
+ * ```ts
+ * { 'contact.locations': 'London' }
+ * ```
+ *
+ * ### Compound object filter (implicit per-key OR across elements)
+ * Pass a plain object with property keys. **Each key is tested independently** — it only
+ * needs *some* element to satisfy each key. Different keys may be satisfied by different elements.
+ * ```ts
+ * // locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
+ * { 'contact.locations': { city: 'London', country: 'US' } }
+ * // → true: 'London' found in element 0, 'US' found in element 1
+ * ```
+ *
+ * ### Logic filter on array elements (atomic per element, like `elem_match`)
+ * When using AND/OR/NOT inside an array filter, each element is tested atomically
+ * against the full logic filter. The criteria must be satisfied within a single element.
+ * ```ts
+ * // locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
+ * { 'contact.locations': { AND: [{ city: 'London' }, { country: 'US' }] } }
+ * // → false: no single element has both city=London and country=US
+ * ```
+ *
+ * ### `elem_match` (explicit single-element matching)
+ * Requires that **one** array element satisfies all criteria.
+ * ```ts
+ * // For object arrays — value is a WhereFilterDefinition applied to each element:
+ * { 'contact.locations': { elem_match: { city: 'London', country: 'UK' } } }
+ *
+ * // For scalar arrays — value is a scalar or value comparison:
+ * { 'contact.locations': { elem_match: 2 } }
+ * { 'contact.locations': { elem_match: { contains: 'Lon' } } }
+ * ```
+ *
+ * ---
+ * ## Spreading Arrays (nested arrays in dot paths)
+ *
+ * When a dot-notation path crosses through multiple arrays
+ * (e.g. `'children.grandchildren'` where both are arrays), intermediate arrays are expanded
+ * and combined with **OR semantics**. The compound filter must pass within the context of
+ * one leaf array.
+ * ```ts
+ * // children: [{ grandchildren: [{name: 'Rita'}] }, { grandchildren: [{name: 'Bob'}] }]
+ * { 'children.grandchildren': { grandchild_name: 'Rita' } }
+ * // → true: found in the first child's grandchildren array
+ * ```
+ *
+ * ---
+ * ## Edge Cases
+ *
+ * | Filter | Result | Reason |
+ * |--------|--------|--------|
+ * | `{}` | matches all | No conditions to fail |
+ * | `{ OR: [] }` | matches nothing | No conditions to succeed (`some` on empty = false) |
+ * | `{ AND: [] }` | matches all | No conditions to fail (`every` on empty = true) |
+ * | `{ 'x': undefined }` | `false` | Undefined filter value never matches |
+ *
+ * ---
  *
  * @example
  * // Simple filter on a top-level property
@@ -64,12 +186,7 @@ export type LogicFilter<T extends Record<string, any>> = {
  * const filterByNestedChildName = { 'person.child.name': 'Alice' };
  *
  * @example
- * // Filter for objects where the 'tags' array contains 'typescript'
- * const filterByTag = { 'tags.elem_match': { $in: ['typescript'] } };
- *
- * @example
- * // A filter using the 'OR' logical operator to find objects that are either
- * // high priority or have a status of 'completed'.
+ * // Logic operator (OR)
  * const logicalFilter = {
  *   OR: [
  *     { isPriority: true },
@@ -78,12 +195,23 @@ export type LogicFilter<T extends Record<string, any>> = {
  * };
  *
  * @example
- * // A filter for a numeric property, finding objects where 'age' is greater than 30.
+ * // Range comparison
  * const numericFilter = { 'person.age': { gt: 30 } };
  *
- * 
- * @note It is loosely inspired by Mongo 
- * 
+ * @example
+ * // Substring match
+ * const containsFilter = { 'person.name': { contains: 'And' } };
+ *
+ * @example
+ * // elem_match on an array of objects
+ * const elemMatchFilter = {
+ *   'contact.locations': {
+ *     elem_match: { city: 'London', country: 'UK' }
+ *   }
+ * };
+ *
+ * @note It is loosely inspired by MongoDB query syntax.
+ *
  * @note When using `WhereFilterDefinition` as a function parameter, TypeScript may have trouble
  * inferring whether it's a logic filter or a partial object filter. To resolve this,
  * you can use type guards like `isLogicFilter` or `isPartialObjectFilter` to narrow

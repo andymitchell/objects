@@ -1,6 +1,7 @@
 import { type ZodTypeAny, z } from "zod";
 
 
+/** Union of all Zod first-party type names (e.g. 'ZodString', 'ZodArray'). Used to drive type-aware SQL casting and path validation. */
 export type ZodKind = keyof typeof z.ZodFirstPartyTypeKind;
 type DotPropPath = string;
 
@@ -9,10 +10,14 @@ type DotPropPath = string;
 type WhitelistTypes<T extends ZodKind[] = ZodKind[]> = T[number];
 
 /**
- * 
- * @param schema The source schema 
+ * Returns a flat map of dot-prop paths to their ZodKind for a schema. Simpler than convertSchemaToDotPropPathTree (no tree structure).
+ *
+ * @param schema The source schema
  * @param whitelistTypes Optional shortlist of allowed types (dot prop paths not of this type are excluded)
- * @returns A record of every dot prop path permutation in the schema, where the value is its kind. {'person.age': 'ZodNumber'}
+ * @returns `{'person.age': 'ZodNumber', ...}`
+ *
+ * @example
+ * convertSchemaToDotPropPathKind(mySchema, ['ZodString', 'ZodNumber'])
  */
 export function convertSchemaToDotPropPathKind<T extends ZodKind[] = ZodKind[]>(
     schema: ZodTypeAny,
@@ -49,6 +54,11 @@ function _convertSchemaToDotPropPathKind(
 }
 
 
+/**
+ * A node in the schema tree produced by convertSchemaToDotPropPathTree.
+ * Captures the Zod type, parent/child links, and metadata (array ancestry, optionality)
+ * needed by the SQL builder for type casting, array spreading, and null guards.
+ */
 export type TreeNode = {
     name: string,
     dotprop_path: string,
@@ -74,11 +84,22 @@ export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
   })
 );
 
+/** Flat lookup from dot-prop path string to its TreeNode. The primary interface used by the SQL builder. */
 export type TreeNodeMap = Record<DotPropPath, TreeNode>;
 type ConvertSchemaToDotPropPathTreeOptions = {
     exclude_schema_reference?: boolean,
     exclude_parent_reference?: boolean
 }
+/**
+ * Recursively walks a Zod schema and produces a TreeNode tree plus a flat TreeNodeMap.
+ * The map is the key input to the SQL builder: it provides ZodKind (for casting), array ancestry
+ * (for jsonb_array_elements spreading), optionality (for IS NOT NULL guards), and sub-schemas
+ * (for recursing into array element types).
+ *
+ * @example
+ * const { root, map } = convertSchemaToDotPropPathTree(ContactSchema);
+ * map['contact.name'].kind // 'ZodString'
+ */
 export function convertSchemaToDotPropPathTree(
     schema: ZodTypeAny,
     options?: ConvertSchemaToDotPropPathTreeOptions
@@ -173,6 +194,7 @@ function _convertSchemaToDotPropPathTree(
 }
 
 
+/** Returns the ZodKind at a dot-prop path within a schema, unwrapping arrays/optionals. */
 export function getZodKindAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropPath): ZodKind | undefined {
 
     const schemaAtPath = getZodSchemaAtSchemaDotPropPath(schema, path);
@@ -182,6 +204,7 @@ export function getZodKindAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropP
 }
 
 
+/** Navigates a Zod schema by dot-prop path and returns the leaf ZodTypeAny, unwrapping arrays/optionals/nullables along the way. */
 export function getZodSchemaAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropPath): ZodTypeAny | undefined {
     const keys = path.split('.');
     let currentSchema: ZodTypeAny = schema;

@@ -4,6 +4,19 @@ import { isZodSchema } from "../utils/isZodSchema.js";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
 
+/**
+ * Converts a dot-prop path into a type-cast Postgres JSONB accessor expression.
+ * Uses the TreeNodeMap (or Zod schema) to determine the correct `->` / `->>` operators and Pg type cast.
+ * Rejects unknown paths to prevent SQL injection.
+ *
+ * @example
+ * convertDotPropPathToPostgresJsonPath('data', 'contact.name', nodeMap)
+ * // → "(data->'contact'->>'name')::text"
+ *
+ * @example
+ * convertDotPropPathToPostgresJsonPath('data', 'contact.locations', nodeMap)
+ * // → "(data->'contact'->'locations')::jsonb"  (ZodArray keeps -> and casts to jsonb)
+ */
 export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMap: TreeNodeMap, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string;
 export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, schema:z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string;
 export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMapOrSchema: TreeNodeMap | z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string {

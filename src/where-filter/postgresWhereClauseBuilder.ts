@@ -21,6 +21,16 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
 
 
 
+/**
+ * Converts a WhereFilterDefinition into a parameterised Postgres WHERE clause for a JSONB column.
+ * Entry point for the whole pipeline: validates the filter, then delegates to the recursive builder.
+ *
+ * @example
+ * const pm = new PropertyMapSchema(myZodSchema, 'data');
+ * const { whereClauseStatement, statementArguments } = postgresWhereClauseBuilder({ name: 'Andy' }, pm);
+ * // whereClauseStatement: "(data->>'name')::text = $1"
+ * // statementArguments: ['Andy']
+ */
 export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseStatement {
     if( !isWhereFilterDefinition(filter) ) {
         throw new Error("postgresWhereClauseBuilder filter was not well-defined. Received: "+safeJson(filter));
@@ -33,11 +43,20 @@ export default function postgresWhereClauseBuilder<T extends Record<string, any>
     return {whereClauseStatement, statementArguments};
 }
 
+/**
+ * Dialect-specific abstraction for converting a single dot-prop path + filter value into SQL.
+ * Implementations know how to map WhereFilterDefinition leaf values to dialect-specific SQL fragments.
+ */
 export interface IPropertyMap<T extends Record<string, any>> {
     generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]):string;
 }
 
 
+/**
+ * Postgres JSONB implementation of IPropertyMap.
+ * Generates SQL fragments for a single JSONB column using TreeNodeMap for type-aware casting,
+ * array spreading via jsonb_array_elements, and parameterised placeholders.
+ */
 class BasePropertyMap<T extends Record<string, any> = Record<string, any>> implements IPropertyMap<T> {
     protected nodeMap:TreeNodeMap;
     protected sqlColumnName:string;
@@ -49,6 +68,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         this.doNotSpreadArray = doNotSpreadArray ?? false;
     }
 
+    /** Counts how many ZodArray nodes exist in the ancestry chain for a path. Determines whether array spreading is needed. */
     private countArraysInPath(dotpropPath:string):number {
         if( (this.nodeMap[dotpropPath]?.kind==='ZodArray' || this.nodeMap[dotpropPath]?.descended_from_array) ) {
             let count = 0; 
@@ -63,10 +83,12 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         }
     }
 
+    /** Wraps convertDotPropPathToPostgresJsonPath, using this instance's column name and nodeMap. */
     private getSqlIdentifier(dotPropPath:string, errorIfNotAsExpected?:ZodKind[], customColumnName?: string):string {
         return convertDotPropPathToPostgresJsonPath(customColumnName ?? this.sqlColumnName, dotPropPath, this.nodeMap, errorIfNotAsExpected);
     }
 
+    /** Pushes a value into the statementArguments array and returns its `$N` placeholder. Objects/arrays are JSON.stringify'd first. */
     protected generatePlaceholder(value:PreparedStatementArgumentOrObject, statementArguments:PreparedStatementArgument[]):string {
 
         if( isPlainObject(value) || Array.isArray(value) ) value = JSON.stringify(value);
@@ -77,8 +99,13 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         return `$${statementArguments.length}`;
     }
 
+    /**
+     * Generates a SQL fragment for a single dot-prop path and its filter value.
+     * Two main branches: direct comparison (no arrays), or jsonb_array_elements spreading + EXISTS wrapping (arrays).
+     * Compound array filters use COUNT(DISTINCT CASE WHEN...) so different elements can satisfy different keys.
+     */
     generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]):string {
-        // TODO Probably provide a version of this for JSONB that others can reference 
+        // TODO Probably provide a version of this for JSONB that others can reference
         const countArraysInPath = this.countArraysInPath(dotpropPath);
         if( countArraysInPath>0  ) { // && !this.doNotSpreadArray
             
@@ -188,6 +215,10 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         }
     }
 
+    /**
+     * Emits a leaf-level SQL comparison for a single value (contains → LIKE, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
+     * Wraps optional/nullable paths with an IS NOT NULL guard.
+     */
     protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
         
         const optionalWrapper = (sqlIdentifier:string, query:string) => {
@@ -258,19 +289,32 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
 
 
+/**
+ * PropertyMap that derives its TreeNodeMap from a Zod schema automatically.
+ *
+ * @example
+ * const pm = new PropertyMapSchema(ContactSchema, 'recordColumn');
+ */
 export class PropertyMapSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> implements IPropertyMap<T> {
     constructor(schema:z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?:boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
     }
 }
+/**
+ * PropertyMap that accepts a pre-built TreeNodeMap directly (when schema introspection is already done).
+ */
 export class PropertyMap<T extends Record<string, any> = Record<string, any>> extends BasePropertyMap<T> implements IPropertyMap<T> {
-    
+
     constructor(nodeMap:TreeNodeMap, sqlColumnName: string, doNotSpreadArray?:boolean) {
         super(nodeMap, sqlColumnName, doNotSpreadArray);
     }
 }
 
+/**
+ * Recursive engine: normalises multi-key filters into AND, handles AND/OR/NOT logic,
+ * and delegates single-key property filters to the IPropertyMap dialect layer.
+ */
 function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:IPropertyMap<T>):string {
     
     
@@ -324,10 +368,13 @@ function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter
 
 type SpreadedJsonbArrays = {sql: string, output_column: string, output_identifier:string};
 /**
- * Combine jsonb_array_elements with CROSS JOIN to list every possible combination of all parent arrays, yielding a final column name that'll contain each permutation.
- * @param column 
- * @param nodesDesc 
- * @returns 
+ * Builds a FROM clause that spreads nested JSONB arrays using `jsonb_array_elements`, joined via CROSS JOIN.
+ * Each array layer in the TreeNode path produces a new aliased column. Used by generateSql to wrap
+ * array-path filters in `EXISTS (SELECT 1 FROM <this output> WHERE ...)`.
+ *
+ * @example
+ * // For path children.grandchildren.name (two arrays):
+ * // → "jsonb_array_elements(col->'children') AS col1 CROSS JOIN jsonb_array_elements(col1->'grandchildren') AS col2"
  */
 export function spreadJsonbArrays(column:string, nodesDesc:TreeNode[]):SpreadedJsonbArrays | undefined {
     const jsonbbArrayElementsParts:{sql:string, output_column:string}[] = [];
@@ -369,6 +416,7 @@ export function spreadJsonbArrays(column:string, nodesDesc:TreeNode[]):SpreadedJ
 export type PreparedWhereClauseStatement = {whereClauseStatement:string, statementArguments:PreparedStatementArgument[]};
 export type PreparedStatementArgument = string | number | boolean | null;
 type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
+/** Typeguard: value is a primitive that can be used as a parameterised query argument. */
 function isPreparedStatementArgument(x: any): x is PreparedStatementArgument {
     return ['string', 'number', 'boolean'].includes(typeof x);
 }

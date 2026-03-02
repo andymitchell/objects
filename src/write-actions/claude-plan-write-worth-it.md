@@ -113,10 +113,10 @@ A Zod schema is required. After every create or update, the resulting object is 
 | **Sequential ordering** | Actions applied in order, later ones see earlier results | Multiple statements in a single transaction — natural fit. |
 
 
-## Return type of applyWritesToItems
+## Return type of applyWritesToItems
 _To be filled in_
 
-## List of general important tests from applyWritesToItems.test.ts
+## List of general important tests from applyWritesToItems.test.ts
 _To be filled in_
 
 # Decision: Is it possible, is it worth?
@@ -337,62 +337,147 @@ Then update `Decision: Is it possible, it is worth?` above:
 
 # [ ] Phase 3
 
-Do additional research to support the implementation. 
+Do additional research to support the implementation.
 
-## Step 1
-Review how @../where-filter/standardTests.ts are used to test multiple implementations (e.g. matchJavascriptObject, pg, etc). This same mechanism will be used. 
+## Step 1
+Review how @../where-filter/standardTests.ts are used to test multiple implementations (e.g. matchJavascriptObject, pg, etc). This same mechanism will be used.
 
-## Step 2 
+## Step 2
 
-Update `How Write Actions Currently Work` in this document with new sections that detail: 
-* `Return type of applyWritesToItems`: The return format of `applyWritesToItems` (with the intention that all the pg/sqlite functions will use this return format)
-* `List of general important tests from applyWritesToItems.test.ts`: Everything important that is tested in `applyWritesToItems.test.ts`, but only choose tests that would broadly make sense to the current TS implementation AND a pg/sql implementation (lowest common denominator - so no 'immer' tests). It should be a succinct conscise list that gives just enough detail to be recreated in new tests.
+Update `How Write Actions Currently Work` in this document with new sections that detail:
+* `Return type of applyWritesToItems`: The return format of `applyWritesToItems` (with the intention that all the pg/sqlite functions will use this return format). Note: `referential_comparison_ok` has been removed from the response type — it is JS-specific and irrelevant to SQL. `final_items` is optional (see Phase 4 notes).
+* `List of general important tests from applyWritesToItems.test.ts`: Everything important that is tested in `applyWritesToItems.test.ts`, but only choose tests that would broadly make sense to the current TS implementation AND a pg/sql implementation (lowest common denominator). It should be a succinct concise list that gives just enough detail to be recreated in new tests.
+
+**Inclusion/exclusion criteria** — before curating the list, propose explicit criteria for which test categories to include vs. exclude. Base the proposal on what you think is correct (e.g. "include permissions because ownership WHERE sub-conditions are feasible in SQL; exclude Immer and referential comparison because they're JS runtime concepts; exclude purity/mutate because SQL has no in-place mutation concept"). Challenge me on borderline cases and I will confirm or decide tie-breakers.
 
 
 # [ ] Phase 4
 
-Rewrite the implementation plan. 
+Rewrite the implementation plan.
 
-Keep most of it, but ammend: 
-* There will be a standalone function `canApplyWriteActionsToSql` that accept a set of write actions, and validate that they fit the 'lite' version. If they include any unsupported properties whatsoever, they're rejected. It will return an overall success/fail, but also specify the failed write actions with a reason (this is a reusable type). 
-* `writeActionToSql` will begin with running `canApplyWriteActionsToSql` and halt if not, returning the same failure type that indicates which actions could not work 
-* Create a helper function, that's db agnostic (using an executing callback per sql line), to find which write action fails. It will be used by the consumer when the generated SQL fails in the Transaction to then re-run it action by action to find which failed - it would return the failed WriteActions along with the SQL error details. Challenge me on this! If the transaction can tell you which specific SQL line failed then great, just use that instead and skip this. 
-* There will be a new function `applyWritesToSql` that is db-agnostic. It will generate SQL that's executed via a callback passed to the function. If it fails, it uses the helper function to rerun and identify which entry failed. It will share the same result type as `applyWritesToItems` (other than the variant to allow it to say which it couldn't run due to `canApplyWriteActionsToSql`)
+Keep most of it, but amend with the following decisions:
 
-And the structure will be different: 
-* The new db stuff will be isolated in its own directory: ./applyWritesToItems/sql 
-* There's no separate 'tests' directory, each function has its own colated .test.ts file 
-* standardTests will be added to ./applyWritesToItems directory 
+### `canApplyWriteActionsToSql` — gate function
+* Standalone function that accepts a set of write actions and validates they fit the 'lite' version (create/update/delete only, LWW strategy only, supported permission types only).
+* If they include any unsupported feature (array_scope, custom write strategies, pre-triggers, `attempt_recover_duplicate_create: 'if-identical'`, unsupported permission types), the entire batch is rejected.
+* There is NO hybrid/partial execution — either all actions pass or none run as SQL.
+* Returns an overall success/fail, plus specifies which write actions failed with a reason (reusable `FailedWriteAction` type).
+* Enforced at BOTH the type level (a `WriteActionPayloadLite<T>` type that excludes `array_scope`) AND runtime (`canApplyWriteActionsToSql` checks at runtime). The type provides compile-time safety for callers who know they're on the SQL path; the runtime check is the definitive guard gate since `writeActionToSql` accepts the full `WriteAction<T>` union.
 
-Don't execute - just rewrite the `Implementation Plan` of this document. 
+### `writeActionToSql` — SQL generator
+* Begins by running `canApplyWriteActionsToSql`; halts and returns the same failure type if validation fails.
+* Generates `PreparedWriteStatement[]` — no `unsupported` field on statements (since all-or-nothing validation already passed).
+
+### Error identification — use the transaction error directly
+* No separate "re-run to find failures" helper. SQL transactions already report which statement failed. Since statements are executed sequentially within a transaction, the first error halts execution — the failing statement index maps directly to the failing `WriteAction`. Subsequent actions are marked `blocked_by_action_uuid` (same pattern as `applyWritesToItems`).
+
+### `applyWritesToSql` — db-agnostic execution wrapper
+* Generates SQL via `writeActionToSql`, executes it via a callback (one call per statement within a transaction).
+* On transaction error: identifies the failing WriteAction from the statement index, marks subsequent actions as blocked, returns error response.
+* Shares the same response type as `applyWritesToItems`, with these modifications:
+  - `referential_comparison_ok` is REMOVED from the response type entirely (from both `applyWritesToItems` and `applyWritesToSql`) — it's a JS runtime concept with no SQL equivalent.
+  - `final_items` is OPTIONAL in the response type. `applyWritesToSql` accepts a config param `includeFinalItems?: boolean` (default false). When true, it does a final SELECT to retrieve the affected rows. When false (the common case for performance), `final_items` is omitted. This avoids negating the performance gain of pure SQL.
+  - `affected_items` uses RETURNING clause (supported in both Postgres and SQLite 3.35+, which we assume as minimum).
+* Can also return the `canApplyWriteActionsToSql` failure variant if validation fails (before any SQL is generated).
+
+### File structure
+* New SQL code lives in: `./applyWritesToItems/sql/`
+* No separate `tests/` directory — each function has a colocated `.test.ts` file
+* `standardTests` lives in `./applyWritesToItems/` directory (shared by JS and SQL test suites)
+
+### Permission handling
+* For `basic_ownership_property` with `property_type: 'id'`: add `AND {jsonCol}->>'ownerPath' = $userIdParam` to the WHERE clause.
+* For `'none'`: no additional WHERE condition.
+* Unsupported permission types (e.g. `'opa'`, `'id_in_scalar_array'` with `transferring_to_path`) cause `canApplyWriteActionsToSql` to reject the batch.
+
+Don't execute — just rewrite the `Implementation Plan` section of this document.
 
 
 # [ ] Phase 5
 
-We're going to do TDD for this. Create a plan in `TDD Testing Plan`. 
+We're going to do TDD for this. Create a plan in `TDD Testing Plan`.
 
 ## standardTests
 
-Generate its own version of `standardTests.ts` seen in where-filter; that will be used by `applyWritesToItems` and both dialects of `applyWritesToSql`. It will work the same way, with each apply function setting up the tests (e.g. a sqlite table) and for each test (e.g. setting initial data in a fresh table), then executing the test on the function and assessing whether when run (directly in the case of applyWritesToItems; or have SQL executed in the case of writeActionToSql), the data source (table, raw JS) has been correctly modified. 
+Generate its own version of `standardTests.ts` seen in where-filter; that will be used by `applyWritesToItems` and both dialects of `applyWritesToSql`. It will work the same way, with each apply function setting up the tests (e.g. a sqlite table) and for each test (e.g. setting initial data in a fresh table), then executing the test on the function and assessing whether when run (directly in the case of applyWritesToItems; or have SQL executed in the case of writeActionToSql), the data source (table, raw JS) has been correctly modified.
 
-Crucially this is a major step because you must create a hierarchial test file (using nested `describe` blocks) that exhaustively covers the entire spec for WriteActions. Do this in order: 
-* Identify the high level parts of the spec, and the intent. It should be something a developer understands and can quickly see "oh this maps to how I'd understand the layout of the spec, and it captures the intent of every part of it". 
-* Fill in what needs to be tested within each part of the spec, covering everything (all input/output permutations and edge cases - i.e. do testing best practice).
+Follow the same DB setup/teardown pattern used in `where-filter/standardTests.ts` — study how it manages test DB connections, per-test table creation, and cleanup. Replicate that pattern for write-action tests.
 
-Additionally, include any tests you missed that were found in `List of general important tests from applyWritesToItems.test.ts`. 
+### Test design philosophy
 
-Be sure to broadly split the file into the 'lite' version of Write Actions (that all the functions must support), and then the full version (currently only supported by `applyWritesToItems` - tests for `writeActionToSql` will be able to skip this). 
+The goal is to match the **spirit of the spec**, not to enumerate every permutation mechanically. The describe-block hierarchy should mirror the key intents of the WriteAction spec so that any developer reading it immediately sees "this maps to how I'd understand the spec." Under each intent, tests cover the happy path plus the edge cases and most likely failures — not an exhaustive combinatorial matrix.
 
-## DB specific tests
+### Steps
+1. Identify the high-level parts of the spec and their intent. Structure these as nested `describe` blocks.
+2. Under each describe, add tests for the happy path and the meaningful edge cases / failure modes.
+3. Include any additional tests from `List of general important tests from applyWritesToItems.test.ts` that weren't already covered.
+4. Split the file into two broad sections:
+   - **Lite Write Actions** (create/update/delete — all implementations must support these)
+   - **Full Write Actions** (array_scope, custom strategies, etc. — only `applyWritesToItems` supports these; SQL tests skip this section)
 
-applyWritesToSql.pg.test.ts (and sqlite version) can have its own dbStandardTests in addition to standardTests for any tests that specifically stress test a database (vs. vanilla `applyWritesToItems`)
+## DB specific tests
 
+`applyWritesToSql.pg.test.ts` (and sqlite version) can have its own `dbStandardTests` in addition to `standardTests` for any tests that specifically stress-test a database (vs. vanilla `applyWritesToItems`).
 
 ---
 
-Output the plan to `TDD Testing Plan`. 
+Output the plan to `TDD Testing Plan`.
 
 
 # [ ] Phase 6
 
-Do red/green TDD, implementing the basic structure with stub functions then fully implementing the tests; before continuing to the function implementation/fixing stage until tests pass. 
+Do red/green TDD. Work in this order:
+
+### Sub-phase 6.1: Types and validation
+1. Define `WriteActionPayloadLite<T>` type (compile-time narrowing)
+2. Define `PreparedWriteStatement` (without `unsupported` field)
+3. Define shared response types (updated `ApplyWritesToItemsChanges` without `referential_comparison_ok`, `final_items` optional)
+4. Implement `canApplyWriteActionsToSql` — runtime validation gate
+5. Tests for `canApplyWriteActionsToSql`: accepts valid lite actions, rejects array_scope / custom strategies / unsupported permissions / `if-identical`
+
+### Sub-phase 6.2: SQL generation (`writeActionToSql`)
+1. Implement `flattenDataToLeafPaths` utility + tests
+2. Implement `writeClauseEngine.ts` — shared logic: iterate actions, dispatch per payload type, inject permission WHERE conditions
+3. Implement `sqliteWriteBuilder.ts` — json_set/json_remove chains for update, INSERT for create, DELETE for delete
+4. Implement `postgresWriteBuilder.ts` — jsonb_set chains for update, INSERT for create, DELETE for delete
+5. Tests for each builder: verify generated SQL + arguments for each payload type
+
+### Sub-phase 6.3: Execution wrapper (`applyWritesToSql`)
+1. Implement `applyWritesToSql` — calls `canApplyWriteActionsToSql`, generates SQL via `writeActionToSql`, executes via callback, handles transaction errors (maps statement index to WriteAction), supports `includeFinalItems` config
+2. Wire up `RETURNING` for `affected_items`
+3. Integration tests against real SQLite (and Postgres if available)
+
+### Sub-phase 6.4: Shared standardTests
+1. Run `standardTests` against `applyWritesToItems` — verify existing behaviour matches
+2. Run `standardTests` against `applyWritesToSql` (SQLite) — verify SQL path matches
+3. Run `standardTests` against `applyWritesToSql` (Postgres) — verify SQL path matches
+4. Fix any discrepancies until all three implementations pass the shared suite
+
+### Sub-phase 6.5: Remove `referential_comparison_ok`
+1. Remove `referential_comparison_ok` from `ApplyWritesToItemsChanges` type
+2. Update `applyWritesToItems` implementation to stop computing it
+3. Update any consumers / tests that reference it
+
+
+# [ ] Phase 7
+
+Audit and improve the DX of `WriteActionsResponse` and related return types.
+
+## Goal
+
+Review the full type surface that consumers interact with after calling `applyWritesToItems` / `applyWritesToSql` — specifically `ApplyWritesToItemsResponse`, `ApplyWritesToItemsChanges`, `WriteActionsResponseOk`, `WriteActionsResponseError`, `SuccessfulWriteAction`, `FailedWriteAction`, and any intermediate types. Identify unpleasantness, inconsistencies, or poor ergonomics.
+
+## Steps
+
+1. Read all relevant type definitions and their usage sites across the codebase (consumers, tests, internal helpers).
+2. Catalogue concrete DX issues. For each, describe the problem and propose a fix. Examples of what to look for:
+   - Awkward discriminated union narrowing (does `if (result.status === 'ok')` give clean access to all fields, or do consumers need extra casts/checks?)
+   - Redundant or confusingly similar fields (e.g. `changes.changed` vs checking `changes.insert.length > 0`)
+   - Fields that exist on both success and error variants but mean subtly different things
+   - Naming inconsistencies (e.g. `remove_keys` vs `insert` — one is a verb, one is a noun)
+   - Types that are overly nested or force consumers to destructure deeply
+   - `final_items` becoming optional (from Phase 4) — does this make the success path annoying to use? Should there be a generic parameter or overloaded return type instead?
+   - Whether `SuccessfulWriteAction[]` and `FailedWriteAction[]` appearing on both variants is confusing
+   - Whether `ObjectsDelta<T>` being mixed into `ApplyWritesToItemsChanges` creates a leaky abstraction (delta is a reusable concept; changes adds write-action-specific fields)
+3. Challenge me with the improvement proposals. I will confirm, reject, or modify each one.
+4. Implement the agreed changes, updating types, implementations, and all consumers/tests.

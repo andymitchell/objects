@@ -7,7 +7,7 @@ import type { EnsureRecord } from "./types.js";
 
 import { getTypedProperty, setTypedProperty } from "./dot-prop-paths/typed-dot-prop.js";
 import cloneDeepSafe from "./utils/cloneDeepSafe.js";
-import type { IPropertyMap, PreparedWhereClauseStatement, WhereFilterDefinition } from "./where-filter/index.ts";
+import type { IPropertyMap, PreparedWhereClauseStatement, PreparedWhereClauseResult, WhereClauseError, WhereFilterDefinition } from "./where-filter/index.ts";
 import { WhereFilter } from "./where-filter/index-old.ts";
 import  { orderList } from "./utils/orderList.ts";
 
@@ -30,6 +30,8 @@ export {WhereFilter};
 export type {
     WhereFilterDefinition,
     PreparedWhereClauseStatement,
+    PreparedWhereClauseResult,
+    WhereClauseError,
     IPropertyMap
 };
 

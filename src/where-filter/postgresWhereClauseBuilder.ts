@@ -1,7 +1,7 @@
 
 import { z } from "zod";
 import type {  ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
-import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from './schemas.ts';
+import {isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from './schemas.ts';
 import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
 import isPlainObject from "../utils/isPlainObject.js";
@@ -9,7 +9,7 @@ import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPost
 import { isValueComparisonRange, isValueComparisonScalar } from "./typeguards.ts";
 import { ValueComparisonRangeOperators } from "./consts.ts";
 import { buildWhereClause, whereClauseBuilder, isPreparedStatementArgument } from "./whereClauseEngine.ts";
-import type { IPropertyMap, PreparedWhereClauseStatement, PreparedStatementArgument, PreparedStatementArgumentOrObject } from "./whereClauseEngine.ts";
+import type { IPropertyMap, PreparedWhereClauseStatement, PreparedWhereClauseResult, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "./whereClauseEngine.ts";
 
 /*
 Future improvements:
@@ -23,19 +23,19 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
 
 
 // Re-export shared types from engine for backwards compatibility
-export type { IPropertyMap, PreparedWhereClauseStatement, PreparedStatementArgument };
+export type { IPropertyMap, PreparedWhereClauseStatement, PreparedWhereClauseResult, PreparedStatementArgument, WhereClauseError };
 
 /**
  * Converts a WhereFilterDefinition into a parameterised Postgres WHERE clause for a JSONB column.
  * Entry point for the whole pipeline: validates the filter, then delegates to the recursive builder.
+ * Returns error-as-value: check `result.success` before accessing fields.
  *
  * @example
  * const pm = new PropertyMapSchema(myZodSchema, 'data');
- * const { whereClauseStatement, statementArguments } = postgresWhereClauseBuilder({ name: 'Andy' }, pm);
- * // whereClauseStatement: "(data->>'name')::text = $1"
- * // statementArguments: ['Andy']
+ * const result = postgresWhereClauseBuilder({ name: 'Andy' }, pm);
+ * if (result.success) { use(result.where_clause_statement, result.statement_arguments); }
  */
-export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseStatement {
+export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseResult {
     return buildWhereClause(filter, propertySqlMap);
 }
 
@@ -92,7 +92,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
      * Two main branches: direct comparison (no arrays), or jsonb_array_elements spreading + EXISTS wrapping (arrays).
      * Compound array filters use COUNT(DISTINCT CASE WHEN...) so different elements can satisfy different keys.
      */
-    generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]):string {
+    generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>):string {
         // TODO Probably provide a version of this for JSONB that others can reference
         const countArraysInPath = this.countArraysInPath(dotpropPath);
         if( countArraysInPath>0  ) { // && !this.doNotSpreadArray
@@ -137,6 +137,50 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                 
                 sa = spreadJsonbArrays(this.sqlColumnName, path);
                 if( !sa ) throw new Error("Could not locate array in path: "+dotpropPath);
+                const saResolved = sa;
+                // $in on array: at least one element must be in the list
+                if (isValueComparisonIn(filter)) {
+                    const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
+                    return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
+                }
+                // $nin on array: no element may be in the list
+                if (isValueComparisonNin(filter)) {
+                    const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
+                    return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
+                }
+                // $all: array must contain all specified values
+                if (isArrayValueComparisonAll(filter)) {
+                    const conditions = filter.$all.map(v => {
+                        const placeholder = this.generatePlaceholder(v, statementArguments);
+                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
+                    });
+                    return conditions.join(' AND ');
+                }
+                // $size: array has exactly N elements
+                if (isArrayValueComparisonSize(filter)) {
+                    // Use jsonb_array_length on the raw JSONB array path
+                    const jsonbPath = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
+                    return `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
+                }
+                // $exists on array
+                if (isValueComparisonExists(filter)) {
+                    const jsonbPath = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    if (filter.$exists) {
+                        return `${jsonbPath} IS NOT NULL`;
+                    } else {
+                        return `${jsonbPath} IS NULL`;
+                    }
+                }
+                // $type on array
+                if (isValueComparisonType(filter)) {
+                    const parts = dotpropPath.split('.');
+                    const jsonbPath = parts.map(p => `'${p}'`).join('->');
+                    const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
+                    const placeholder = this.generatePlaceholder(filter.$type, statementArguments);
+                    return `jsonb_typeof(${rawJsonbExpr}) = ${placeholder}`;
+                }
+
                 if( isArrayValueComparisonElemMatch(filter) ) {
                     // Check for scalar value comparisons first to avoid the ambiguity
                     // where operator objects like {$gt: 5} pass isWhereFilterDefinition.
@@ -163,12 +207,12 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                     } else if( isWhereFilterDefinition(elemVal) ) {
                         // Object array: recurse with sub-PropertyMap
                         const subPropertyMap = new PropertyMapSchema(treeNode.schema!, sa.output_column, true);
-                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap);
+                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
                         subClause = result;
                     }
                 } else {
                     // Compound filter: break it apart and each one must match something
-                    if( isPlainObject(filter) ) {                        
+                    if( isPlainObject(filter) ) {
                         const keys = Object.keys(filter) as Array<keyof typeof filter>;
                         let andClauses:string[] = [];
 
@@ -176,7 +220,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
                         keys.forEach(key => {
                             const subFilter:WhereFilterDefinition = {[key]: filter[key]};
-                            const result = whereClauseBuilder(subFilter, statementArguments, subPropertyMap);
+                            const result = whereClauseBuilder(subFilter, statementArguments, subPropertyMap, errors, rootFilter);
                             andClauses = [
                                 ...andClauses,
                                 result
@@ -209,9 +253,8 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
         } else {
             // Do direct comparison
-            
 
-            return this.generateComparison(dotpropPath, filter, statementArguments);
+            return this.generateComparison(dotpropPath, filter, statementArguments, undefined, undefined, errors, rootFilter);
         }
     }
 
@@ -219,14 +262,74 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
      * Emits a leaf-level SQL comparison for a single value ($contains → LIKE, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
-    protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
-        
+    protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>):string {
+
         const optionalWrapper = (sqlIdentifier:string, query:string) => {
             if( !this.nodeMap[dotpropPath] ) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
             if( this.nodeMap[dotpropPath]!.optional_or_nullable ) {
                 return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
             }
             return query;
+        }
+
+        /** Wrapper for optional fields where missing matches (e.g. $ne, $nin, $not). */
+        const optionalWrapperNullMatches = (sqlIdentifier:string, query:string) => {
+            if( !this.nodeMap[dotpropPath] ) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if( this.nodeMap[dotpropPath]!.optional_or_nullable ) {
+                return `(${sqlIdentifier} IS NULL OR ${query})`;
+            }
+            return query;
+        }
+
+        // $ne
+        if (isValueComparisonNe(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const placeholder = this.generatePlaceholder(filter.$ne, statementArguments);
+            return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} != ${placeholder}`);
+        }
+        // $in
+        if (isValueComparisonIn(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IN (${placeholders.join(', ')})`);
+        }
+        // $nin
+        if (isValueComparisonNin(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
+            return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} NOT IN (${placeholders.join(', ')})`);
+        }
+        // $not — negate inner comparison
+        if (isValueComparisonNot(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter);
+            return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
+        }
+        // $exists
+        if (isValueComparisonExists(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            if (filter.$exists) {
+                return `${sqlIdentifier} IS NOT NULL`;
+            } else {
+                return `${sqlIdentifier} IS NULL`;
+            }
+        }
+        // $type
+        if (isValueComparisonType(filter)) {
+            // For Postgres JSONB, use jsonb_typeof on the raw JSONB value (-> not ->>).
+            // Build the -> chain manually since convertDotPropPathToPostgresJsonPath uses ->> for leaf scalars.
+            const parts = dotpropPath.split('.');
+            const jsonbPath = parts.map(p => `'${p}'`).join('->');
+            const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
+            const placeholder = this.generatePlaceholder(filter.$type, statementArguments);
+            return `jsonb_typeof(${rawJsonbExpr}) = ${placeholder}`;
+        }
+        // $regex
+        if (isValueComparisonRegex(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
+            const placeholder = this.generatePlaceholder(filter.$regex, statementArguments);
+            const op = filter.$options?.includes('i') ? '~*' : '~';
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ${op} ${placeholder}`);
         }
 
         if( isValueComparisonContains(filter) ) {

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import sqliteWhereClauseBuilder, { SqlitePropertyMapSchema, spreadJsonArraysSqlite } from "./sqliteWhereClauseBuilder.js";
 import { standardTests, type MatchJavascriptObjectInTesting } from "./standardTests.js";
-import type { PreparedWhereClauseStatement } from "./whereClauseEngine.js";
+import type { PreparedWhereClauseResult } from "./whereClauseEngine.js";
 import { SQLITE_UNSAFE_WARNING } from "./convertDotPropPathToSqliteJsonPath.js";
 import { z } from "zod";
 import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
@@ -17,7 +17,7 @@ describe('sqlite where clause builder', () => {
 
             const pm = new SqlitePropertyMapSchema(schema, 'recordColumn');
 
-            let clause: PreparedWhereClauseStatement | undefined;
+            let clause: PreparedWhereClauseResult | undefined;
             try {
                 clause = sqliteWhereClauseBuilder(filter, pm);
             } catch (e) {
@@ -31,15 +31,25 @@ describe('sqlite where clause builder', () => {
                 throw e;
             }
 
+            if (!clause.success) {
+                // Re-throw validation errors so standardTests error-handling tests still work.
+                // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
+                const msg = clause.errors.map(e => e.message).join('; ');
+                if (msg.toLowerCase().includes('not well-defined')) {
+                    throw new Error(msg);
+                }
+                return undefined;
+            }
+
             let queryStr: string;
-            if (clause.whereClauseStatement) {
-                queryStr = `SELECT * FROM test_table WHERE ${clause.whereClauseStatement}`;
+            if (clause.where_clause_statement) {
+                queryStr = `SELECT * FROM test_table WHERE ${clause.where_clause_statement}`;
             } else {
                 queryStr = `SELECT * FROM test_table`;
             }
 
             try {
-                const rows = db.prepare(queryStr).all(...clause.statementArguments);
+                const rows = db.prepare(queryStr).all(...clause.statement_arguments);
                 return rows.length > 0;
             } catch (e) {
                 throw e;

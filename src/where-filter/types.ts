@@ -18,9 +18,34 @@ export type ValueComparisonRangeString = Partial<Record<ValueComparisonRangeOper
 export type ValueComparisonString = ValueComparisonRangeString | ValueComparisonContains;
 export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never);
 export type ValueComparisonRangeFlexi<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never) | T;
-export type ValueComparisonFlexi<T = any> = (T extends string? ValueComparisonString : T extends number? ValueComparisonRangeNumeric : never) | T;
+export type ValueComparisonNe<T = any> = { $ne: T extends string ? string : T extends number ? number : never };
+export type ValueComparisonIn<T = any> = { $in: (T extends string ? string : T extends number ? number : never)[] };
+export type ValueComparisonNin<T = any> = { $nin: (T extends string ? string : T extends number ? number : never)[] };
+export type ValueComparisonExists = { $exists: boolean };
+export type ValueComparisonType = { $type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' };
+export type ValueComparisonRegex = { $regex: string; $options?: string };
+export type ValueComparisonNot<T = any> = {
+    $not: ValueComparisonRange<T> | ValueComparisonContains | ValueComparisonNe<T>
+          | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonRegex
+};
+
+export type ValueComparisonFlexi<T = any> =
+    (T extends string
+        ? ValueComparisonString | ValueComparisonRegex
+        : T extends number
+            ? ValueComparisonRangeNumeric
+            : never)
+    | ValueComparisonNe<T>
+    | ValueComparisonIn<T>
+    | ValueComparisonNin<T>
+    | ValueComparisonNot<T>
+    | ValueComparisonExists
+    | ValueComparisonType
+    | T;
 export type ArrayValueComparisonElemMatch<T = any>  = {$elemMatch: T extends Record<string, any>? WhereFilterDefinition<T> : ValueComparisonFlexi<T>};
-export type ArrayValueComparison<T = any> = ArrayValueComparisonElemMatch<T>;
+export type ArrayValueComparisonAll<T = any> = { $all: T[] };
+export type ArrayValueComparisonSize = { $size: number };
+export type ArrayValueComparison<T = any> = ArrayValueComparisonElemMatch<T> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
 

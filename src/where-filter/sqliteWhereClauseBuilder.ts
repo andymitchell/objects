@@ -1,7 +1,7 @@
 
 import { z } from "zod";
 import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
-import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from './schemas.ts';
+import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from './schemas.ts';
 import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
 import isPlainObject from "../utils/isPlainObject.js";
@@ -9,19 +9,19 @@ import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqlite
 import { isValueComparisonRange, isValueComparisonScalar } from "./typeguards.ts";
 import { ValueComparisonRangeOperators } from "./consts.ts";
 import { buildWhereClause, whereClauseBuilder, isPreparedStatementArgument } from "./whereClauseEngine.ts";
-import type { IPropertyMap, PreparedWhereClauseStatement, PreparedStatementArgument, PreparedStatementArgumentOrObject } from "./whereClauseEngine.ts";
+import type { IPropertyMap, PreparedWhereClauseResult, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "./whereClauseEngine.ts";
 
 /**
  * Converts a WhereFilterDefinition into a parameterised SQLite WHERE clause for a JSON column.
  * SQLite equivalent of postgresWhereClauseBuilder: validates the filter, then delegates to the shared recursive engine.
+ * Returns error-as-value: check `result.success` before accessing fields.
  *
  * @example
  * const pm = new SqlitePropertyMapSchema(myZodSchema, 'data');
- * const { whereClauseStatement, statementArguments } = sqliteWhereClauseBuilder({ name: 'Andy' }, pm);
- * // whereClauseStatement: "json_extract(data, '$.name') = ?"
- * // statementArguments: ['Andy']
+ * const result = sqliteWhereClauseBuilder({ name: 'Andy' }, pm);
+ * if (result.success) { use(result.where_clause_statement, result.statement_arguments); }
  */
-export default function sqliteWhereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyMap<T>): PreparedWhereClauseStatement {
+export default function sqliteWhereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyMap<T>): PreparedWhereClauseResult {
     return buildWhereClause(filter, propertySqlMap);
 }
 
@@ -76,7 +76,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
      * Generates a SQL fragment for a single dot-prop path and its filter value.
      * Two main branches: direct comparison (no arrays), or json_each spreading + EXISTS wrapping (arrays).
      */
-    generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]): string {
+    generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
         const countArraysInPath = this.countArraysInPath(dotpropPath);
         if (countArraysInPath > 0) {
 
@@ -111,6 +111,47 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
 
                 sa = spreadJsonArraysSqlite(this.sqlColumnName, path);
                 if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
+                const saResolved = sa;
+                // $in on array: at least one element must be in the list
+                if (isValueComparisonIn(filter)) {
+                    const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
+                    return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
+                }
+                // $nin on array: no element may be in the list
+                if (isValueComparisonNin(filter)) {
+                    const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
+                    return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
+                }
+                // $all: array must contain all specified values
+                if (isArrayValueComparisonAll(filter)) {
+                    const conditions = filter.$all.map(v => {
+                        const placeholder = this.generatePlaceholder(v, statementArguments);
+                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
+                    });
+                    return conditions.join(' AND ');
+                }
+                // $size: array has exactly N elements
+                if (isArrayValueComparisonSize(filter)) {
+                    const jsonPath = '$.' + dotpropPath.split('.').join('.');
+                    const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
+                    return `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+                }
+                // $exists on array
+                if (isValueComparisonExists(filter)) {
+                    const jsonPath = '$.' + dotpropPath.split('.').join('.');
+                    if (filter.$exists) {
+                        return `json_type(${this.sqlColumnName}, '${jsonPath}') IS NOT NULL`;
+                    } else {
+                        return `json_type(${this.sqlColumnName}, '${jsonPath}') IS NULL`;
+                    }
+                }
+                // $type on array
+                if (isValueComparisonType(filter)) {
+                    const jsonPath = '$.' + dotpropPath.split('.').join('.');
+                    const placeholder = this.generatePlaceholder(filter.$type, statementArguments);
+                    return `json_type(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+                }
+
                 if (isArrayValueComparisonElemMatch(filter)) {
                     // Check for scalar value comparisons first to avoid the ambiguity
                     // where operator objects like {$gt: 5} pass isWhereFilterDefinition.
@@ -127,7 +168,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                     } else if (isWhereFilterDefinition(elemVal)) {
                         // Object array: recurse with sub-PropertyMap scoped to array element schema
                         const subPropertyMap = new SqlitePropertyMapSchema(treeNode.schema!, sa.output_column, true);
-                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap);
+                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
                         subClause = result;
                     }
                 } else {
@@ -140,7 +181,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
 
                         keys.forEach(key => {
                             const subFilter: WhereFilterDefinition = { [key]: filter[key] };
-                            const result = whereClauseBuilder(subFilter, statementArguments, subPropertyMap);
+                            const result = whereClauseBuilder(subFilter, statementArguments, subPropertyMap, errors, rootFilter);
                             andClauses = [...andClauses, result];
                         });
 
@@ -165,7 +206,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
             return sql;
 
         } else {
-            return this.generateComparison(dotpropPath, filter, statementArguments);
+            return this.generateComparison(dotpropPath, filter, statementArguments, undefined, undefined, errors, rootFilter);
         }
     }
 
@@ -174,7 +215,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
      * $contains → LIKE, range → >/</>=/<= , scalar → =, object/array → json()=json(?), undefined → IS NULL.
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
-    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean): string {
+    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
 
         const optionalWrapper = (sqlIdentifier: string, query: string) => {
             if (!this.nodeMap[dotpropPath]) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
@@ -182,6 +223,85 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                 return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
             }
             return query;
+        }
+
+        /** Wrapper for optional fields where missing matches (e.g. $ne, $nin, $not). */
+        const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
+            if (!this.nodeMap[dotpropPath]) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
+                return `(${sqlIdentifier} IS NULL OR ${query})`;
+            }
+            return query;
+        }
+
+        // $ne
+        if (isValueComparisonNe(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const placeholder = this.generatePlaceholder(filter.$ne, statementArguments);
+            return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} != ${placeholder}`);
+        }
+        // $in
+        if (isValueComparisonIn(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IN (${placeholders.join(', ')})`);
+        }
+        // $nin
+        if (isValueComparisonNin(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
+            return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} NOT IN (${placeholders.join(', ')})`);
+        }
+        // $not — negate inner comparison
+        if (isValueComparisonNot(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter);
+            return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
+        }
+        // $exists
+        if (isValueComparisonExists(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            if (filter.$exists) {
+                return `${sqlIdentifier} IS NOT NULL`;
+            } else {
+                return `${sqlIdentifier} IS NULL`;
+            }
+        }
+        // $type
+        if (isValueComparisonType(filter)) {
+            const jsonPath = '$.' + dotpropPath.split('.').join('.');
+            const typeMap: Record<string, string> = {
+                'string': 'text',
+                'number': 'integer',  // json_type returns 'integer' or 'real'
+                'boolean': 'true',    // json_type returns 'true' or 'false'
+                'object': 'object',
+                'array': 'array',
+                'null': 'null',
+            };
+            if (filter.$type === 'number') {
+                const placeholder1 = this.generatePlaceholder('integer', statementArguments);
+                const placeholder2 = this.generatePlaceholder('real', statementArguments);
+                return `json_type(${this.sqlColumnName}, '${jsonPath}') IN (${placeholder1}, ${placeholder2})`;
+            } else if (filter.$type === 'boolean') {
+                const placeholder1 = this.generatePlaceholder('true', statementArguments);
+                const placeholder2 = this.generatePlaceholder('false', statementArguments);
+                return `json_type(${this.sqlColumnName}, '${jsonPath}') IN (${placeholder1}, ${placeholder2})`;
+            } else {
+                const mappedType = typeMap[filter.$type] ?? filter.$type;
+                const placeholder = this.generatePlaceholder(mappedType, statementArguments);
+                return `json_type(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+            }
+        }
+        // $regex — SQLite has no native regex support
+        if (isValueComparisonRegex(filter)) {
+            if (errors && rootFilter) {
+                errors.push({
+                    sub_filter: { [dotpropPath]: filter } as any,
+                    root_filter: rootFilter as any,
+                    message: '$regex is not supported in SQLite'
+                });
+            }
+            return 'FALSE';
         }
 
         if (isValueComparisonContains(filter)) {

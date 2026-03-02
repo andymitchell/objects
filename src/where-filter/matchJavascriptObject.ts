@@ -3,7 +3,7 @@ import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPr
 import isPlainObject from "../utils/isPlainObject.js";
 import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
-import { isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from "./schemas.ts";
+import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonRangeFlexi, isValueComparisonScalar } from "./typeguards.ts";
 import { ValueComparisonRangeOperators } from "./consts.ts";
 import { safeJson } from "./safeJson.ts";
@@ -144,6 +144,20 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
             }
         }
 
+        // Handle $exists before array/scalar branching — it checks the value itself
+        if (isValueComparisonExists(dotpropFilter)) {
+            if (dotpropFilter.$exists) {
+                return objectValue !== undefined && objectValue !== null;
+            } else {
+                return objectValue === undefined || objectValue === null;
+            }
+        }
+
+        // Handle $type before array/scalar branching — it checks the value's runtime type
+        if (isValueComparisonType(dotpropFilter)) {
+            return checkJsType(objectValue, dotpropFilter.$type);
+        }
+
         if( Array.isArray(objectValue) ) {
             return compareArray(objectValue, dotpropFilter, [...debugPath, dotpropFilter]);
         } else {
@@ -155,6 +169,22 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
 }
 
 
+
+/** Checks if a value matches the expected $type string. */
+function checkJsType(value: any, expectedType: string): boolean {
+    if (value === undefined || value === null) {
+        return expectedType === 'null';
+    }
+    switch (expectedType) {
+        case 'string': return typeof value === 'string';
+        case 'number': return typeof value === 'number';
+        case 'boolean': return typeof value === 'boolean';
+        case 'array': return Array.isArray(value);
+        case 'object': return isPlainObject(value) && !Array.isArray(value);
+        case 'null': return value === null;
+        default: return false;
+    }
+}
 
 type CompareFunction = <T extends number | string>(value: T, filterValue: T) => boolean;
 type ValueComparisonFlexiOperatorJavascriptFunctionsTyped = {
@@ -171,6 +201,34 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
 
     
     if( filterValueIsPlainObject ) {
+        // $ne
+        if (isValueComparisonNe(filterValue, true)) {
+            if (value === undefined || value === null) return true; // MongoDB: ne matches missing
+            return value !== filterValue.$ne;
+        }
+        // $in
+        if (isValueComparisonIn(filterValue, true)) {
+            if (value === undefined || value === null) return false;
+            return filterValue.$in.includes(value);
+        }
+        // $nin
+        if (isValueComparisonNin(filterValue, true)) {
+            if (value === undefined || value === null) return true; // MongoDB: nin matches missing
+            return !filterValue.$nin.includes(value);
+        }
+        // $not — negate inner comparison
+        if (isValueComparisonNot(filterValue, true)) {
+            if (value === undefined || value === null) return true; // MongoDB: $not matches missing
+            return !compareValue(value, filterValue.$not);
+        }
+        // $regex
+        if (isValueComparisonRegex(filterValue, true)) {
+            if (typeof value !== 'string') return false;
+            const regex = new RegExp(filterValue.$regex, filterValue.$options);
+            return regex.test(value);
+        }
+        // $exists and $type are handled before compareValue in _matchJavascriptObject
+
         if( isValueComparisonContains(filterValue, true) ) {
             if( typeof value==='string' ) {
                 return value.indexOf(filterValue.$contains)>-1;
@@ -215,6 +273,18 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
     if( Array.isArray(filterValue) ) {
         // Two arrays = straight comparison
         return deepEql(value, filterValue);
+    } else if (isValueComparisonIn(filterValue)) {
+        // $in on array: at least one element must be in the list
+        return filterValue.$in.some(v => value.includes(v));
+    } else if (isValueComparisonNin(filterValue)) {
+        // $nin on array: no element may be in the list
+        return !filterValue.$nin.some(v => value.includes(v));
+    } else if (isArrayValueComparisonAll(filterValue)) {
+        // $all: array must contain all specified values
+        return filterValue.$all.every(v => value.includes(v));
+    } else if (isArrayValueComparisonSize(filterValue)) {
+        // $size: array must have exactly N elements
+        return value.length === filterValue.$size;
     } else if( isArrayValueComparisonElemMatch(filterValue) ) {
         // In a $elemMatch, one item in the 'value' array must match all the criteria.
         // Use element-type-based branching: the runtime type of each array element

@@ -1,7 +1,65 @@
 import { z, ZodNumber, ZodOptional, type ZodSchema, type ZodTypeDef } from "zod";
-import type {  ArrayValueComparisonElemMatch, ValueComparisonContains, WhereFilterDefinition } from "./types.ts";
+import type {  ArrayValueComparisonAll, ArrayValueComparisonElemMatch, ArrayValueComparisonSize, ValueComparisonContains, ValueComparisonExists, ValueComparisonIn, ValueComparisonNe, ValueComparisonNin, ValueComparisonNot, ValueComparisonRegex, ValueComparisonType, WhereFilterDefinition } from "./types.ts";
 import isPlainObject from "../utils/isPlainObject.js";
 import { ValueComparisonRangeOperators } from "./consts.ts";
+
+export const UpdatingMethodSchema = z.enum(['merge', 'assign']);
+
+const ValueComparisonRangeNumericSchemaPartial: Record<string, ZodOptional<ZodNumber>> = {};
+ValueComparisonRangeOperators.forEach(operator => ValueComparisonRangeNumericSchemaPartial[operator] = z.number().optional());
+const ValueComparisonRangeNumericSchema = z.object(ValueComparisonRangeNumericSchemaPartial);
+const ValueComparisonContainsSchema = z.object({
+    $contains: z.union([z.string(), z.number()]),
+});
+const ValueComparisonScalarSchema = z.union([z.string(), z.number()]);
+
+// New operator schemas
+const ValueComparisonNeSchema = z.object({ $ne: z.union([z.string(), z.number()]) });
+const ValueComparisonInSchema = z.object({ $in: z.array(z.union([z.string(), z.number()])) });
+const ValueComparisonNinSchema = z.object({ $nin: z.array(z.union([z.string(), z.number()])) });
+const ValueComparisonExistsSchema = z.object({ $exists: z.boolean() });
+const ValueComparisonTypeSchema = z.object({
+    $type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'null'])
+});
+const ValueComparisonRegexSchema = z.object({
+    $regex: z.string(),
+    $options: z.string().optional()
+});
+const ValueComparisonNotSchema: ZodSchema = z.lazy(() => z.object({
+    $not: z.union([
+        ValueComparisonContainsSchema,
+        ValueComparisonRangeNumericSchema,
+        ValueComparisonNeSchema,
+        ValueComparisonInSchema,
+        ValueComparisonNinSchema,
+        ValueComparisonRegexSchema,
+    ])
+}));
+
+const ArrayValueComparisonAllSchema = z.object({ $all: z.array(z.union([z.string(), z.number()])) });
+const ArrayValueComparisonSizeSchema = z.object({ $size: z.number().int().min(0) });
+
+const ValueComparisonSchema = z.union([
+    ValueComparisonScalarSchema,
+    ValueComparisonContainsSchema,
+    ValueComparisonRangeNumericSchema,
+    ValueComparisonNeSchema,
+    ValueComparisonInSchema,
+    ValueComparisonNinSchema,
+    ValueComparisonNotSchema,
+    ValueComparisonExistsSchema,
+    ValueComparisonTypeSchema,
+    ValueComparisonRegexSchema,
+]);
+
+const ArrayValueComparisonElemMatchSchema = z.object({
+    $elemMatch: z.union([ValueComparisonSchema, z.lazy(() => WhereFilterSchema)]),
+});
+const ArrayValueComparisonSchema = z.union([
+    ArrayValueComparisonElemMatchSchema,
+    ArrayValueComparisonAllSchema,
+    ArrayValueComparisonSizeSchema,
+]);
 
 export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef, any> = z.lazy(() =>
     z.union([
@@ -18,33 +76,6 @@ export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef
     ])
 );
 
-export const UpdatingMethodSchema = z.enum(['merge', 'assign']);
-
-const ValueComparisonRangeNumericSchemaPartial: Record<string, ZodOptional<ZodNumber>> = {};
-ValueComparisonRangeOperators.forEach(operator => ValueComparisonRangeNumericSchemaPartial[operator] = z.number().optional());
-const ValueComparisonRangeNumericSchema = z.object(ValueComparisonRangeNumericSchemaPartial);
-const ValueComparisonContainsSchema = z.object({
-    $contains: z.union([z.string(), z.number()]),
-});
-/*
-const ValueComparisonArrayContainsSchema = z.object({
-    array_contains: z.union([z.string(), z.number()]),
-});
-*/
-const ValueComparisonScalarSchema = z.union([z.string(), z.number()]);
-
-const ValueComparisonSchema = z.union([
-    ValueComparisonScalarSchema,
-    ValueComparisonContainsSchema,
-    //ValueComparisonArrayContainsSchema,
-    ValueComparisonRangeNumericSchema,
-]);
-
-const ArrayValueComparisonElemMatchSchema = z.object({
-    $elemMatch: z.union([ValueComparisonSchema, WhereFilterSchema]),
-});
-const ArrayValueComparisonSchema = ArrayValueComparisonElemMatchSchema;
-
 
 export function isWhereFilterDefinition(x: unknown):x is WhereFilterDefinition {
     return WhereFilterSchema.safeParse(x).success;
@@ -60,4 +91,32 @@ export function isValueComparisonContains(x:unknown, alreadyProvedIsPlainObject?
 
 export function isArrayValueComparisonElemMatch(x: unknown): x is ArrayValueComparisonElemMatch {
     return ArrayValueComparisonElemMatchSchema.safeParse(x).success;
+}
+
+export function isValueComparisonNe(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonNe {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$ne" in (x as object);
+}
+export function isValueComparisonIn(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonIn {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$in" in (x as object);
+}
+export function isValueComparisonNin(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonNin {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$nin" in (x as object);
+}
+export function isValueComparisonNot(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonNot {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$not" in (x as object);
+}
+export function isValueComparisonExists(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonExists {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$exists" in (x as object);
+}
+export function isValueComparisonType(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonType {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$type" in (x as object);
+}
+export function isValueComparisonRegex(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonRegex {
+    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$regex" in (x as object);
+}
+export function isArrayValueComparisonAll(x: unknown): x is ArrayValueComparisonAll {
+    return ArrayValueComparisonAllSchema.safeParse(x).success;
+}
+export function isArrayValueComparisonSize(x: unknown): x is ArrayValueComparisonSize {
+    return ArrayValueComparisonSizeSchema.safeParse(x).success;
 }

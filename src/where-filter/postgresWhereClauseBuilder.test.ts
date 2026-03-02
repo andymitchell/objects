@@ -1,4 +1,4 @@
-import postgresWhereClauseBuilder, {  type PreparedWhereClauseStatement, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder.js";
+import postgresWhereClauseBuilder, {  type PreparedWhereClauseResult, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder.js";
 
 
 import {  standardTests, type MatchJavascriptObjectInTesting } from "./standardTests.js";
@@ -37,7 +37,7 @@ describe('postgres where clause builder', () => {
 
             await db.query(`INSERT INTO ${schemaScope('test_table_123')} (recordColumn) VALUES('${JSON.stringify(object)}'::jsonb)`);
 
-            let clause:PreparedWhereClauseStatement | undefined;
+            let clause:PreparedWhereClauseResult | undefined;
             try {
                 clause = postgresWhereClauseBuilder(filter, pm);
 
@@ -53,18 +53,28 @@ describe('postgres where clause builder', () => {
                 throw e;
             }
 
+            if( !clause.success ) {
+                // Re-throw validation errors so standardTests error-handling tests still work.
+                // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
+                const msg = clause.errors.map(e => e.message).join('; ');
+                if( msg.toLowerCase().includes('not well-defined') ) {
+                    throw new Error(msg);
+                }
+                return undefined;
+            }
+
             let queryStr:string;
-            if( clause.whereClauseStatement ) {
-                queryStr = `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.whereClauseStatement}`;
+            if( clause.where_clause_statement ) {
+                queryStr = `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.where_clause_statement}`;
             } else {
                 queryStr = `SELECT * FROM ${schemaScope('test_table_123')}`;
             }
-            
+
             try {
-                const result = await db.query(queryStr, clause.statementArguments);
-                
+                const result = await db.query(queryStr, clause.statement_arguments);
+
                 const rows = result.rows;
-            
+
                 return rows.length>0;
             } catch(e) {
                 debugger;

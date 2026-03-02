@@ -4,7 +4,7 @@ import { convertDotPropPathToSqliteJsonPath } from './convertDotPropPathToSqlite
 import matchJavascriptObject, { compileMatchJavascriptObject, filterJavascriptObjects } from './matchJavascriptObject.ts';
 import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder.ts';
 import sqliteWhereClauseBuilder, { SqlitePropertyMapSchema } from './sqliteWhereClauseBuilder.ts';
-import type { IPropertyMap, PreparedWhereClauseStatement } from './whereClauseEngine.ts';
+import type { IPropertyMap, PreparedWhereClauseStatement, PreparedWhereClauseResult, WhereClauseError } from './whereClauseEngine.ts';
 import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
 import { isLogicFilter, isPartialObjectFilter } from './typeguards.ts';
 import type {  MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition} from './types.ts';
@@ -31,6 +31,8 @@ export type {
     LogicFilter,
     PartialObjectFilter,
     PreparedWhereClauseStatement,
+    PreparedWhereClauseResult,
+    WhereClauseError,
     IPropertyMap,
     ValueComparisonFlexi
 };

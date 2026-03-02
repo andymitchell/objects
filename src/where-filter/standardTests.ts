@@ -2025,7 +2025,511 @@ export function standardTests(testConfig: StandardTestConfig) {
             ContactSchema
         );
 
-        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported 
+        if (result === undefined) { console.warn('Skipping'); return; } // indicates not supported
         expect(result).toBe(true);
     })
+
+
+    // ──────────────────────────────────────────────────────────────────────
+    // New MongoDB operators (Phase 5)
+    // ──────────────────────────────────────────────────────────────────────
+
+    describe('$ne (not equal)', () => {
+        test('$ne string: passes when not equal', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $ne: 'Bob' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$ne string: fails when equal', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $ne: 'Andy' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$ne number: passes when not equal', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $ne: 25 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$ne number: fails when equal', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $ne: 30 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$ne on missing optional field: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.age': { $ne: 30 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+    });
+
+    describe('$in (membership)', () => {
+        test('$in string: passes when value in list', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $in: ['Andy', 'Bob'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$in string: fails when value not in list', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $in: ['Bob', 'Carol'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$in number: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $in: [25, 30, 35] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$in number: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $in: [25, 35] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$in on array field: passes when intersection non-empty', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $in: ['NYC', 'Tokyo'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$in on array field: fails when no intersection', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $in: ['Tokyo', 'Paris'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('$nin (not in)', () => {
+        test('$nin string: passes when value not in list', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $nin: ['Bob', 'Carol'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$nin string: fails when value in list', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $nin: ['Andy', 'Bob'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$nin number: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $nin: [25, 35] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$nin number: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $nin: [25, 30, 35] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$nin on array field: passes when no intersection', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $nin: ['Tokyo', 'Paris'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$nin on array field: fails when intersection exists', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $nin: ['NYC', 'Tokyo'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('$not (field-level negation)', () => {
+        test('$not with $gt: passes when value does not exceed', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 20 } },
+                { 'contact.age': { $not: { $gt: 25 } } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$not with $gt: fails when value exceeds', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $not: { $gt: 25 } } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$not with $contains: passes when substring absent', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $not: { $contains: 'Bob' } } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$not with $contains: fails when substring present', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $not: { $contains: 'And' } } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$not on missing optional field: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.age': { $not: { $gt: 0 } } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+    });
+
+    describe('$exists', () => {
+        test('$exists true on existing field: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $exists: true } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$exists true on missing field: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.age': { $exists: true } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$exists false on missing field: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.age': { $exists: false } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$exists false on existing field: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $exists: false } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$exists true on existing array: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London'] } },
+                { 'contact.locations': { $exists: true } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$exists false on missing array: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.locations': { $exists: false } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+    });
+
+    describe('$type', () => {
+        test('$type "string": passes on string field', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $type: 'string' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$type "string": fails on number field', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $type: 'string' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$type "number": passes on number field', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', age: 30 } },
+                { 'contact.age': { $type: 'number' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$type "number": fails on string field', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $type: 'number' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$type "array": passes on array field', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London'] } },
+                { 'contact.locations': { $type: 'array' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$type on missing field: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.age': { $type: 'number' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('$regex', () => {
+        test('$regex: passes when pattern matches', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $regex: 'And' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$regex: fails when pattern does not match', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $regex: 'Bob' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$regex anchored: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $regex: '^And' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$regex anchored: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $regex: '^ndy' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$regex case-insensitive via $options: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $regex: 'andy', $options: 'i' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$regex case-sensitive default: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.name': { $regex: 'andy' } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('$all (array contains all)', () => {
+        test('$all: passes when array contains all values', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC', 'Tokyo'] } },
+                { 'contact.locations': { $all: ['London', 'NYC'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$all: fails when array missing a value', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $all: ['London', 'Tokyo'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$all with single value: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $all: ['London'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$all on empty array: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [] } },
+                { 'contact.locations': { $all: ['London'] } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('$size (array length)', () => {
+        test('$size: passes when length matches', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $size: 2 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$size: fails when length differs', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                { 'contact.locations': { $size: 3 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+
+        test('$size 0 on empty array: passes', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: [] } },
+                { 'contact.locations': { $size: 0 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(true);
+        });
+
+        test('$size 0 on non-empty array: fails', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy', locations: ['London'] } },
+                { 'contact.locations': { $size: 0 } } as any,
+                ContactSchema
+            );
+            if (result === undefined) { console.warn('Skipping'); return; }
+            expect(result).toBe(false);
+        });
+    });
+
 }

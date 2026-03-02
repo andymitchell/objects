@@ -567,13 +567,667 @@ Test descriptions (string labels) should also update to reference the new names 
 
 Run the full test suite. All tests should pass with the new operator names. No tests should be added or removed — this is purely a rename.
 
-# [ ] Phase 4
+# [x] Phase 4
 
 Write a plan for how we will support the missing functionality currently found in MongoDB but not us: `$ne`, `$in`, `$nin`, `$not`, `$exists`, `$type`, `$regex`, `$all`, `$size`. 
 
 It will need to be supported in the types and schemas, matchJavascriptOBject, the postgres/sqlite query builders, the standardTests (ideally separated cleanly with 'describe' blocks). 
 
-Output the plan in this document as steps under Phase 4a.
+TDD is most important. Make a plan for how they'll be tested first, ideally all in standardTests.ts. 
 
-# [ ] Phase 4a
-_To be filled in by Phase 4_
+Output the plan in this document as steps under `Phase 4a`.
+
+# [x] Phase 4a
+
+Discussed the builder return type change. Agreed:
+1. **All errors become error-as-value** — not just capability gaps ($regex on SQLite), but also validation errors (bad filter shape, missing paths, type mismatches). No more throws from builders.
+2. **Error includes both filters** — each error carries the specific sub-filter that failed AND the top-level root filter.
+3. **Breaking change to return type** — `PreparedWhereClauseStatement` is replaced by a discriminated union `PreparedWhereClauseResult`. Consumers must check `.success`.
+4. **snake_case for property names** — package convention. Existing camelCase properties (`whereClauseStatement`, `statementArguments`) renamed to `where_clause_statement`, `statement_arguments`.
+
+Phase 5 updated with these decisions.
+
+# [x] Phase 5
+
+All 772 tests pass (7 skipped). Implemented all 9 new MongoDB operators plus error-as-value return type migration.
+
+**What was done:**
+
+- **Step 0 (Result type migration):** `PreparedWhereClauseResult` discriminated union replaces `PreparedWhereClauseStatement` as the builder return type. `WhereClauseError` type carries `sub_filter`, `root_filter`, and `message`. `IPropertyMap.generateSql` now receives `errors` and `rootFilter` params. Both dialect builders updated. All callers and tests updated to check `.success` and use `where_clause_statement`/`statement_arguments`. Old type kept as deprecated alias.
+
+- **Step 1 (Tests):** ~48 new tests added to `standardTests.ts` covering `$ne`, `$in`, `$nin`, `$not`, `$exists`, `$type`, `$regex`, `$all`, `$size`. Run across all 3 test engines (JS matcher, Postgres, SQLite) = ~144 new test executions.
+
+- **Steps 2–5 (Types, schemas, JS matching, SQL builders):** All operators implemented in `types.ts`, `schemas.ts`, `matchJavascriptObject.ts`, `postgresWhereClauseBuilder.ts`, `sqliteWhereClauseBuilder.ts`. Key decisions:
+  - `$exists`/`$type` handled BEFORE the array/scalar branch in `_matchJavascriptObject`
+  - `$ne`/`$nin`/`$not` use `optionalWrapperNullMatches` (IS NULL OR ...) for MongoDB-compatible missing-field behavior
+  - `$type` in Postgres uses `jsonb_typeof()` on raw JSONB (via `->` chain)
+  - `$type` in SQLite uses `json_type()` with type name mapping (number→integer/real, boolean→true/false, string→text)
+  - `$regex` in SQLite pushes `WhereClauseError` and returns `FALSE` placeholder
+  - `$regex` in Postgres uses `~` (case-sensitive) or `~*` (case-insensitive via `$options: 'i'`)
+  - `$all` uses multiple `EXISTS` subqueries joined with AND
+  - `$size` uses `jsonb_array_length` (Postgres) / `json_array_length` (SQLite)
+
+## Implementation Plan
+
+
+## Operator Categories
+
+| Operator | Category | What it does | Works on |
+|----------|----------|-------------|----------|
+| `$ne` | Scalar comparison | Not equal | string, number |
+| `$in` | Membership | Value in list (scalar) or array intersects list (array) | string, number; also arrays |
+| `$nin` | Membership | Value NOT in list / array doesn't intersect list | string, number; also arrays |
+| `$not` | Meta/wrapper | Negates an inner operator expression | wraps any ValueComparison |
+| `$exists` | Meta | Field exists (not null/undefined) | any field |
+| `$type` | Meta | Runtime type check | any field |
+| `$regex` | String | Regex match | string |
+| `$all` | Array-level | Array contains ALL specified values | arrays |
+| `$size` | Array-level | Array has exactly N elements | arrays |
+
+### Key Design Decisions
+
+**$ne on undefined/null values:** Follow MongoDB — `{$ne: 5}` on a missing field returns `true` (the field's value is not 5). In JS, `undefined !== 5` is naturally `true`. In SQL, requires `(column IS NULL OR column != $N)` — opposite of the current optionalWrapper pattern.
+
+**$in/$nin on array fields:** Follow MongoDB — `{$in: ['a','b']}` on an array means "array contains at least one of these" (intersection is non-empty). Needs handling in both `compareValue` (scalar fields) and `compareArray` (array fields).
+
+**$not wraps operator expressions only:** Per MongoDB, `{$not: {$gt: 5}}` is valid, `{$not: 5}` is not. $not takes a non-scalar value comparison (range, $contains, $ne, $in, $regex, etc.) and negates it. On undefined/null: returns `true` (MongoDB: $not matches non-existent fields).
+
+**$type values:** `"string"`, `"number"`, `"boolean"`, `"object"`, `"array"`, `"null"`. Maps to JS `typeof` (with special casing for array/null/object). SQL: Postgres `jsonb_typeof()`, SQLite `json_type()` (with type name mapping).
+
+**$regex in SQLite:** SQLite has no native regex. Implement `$regex` for Postgres only. SQLite builder pushes a `WhereClauseError` to the errors array and returns a placeholder SQL fragment. The builder's top-level return is `{success: false, errors: [...]}`, surfacing exactly which sub-filter used `$regex`. This is handled by the error-as-value return type (see below).
+
+**Builder return type (error-as-value):** Both `postgresWhereClauseBuilder` and `sqliteWhereClauseBuilder` change from returning `PreparedWhereClauseStatement` to returning `PreparedWhereClauseResult` — a discriminated union:
+```ts
+type WhereClauseError = {
+    sub_filter: WhereFilterDefinition;    // the specific sub-filter that caused the error
+    root_filter: WhereFilterDefinition;   // the entire top-level filter
+    message: string;                      // human-readable error description
+};
+
+type PreparedWhereClauseResult =
+    | { success: true; where_clause_statement: string; statement_arguments: PreparedStatementArgument[] }
+    | { success: false; errors: WhereClauseError[] };
+```
+All errors become values — validation errors (bad filter shape, missing paths, type mismatches) AND capability gaps ($regex on SQLite). No throws from builders.
+
+Internal plumbing: a shared `errors: WhereClauseError[]` array is passed through the call chain (`buildWhereClause` → `whereClauseBuilder` → `generateSql` → `generateComparison`). When a function hits an error, it pushes to the array and returns a placeholder SQL fragment (e.g., `'FALSE'`). At the top level, `buildWhereClause` checks `errors.length > 0` and returns the appropriate discriminant. This collects ALL errors in a single pass rather than bailing on the first one.
+
+**snake_case for property names:** Package convention. Existing `PreparedWhereClauseStatement` properties renamed: `whereClauseStatement` → `where_clause_statement`, `statementArguments` → `statement_arguments`. The old type is replaced by the new result type. `IPropertyMap.generateSql` signature updated with additional `errors` and `root_filter` parameters.
+
+**$exists in `_matchJavascriptObject`:** Handle BEFORE the array/scalar branch — it checks the resolved value itself, not its contents. Same for `$type`.
+
+---
+
+## Step 0: Result Type Migration (error-as-value)
+
+This step is a prerequisite — it changes the builder return type before any new operators are added. All existing tests must still pass after this step (they just check `.success === true` and unwrap the result).
+
+### 0a. New types in `whereClauseEngine.ts` (or a shared types file)
+
+```ts
+export type WhereClauseError = {
+    sub_filter: WhereFilterDefinition;
+    root_filter: WhereFilterDefinition;
+    message: string;
+};
+
+export type PreparedWhereClauseResult =
+    | { success: true; where_clause_statement: string; statement_arguments: PreparedStatementArgument[] }
+    | { success: false; errors: WhereClauseError[] };
+```
+
+Remove (or keep as internal-only) the old `PreparedWhereClauseStatement` type. Export `PreparedWhereClauseResult` and `WhereClauseError` from the package index.
+
+### 0b. Update `IPropertyMap` interface
+
+```ts
+export interface IPropertyMap<T extends Record<string, any>> {
+    generateSql(
+        dotprop_path: string,
+        filter: WhereFilterDefinition<T>,
+        statement_arguments: PreparedStatementArgument[],
+        errors: WhereClauseError[],
+        root_filter: WhereFilterDefinition<T>
+    ): string;
+}
+```
+
+### 0c. Update `buildWhereClause` in `whereClauseEngine.ts`
+
+```ts
+export function buildWhereClause<T extends Record<string, any> = any>(
+    filter: WhereFilterDefinition<T>,
+    property_sql_map: IPropertyMap<T>
+): PreparedWhereClauseResult {
+    const errors: WhereClauseError[] = [];
+    if (!isWhereFilterDefinition(filter)) {
+        errors.push({
+            sub_filter: filter as any,
+            root_filter: filter as any,
+            message: `Not a valid WhereFilterDefinition: ${safeJson(filter)}`
+        });
+        return { success: false, errors };
+    }
+    const statement_arguments: PreparedStatementArgument[] = [];
+    const where_clause_statement = whereClauseBuilder(filter, statement_arguments, property_sql_map, errors, filter);
+    if (errors.length > 0) {
+        return { success: false, errors };
+    }
+    return { success: true, where_clause_statement, statement_arguments };
+}
+```
+
+### 0d. Update `whereClauseBuilder` (internal, recursive)
+
+Add `errors` and `root_filter` params, pass them through to `generateSql`. Convert existing throws to `errors.push(...)` + return placeholder `'FALSE'`.
+
+```ts
+function whereClauseBuilder<T extends Record<string, any> = any>(
+    filter: WhereFilterDefinition<T>,
+    statement_arguments: PreparedStatementArgument[],
+    property_sql_map: IPropertyMap<T>,
+    errors: WhereClauseError[],
+    root_filter: WhereFilterDefinition<T>
+): string
+```
+
+### 0e. Update dialect builders (`postgresWhereClauseBuilder.ts`, `sqliteWhereClauseBuilder.ts`)
+
+1. Each builder's `generateSql` and `generateComparison` accept `errors: WhereClauseError[]` and `root_filter: WhereFilterDefinition`.
+2. Convert existing throws (path validation, type mismatch) to `errors.push({sub_filter: filter, root_filter, message: '...'})` + return `'FALSE'`.
+3. Top-level export function signature changes:
+   ```ts
+   export default function sqliteWhereClauseBuilder<T extends Record<string, any> = any>(
+       filter: WhereFilterDefinition<T>,
+       property_sql_map: IPropertyMap<T>
+   ): PreparedWhereClauseResult
+   ```
+
+### 0f. Update all callers and tests
+
+- Every call site that uses the builder result must now check `result.success` before accessing `result.where_clause_statement` / `result.statement_arguments`.
+- Existing tests that pass a filter and check SQL output need a thin unwrap: assert `result.success === true`, then check the fields.
+- Update the package's `index.ts` exports: remove `PreparedWhereClauseStatement`, add `PreparedWhereClauseResult`, `WhereClauseError`.
+
+### 0g. Rename existing snake_case migration
+
+While touching every test and caller, rename:
+- `whereClauseStatement` → `where_clause_statement`
+- `statementArguments` → `statement_arguments`
+
+This is a single find-and-replace pass across the codebase.
+
+---
+
+## Step 1: Test Plan (TDD — all tests written first, all fail)
+
+All tests go in `standardTests.ts` in new `describe` blocks after the existing `$elemMatch element-type branching` block. Each uses the existing `ContactSchema` unless noted.
+
+### `describe('$ne (not equal)')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$ne string: passes when not equal` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$ne: 'Bob'}}` | `true` |
+| `$ne string: fails when equal` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$ne: 'Andy'}}` | `false` |
+| `$ne number: passes when not equal` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$ne: 25}}` | `true` |
+| `$ne number: fails when equal` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$ne: 30}}` | `false` |
+| `$ne on missing optional field: passes` | `{contact: {name: 'Andy'}}` | `{'contact.age': {$ne: 30}}` | `true` |
+
+### `describe('$in (membership)')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$in string: passes when value in list` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$in: ['Andy', 'Bob']}}` | `true` |
+| `$in string: fails when value not in list` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$in: ['Bob', 'Carol']}}` | `false` |
+| `$in number: passes` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$in: [25, 30, 35]}}` | `true` |
+| `$in number: fails` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$in: [25, 35]}}` | `false` |
+| `$in on array field: passes when intersection non-empty` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$in: ['NYC', 'Tokyo']}}` | `true` |
+| `$in on array field: fails when no intersection` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$in: ['Tokyo', 'Paris']}}` | `false` |
+
+### `describe('$nin (not in)')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$nin string: passes when value not in list` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$nin: ['Bob', 'Carol']}}` | `true` |
+| `$nin string: fails when value in list` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$nin: ['Andy', 'Bob']}}` | `false` |
+| `$nin number: passes` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$nin: [25, 35]}}` | `true` |
+| `$nin number: fails` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$nin: [25, 30, 35]}}` | `false` |
+| `$nin on array field: passes when no intersection` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$nin: ['Tokyo', 'Paris']}}` | `true` |
+| `$nin on array field: fails when intersection exists` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$nin: ['NYC', 'Tokyo']}}` | `false` |
+
+### `describe('$not (field-level negation)')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$not with $gt: passes when value does not exceed` | `{contact: {name: 'Andy', age: 20}}` | `{'contact.age': {$not: {$gt: 25}}}` | `true` |
+| `$not with $gt: fails when value exceeds` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$not: {$gt: 25}}}` | `false` |
+| `$not with $contains: passes when substring absent` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$not: {$contains: 'Bob'}}}` | `true` |
+| `$not with $contains: fails when substring present` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$not: {$contains: 'And'}}}` | `false` |
+| `$not on missing optional field: passes` | `{contact: {name: 'Andy'}}` | `{'contact.age': {$not: {$gt: 0}}}` | `true` |
+
+### `describe('$exists')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$exists true on existing field: passes` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$exists: true}}` | `true` |
+| `$exists true on missing field: fails` | `{contact: {name: 'Andy'}}` | `{'contact.age': {$exists: true}}` | `false` |
+| `$exists false on missing field: passes` | `{contact: {name: 'Andy'}}` | `{'contact.age': {$exists: false}}` | `true` |
+| `$exists false on existing field: fails` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$exists: false}}` | `false` |
+| `$exists true on existing array: passes` | `{contact: {name: 'Andy', locations: ['London']}}` | `{'contact.locations': {$exists: true}}` | `true` |
+| `$exists false on missing array: passes` | `{contact: {name: 'Andy'}}` | `{'contact.locations': {$exists: false}}` | `true` |
+
+### `describe('$type')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$type "string": passes on string field` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$type: 'string'}}` | `true` |
+| `$type "string": fails on number field` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$type: 'string'}}` | `false` |
+| `$type "number": passes on number field` | `{contact: {name: 'Andy', age: 30}}` | `{'contact.age': {$type: 'number'}}` | `true` |
+| `$type "number": fails on string field` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$type: 'number'}}` | `false` |
+| `$type "array": passes on array field` | `{contact: {name: 'Andy', locations: ['London']}}` | `{'contact.locations': {$type: 'array'}}` | `true` |
+| `$type on missing field: fails` | `{contact: {name: 'Andy'}}` | `{'contact.age': {$type: 'number'}}` | `false` |
+
+### `describe('$regex')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$regex: passes when pattern matches` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$regex: 'And'}}` | `true` |
+| `$regex: fails when pattern does not match` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$regex: 'Bob'}}` | `false` |
+| `$regex anchored: passes` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$regex: '^And'}}` | `true` |
+| `$regex anchored: fails` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$regex: '^ndy'}}` | `false` |
+| `$regex case-insensitive via $options: passes` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$regex: 'andy', $options: 'i'}}` | `true` |
+| `$regex case-sensitive default: fails` | `{contact: {name: 'Andy'}}` | `{'contact.name': {$regex: 'andy'}}` | `false` |
+
+### `describe('$all (array contains all)')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$all: passes when array contains all values` | `{contact: {name: 'Andy', locations: ['London', 'NYC', 'Tokyo']}}` | `{'contact.locations': {$all: ['London', 'NYC']}}` | `true` |
+| `$all: fails when array missing a value` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$all: ['London', 'Tokyo']}}` | `false` |
+| `$all with single value: passes` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$all: ['London']}}` | `true` |
+| `$all on empty array: fails` | `{contact: {name: 'Andy', locations: []}}` | `{'contact.locations': {$all: ['London']}}` | `false` |
+
+### `describe('$size (array length)')`
+
+| Test name | Object | Filter | Expected |
+|-----------|--------|--------|----------|
+| `$size: passes when length matches` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$size: 2}}` | `true` |
+| `$size: fails when length differs` | `{contact: {name: 'Andy', locations: ['London', 'NYC']}}` | `{'contact.locations': {$size: 3}}` | `false` |
+| `$size 0 on empty array: passes` | `{contact: {name: 'Andy', locations: []}}` | `{'contact.locations': {$size: 0}}` | `true` |
+| `$size 0 on non-empty array: fails` | `{contact: {name: 'Andy', locations: ['London']}}` | `{'contact.locations': {$size: 0}}` | `false` |
+
+### `describe('builder error-as-value')`
+
+These tests verify the new `PreparedWhereClauseResult` error handling. They run against the SQL builders only (not `matchJavascriptObject`).
+
+| Test name | Builder | Filter | Expected |
+|-----------|---------|--------|----------|
+| `SQLite: $regex returns success false with error` | sqlite | `{'contact.name': {$regex: 'And'}}` | `{success: false, errors: [{sub_filter: {$regex: 'And'}, root_filter: <entire filter>, message: /regex.*not supported/i}]}` |
+| `Postgres: $regex returns success true` | postgres | `{'contact.name': {$regex: 'And'}}` | `{success: true, ...}` |
+| `SQLite: valid filter returns success true` | sqlite | `{'contact.name': 'Andy'}` | `{success: true, where_clause_statement: ..., statement_arguments: [...]}` |
+| `invalid filter returns success false` | both | `{not_a_real_path: 'x'}` (invalid path) | `{success: false, errors: [{..., message: /path/i}]}` |
+| `$regex nested in $and: SQLite surfaces error with sub_filter and root_filter` | sqlite | `{$and: [{'contact.name': {$regex: 'x'}}, {'contact.age': {$gt: 5}}]}` | `{success: false, errors: [{sub_filter: {'contact.name': {$regex: 'x'}}, root_filter: <entire $and filter>, ...}]}` |
+
+**Total: ~58 new tests across 10 describe blocks.**
+
+---
+
+## Step 2: Types (`types.ts`)
+
+### New value comparison types
+
+```ts
+export type ValueComparisonNe<T = any> = { $ne: T extends string ? string : T extends number ? number : never };
+export type ValueComparisonIn<T = any> = { $in: (T extends string ? string : T extends number ? number : never)[] };
+export type ValueComparisonNin<T = any> = { $nin: (T extends string ? string : T extends number ? number : never)[] };
+export type ValueComparisonExists = { $exists: boolean };
+export type ValueComparisonType = { $type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' };
+export type ValueComparisonRegex = { $regex: string; $options?: string };
+export type ValueComparisonNot<T = any> = {
+    $not: ValueComparisonRange<T> | ValueComparisonContains | ValueComparisonNe<T>
+          | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonRegex
+};
+```
+
+### New array comparison types
+
+```ts
+export type ArrayValueComparisonAll<T = any> = { $all: T[] };
+export type ArrayValueComparisonSize = { $size: number };
+```
+
+### Update ValueComparisonFlexi
+
+Add the new operators to the union. `ValueComparisonFlexi<T>` becomes:
+```ts
+export type ValueComparisonFlexi<T = any> =
+    (T extends string
+        ? ValueComparisonString | ValueComparisonRegex
+        : T extends number
+            ? ValueComparisonRangeNumeric
+            : never)
+    | ValueComparisonNe<T>
+    | ValueComparisonIn<T>
+    | ValueComparisonNin<T>
+    | ValueComparisonNot<T>
+    | ValueComparisonExists
+    | ValueComparisonType
+    | T;
+```
+
+### Update ArrayValueComparison
+
+```ts
+export type ArrayValueComparison<T = any> =
+    ArrayValueComparisonElemMatch<T>
+    | ArrayValueComparisonAll<T>
+    | ArrayValueComparisonSize;
+```
+
+---
+
+## Step 3: Schemas & Typeguards (`schemas.ts`, `typeguards.ts`)
+
+### New Zod schemas in `schemas.ts`
+
+```ts
+const ValueComparisonNeSchema = z.object({ $ne: z.union([z.string(), z.number()]) });
+const ValueComparisonInSchema = z.object({ $in: z.array(z.union([z.string(), z.number()])) });
+const ValueComparisonNinSchema = z.object({ $nin: z.array(z.union([z.string(), z.number()])) });
+const ValueComparisonExistsSchema = z.object({ $exists: z.boolean() });
+const ValueComparisonTypeSchema = z.object({
+    $type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'null'])
+});
+const ValueComparisonRegexSchema = z.object({
+    $regex: z.string(),
+    $options: z.string().optional()
+});
+// $not wraps non-scalar operators:
+const ValueComparisonNotSchema = z.object({
+    $not: z.union([
+        ValueComparisonContainsSchema,
+        ValueComparisonRangeNumericSchema,
+        ValueComparisonNeSchema,
+        ValueComparisonInSchema,
+        ValueComparisonNinSchema,
+        ValueComparisonRegexSchema,
+    ])
+});
+
+const ArrayValueComparisonAllSchema = z.object({ $all: z.array(z.union([z.string(), z.number()])) });
+const ArrayValueComparisonSizeSchema = z.object({ $size: z.number().int().nonnegative() });
+```
+
+### Update ValueComparisonSchema
+
+```ts
+const ValueComparisonSchema = z.union([
+    ValueComparisonScalarSchema,
+    ValueComparisonContainsSchema,
+    ValueComparisonRangeNumericSchema,
+    ValueComparisonNeSchema,
+    ValueComparisonInSchema,
+    ValueComparisonNinSchema,
+    ValueComparisonNotSchema,
+    ValueComparisonExistsSchema,
+    ValueComparisonTypeSchema,
+    ValueComparisonRegexSchema,
+]);
+```
+
+### Update ArrayValueComparisonSchema
+
+```ts
+const ArrayValueComparisonSchema = z.union([
+    ArrayValueComparisonElemMatchSchema,
+    ArrayValueComparisonAllSchema,
+    ArrayValueComparisonSizeSchema,
+]);
+```
+
+### New typeguard functions in `schemas.ts`
+
+```ts
+export function isValueComparisonNe(x: unknown, proved?: boolean): x is ValueComparisonNe {
+    return (proved || isPlainObject(x)) && "$ne" in x;
+}
+export function isValueComparisonIn(x: unknown, proved?: boolean): x is ValueComparisonIn {
+    return (proved || isPlainObject(x)) && "$in" in x;
+}
+export function isValueComparisonNin(x: unknown, proved?: boolean): x is ValueComparisonNin {
+    return (proved || isPlainObject(x)) && "$nin" in x;
+}
+export function isValueComparisonNot(x: unknown, proved?: boolean): x is ValueComparisonNot {
+    return (proved || isPlainObject(x)) && "$not" in x;
+}
+export function isValueComparisonExists(x: unknown, proved?: boolean): x is ValueComparisonExists {
+    return (proved || isPlainObject(x)) && "$exists" in x;
+}
+export function isValueComparisonType(x: unknown, proved?: boolean): x is ValueComparisonType {
+    return (proved || isPlainObject(x)) && "$type" in x;
+}
+export function isValueComparisonRegex(x: unknown, proved?: boolean): x is ValueComparisonRegex {
+    return (proved || isPlainObject(x)) && "$regex" in x;
+}
+export function isArrayValueComparisonAll(x: unknown): x is ArrayValueComparisonAll {
+    return ArrayValueComparisonAllSchema.safeParse(x).success;
+}
+export function isArrayValueComparisonSize(x: unknown): x is ArrayValueComparisonSize {
+    return ArrayValueComparisonSizeSchema.safeParse(x).success;
+}
+```
+
+---
+
+## Step 4: JS Matching (`matchJavascriptObject.ts`)
+
+### 4a. Handle `$exists` and `$type` in `_matchJavascriptObject`
+
+Insert AFTER the undefined/spreading check (line ~145) and BEFORE the `Array.isArray(objectValue)` check (line ~147):
+
+```ts
+// Handle $exists before array/scalar branching — it checks the value itself
+if (isValueComparisonExists(dotpropFilter)) {
+    if (dotpropFilter.$exists) {
+        return objectValue !== undefined && objectValue !== null;
+    } else {
+        return objectValue === undefined || objectValue === null;
+    }
+}
+
+// Handle $type before array/scalar branching — it checks the value's type
+if (isValueComparisonType(dotpropFilter)) {
+    return checkJsType(objectValue, dotpropFilter.$type);
+}
+```
+
+`checkJsType` helper:
+```ts
+function checkJsType(value: any, expectedType: string): boolean {
+    if (value === undefined || value === null) {
+        return expectedType === 'null';
+    }
+    switch (expectedType) {
+        case 'string': return typeof value === 'string';
+        case 'number': return typeof value === 'number';
+        case 'boolean': return typeof value === 'boolean';
+        case 'array': return Array.isArray(value);
+        case 'object': return isPlainObject(value) && !Array.isArray(value);
+        case 'null': return value === null;
+        default: return false;
+    }
+}
+```
+
+### 4b. Add new operators to `compareValue`
+
+Insert new branches AFTER the existing `isValueComparisonContains` check and BEFORE the `isValueComparisonRangeFlexi` check. Order matters: all `$`-prefixed operator checks must come before the deep-equality fallthrough.
+
+```ts
+// $ne
+if (isValueComparisonNe(filterValue, true)) {
+    if (value === undefined || value === null) return true; // MongoDB: ne matches missing
+    return value !== filterValue.$ne;
+}
+
+// $in
+if (isValueComparisonIn(filterValue, true)) {
+    if (value === undefined || value === null) return false;
+    return filterValue.$in.includes(value);
+}
+
+// $nin
+if (isValueComparisonNin(filterValue, true)) {
+    if (value === undefined || value === null) return true; // MongoDB: nin matches missing
+    return !filterValue.$nin.includes(value);
+}
+
+// $not — negate inner comparison
+if (isValueComparisonNot(filterValue, true)) {
+    if (value === undefined || value === null) return true; // MongoDB: $not matches missing
+    return !compareValue(value, filterValue.$not);
+}
+
+// $regex
+if (isValueComparisonRegex(filterValue, true)) {
+    if (typeof value !== 'string') return false;
+    const regex = new RegExp(filterValue.$regex, filterValue.$options);
+    return regex.test(value);
+}
+```
+
+### 4c. Add `$in`, `$nin`, `$all`, `$size` to `compareArray`
+
+Insert new branches after the `isArrayValueComparisonElemMatch` check and before the compound filter fallthrough:
+
+```ts
+// $in on array: at least one element must be in the list
+if (isValueComparisonIn(filterValue)) {
+    return filterValue.$in.some(v => value.includes(v));
+}
+
+// $nin on array: no element may be in the list
+if (isValueComparisonNin(filterValue)) {
+    return !filterValue.$nin.some(v => value.includes(v));
+}
+
+// $all: array must contain all specified values
+if (isArrayValueComparisonAll(filterValue)) {
+    return filterValue.$all.every(v => value.includes(v));
+}
+
+// $size: array must have exactly N elements
+if (isArrayValueComparisonSize(filterValue)) {
+    return value.length === filterValue.$size;
+}
+```
+
+---
+
+## Step 5: SQL Builders (`postgresWhereClauseBuilder.ts`, `sqliteWhereClauseBuilder.ts`)
+
+### 5a. `generateComparison` — new branches (both builders)
+
+Add BEFORE the `isValueComparisonScalar` check (since new operators are plain objects with `$` keys). Each needs Postgres-specific and SQLite-specific SQL.
+
+**$ne:**
+- Postgres: `(column IS NULL OR column != $N)` (to match MongoDB's missing-field behavior)
+- SQLite: `(column IS NULL OR column != ?)`
+- For non-optional fields, simplify to `column != $N`
+
+**$in:**
+- Postgres: `column IN ($1, $2, ...)` — generate a placeholder for each array element
+- SQLite: `column IN (?, ?, ...)`
+
+**$nin:**
+- Postgres: `(column IS NULL OR column NOT IN ($1, $2, ...))` (missing → matches)
+- SQLite: same pattern
+
+**$not:**
+- Postgres: `(column IS NULL OR NOT (inner_clause))` — recurse into `generateComparison` with the inner expression, then wrap with NOT
+- SQLite: same pattern
+
+**$exists:**
+- Postgres: `$exists: true` → `column IS NOT NULL`; `$exists: false` → `column IS NULL`
+- SQLite: same
+
+**$type:**
+- Postgres: `jsonb_typeof(column) = $N` — type name mapping: string→'string', number→'number', boolean→'boolean', object→'object', array→'array', null→'null'
+- SQLite: `json_type(column) = ?` — type name mapping: string→'text', number→`IN ('integer','real')`, boolean→`IN ('true','false')`, object→'object', array→'array', null→'null'
+
+**$regex:**
+- Postgres: `column ~ $N` (case-sensitive); with `$options: 'i'` → `column ~* $N`
+- SQLite: push `WhereClauseError` to the `errors` array (`{sub_filter: <the $regex filter>, root_filter, message: '$regex is not supported in SQLite'}`) and return `'FALSE'` as placeholder SQL.
+
+### 5b. `generateSql` — array-level operators
+
+In the array-path branch (where `countArraysInPath > 0`), add detection for `$all` and `$size` before the `$elemMatch` check.
+
+**$all on arrays:**
+- Postgres: For each value in `$all`, generate `EXISTS (SELECT 1 FROM jsonb_array_elements(column) AS elem WHERE elem #>> '{}' = $N)`, join with AND.
+- SQLite: For each value, `EXISTS (SELECT 1 FROM json_each(column, '$.path') WHERE value = ?)`, join with AND.
+
+**$size on arrays:**
+- Postgres: `jsonb_array_length(column) = $N`
+- SQLite: `json_array_length(column, '$.path') = ?`
+
+**$in/$nin on arrays:**
+- Detect `isValueComparisonIn`/`isValueComparisonNin` in the array-path branch.
+- Postgres $in: `EXISTS (SELECT 1 FROM jsonb_array_elements(column) AS elem WHERE elem #>> '{}' IN ($1, $2, ...))`.
+- Postgres $nin: `NOT EXISTS (SELECT 1 FROM jsonb_array_elements(column) AS elem WHERE elem #>> '{}' IN ($1, $2, ...))`.
+- SQLite: same pattern with `json_each`.
+
+---
+
+## Step 6: Implementation Order
+
+Implement in rounds to progressively make tests pass:
+
+**Round 0 — Result type migration (Step 0):**
+1. Add `WhereClauseError` and `PreparedWhereClauseResult` types
+2. Update `IPropertyMap` interface with `errors` and `root_filter` params
+3. Update `buildWhereClause` and `whereClauseBuilder` in engine
+4. Update both dialect builders: convert throws → error pushes, update signatures
+5. Rename snake_case properties (`where_clause_statement`, `statement_arguments`)
+6. Update all callers and existing tests to unwrap the result
+7. Run tests — all existing tests must still pass (no new operators yet)
+
+**Round 1 — Simple operators ($ne, $exists, $size):**
+1. Add types, schemas, typeguards for $ne, $exists, $size
+2. Add `$exists` and `checkJsType` handler in `_matchJavascriptObject` (early exit)
+3. Add `$ne` branch in `compareValue`
+4. Add `$size` branch in `compareArray`
+5. Add SQL for $ne, $exists, $size in both builders
+6. Run tests — ~13 tests should pass
+
+**Round 2 — Membership operators ($in, $nin):**
+1. Add types, schemas, typeguards for $in, $nin
+2. Add `$in`/`$nin` branches in `compareValue`
+3. Add `$in`/`$nin` branches in `compareArray`
+4. Add SQL for $in, $nin in both builders (scalar and array paths)
+5. Run tests — ~12 more tests should pass
+
+**Round 3 — Negation ($not):**
+1. Add types, schemas, typeguards for $not
+2. Add `$not` branch in `compareValue` (recursive call)
+3. Add SQL for $not in both builders (NOT wrapper + recursive generateComparison)
+4. Run tests — ~5 more tests should pass
+
+**Round 4 — Type and regex ($type, $regex):**
+1. Add types, schemas, typeguards for $type, $regex
+2. Add `$type` handler in `_matchJavascriptObject` (early exit)
+3. Add `$regex` branch in `compareValue`
+4. Add SQL for $type in both builders (dialect-specific type function)
+5. Add SQL for $regex in Postgres; SQLite pushes `WhereClauseError` and returns `'FALSE'`
+6. Run tests — ~12 more operator tests + builder error tests should pass
+
+**Round 5 — Array containment ($all):**
+1. Add types, schemas, typeguards for $all
+2. Add `$all` branch in `compareArray`
+3. Add SQL for $all in both builders (multiple EXISTS subqueries joined with AND)
+4. Run tests — ~4 more tests should pass
+
+**Round 6 — Final verification:**
+1. Run full test suite (all ~681+ tests)
+2. Update JSDoc on `WhereFilterDefinition` in `types.ts` to document new operators
+3. Mark Phase 5 as complete

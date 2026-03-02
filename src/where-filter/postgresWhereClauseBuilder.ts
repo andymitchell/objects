@@ -1,14 +1,15 @@
 
 import { z } from "zod";
 import type {  ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
-import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterArray, isWhereFilterDefinition } from './schemas.ts';
+import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from './schemas.ts';
 import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
 import isPlainObject from "../utils/isPlainObject.js";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.js";
-import {isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "./typeguards.ts";
-import { ValueComparisonRangeOperators, WhereFilterLogicOperators } from "./consts.ts";
-import { safeJson } from "./safeJson.ts";
+import { isValueComparisonRange, isValueComparisonScalar } from "./typeguards.ts";
+import { ValueComparisonRangeOperators } from "./consts.ts";
+import { buildWhereClause, whereClauseBuilder, isPreparedStatementArgument } from "./whereClauseEngine.ts";
+import type { IPropertyMap, PreparedWhereClauseStatement, PreparedStatementArgument, PreparedStatementArgumentOrObject } from "./whereClauseEngine.ts";
 
 /*
 Future improvements:
@@ -21,6 +22,9 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
 
 
 
+// Re-export shared types from engine for backwards compatibility
+export type { IPropertyMap, PreparedWhereClauseStatement, PreparedStatementArgument };
+
 /**
  * Converts a WhereFilterDefinition into a parameterised Postgres WHERE clause for a JSONB column.
  * Entry point for the whole pipeline: validates the filter, then delegates to the recursive builder.
@@ -32,23 +36,7 @@ PropertyMap needs to be much more composable. It probably needs plugins for:
  * // statementArguments: ['Andy']
  */
 export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, propertySqlMap:IPropertyMap<T>):PreparedWhereClauseStatement {
-    if( !isWhereFilterDefinition(filter) ) {
-        throw new Error("postgresWhereClauseBuilder filter was not well-defined. Received: "+safeJson(filter));
-    }
-
-
-    const statementArguments:PreparedStatementArgument[] = [];
-
-    const whereClauseStatement = _postgresWhereClauseBuilder<T>(filter, statementArguments, propertySqlMap);
-    return {whereClauseStatement, statementArguments};
-}
-
-/**
- * Dialect-specific abstraction for converting a single dot-prop path + filter value into SQL.
- * Implementations know how to map WhereFilterDefinition leaf values to dialect-specific SQL fragments.
- */
-export interface IPropertyMap<T extends Record<string, any>> {
-    generateSql(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[]):string;
+    return buildWhereClause(filter, propertySqlMap);
 }
 
 
@@ -110,7 +98,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
         if( countArraysInPath>0  ) { // && !this.doNotSpreadArray
             
             //throw new Error("Unsupported");
-            // Almost all will involve the format EXISTS(SELECT 1 FROM jsonb_array_elements [CROSS JOIN...] WHERE <<as_column> run on _postgresWhereClauseBuilder>)
+            // Almost all will involve the format EXISTS(SELECT 1 FROM jsonb_array_elements [CROSS JOIN...] WHERE <<as_column> run on whereClauseBuilder>)
 
             const path = [];
             let target:TreeNode | undefined = this.nodeMap[dotpropPath];
@@ -153,7 +141,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                     if( isWhereFilterDefinition(filter.elem_match) ) {
                         // Recurse
                         const subPropertyMap = new PropertyMapSchema(treeNode.schema!, sa.output_column, true);
-                        const result = _postgresWhereClauseBuilder(filter.elem_match, statementArguments, subPropertyMap);
+                        const result = whereClauseBuilder(filter.elem_match, statementArguments, subPropertyMap);
                         //return result;
                         subClause = result;
 
@@ -176,7 +164,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
 
                         keys.forEach(key => {
                             const subFilter:WhereFilterDefinition = {[key]: filter[key]};
-                            const result = _postgresWhereClauseBuilder(subFilter, statementArguments, subPropertyMap);
+                            const result = whereClauseBuilder(subFilter, statementArguments, subPropertyMap);
                             andClauses = [
                                 ...andClauses,
                                 result
@@ -311,61 +299,6 @@ export class PropertyMap<T extends Record<string, any> = Record<string, any>> ex
     }
 }
 
-/**
- * Recursive engine: normalises multi-key filters into AND, handles AND/OR/NOT logic,
- * and delegates single-key property filters to the IPropertyMap dialect layer.
- */
-function _postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], propertySqlMap:IPropertyMap<T>):string {
-    
-    
-    const keys = Object.keys(filter) as Array<keyof typeof filter>;
-    if( keys.length===0 ) {
-        // If there are no keys on the filter, there is no filter. Therefore return all. 
-        return '';
-    } else if( keys.length>1 ) {
-        // If there's more than 1 key on the filter, split it formally into an AND 
-        filter = {
-            AND: keys.map(key => ({[key]: filter[key]}))
-        }
-    }
-
-    if( isLogicFilter(filter) ) {
-        let andClauses:string[] = [];
-
-        for( const type of WhereFilterLogicOperators ) {
-            const filterType = filter[type];
-            if( isWhereFilterArray(filterType) ) {
-                let subClauseString = '';
-                const subClauses = [...filterType].map(subFilter => _postgresWhereClauseBuilder(subFilter, statementArguments, propertySqlMap));
-                if( type==='NOT' ) {
-                    subClauseString =`NOT (${subClauses.join(' OR ')})`;
-                } else if( subClauses.length>0 ) {
-                    if( typeof subClauses[0]!=='string' ) throw new Error("subClauses[0] was empty");
-                    subClauseString = subClauses.length===1? subClauses[0] : `(${subClauses.join(` ${type} `)})`;
-                } else {
-                    if( type==='AND' ) {
-                        subClauseString = '1 = 1'; // Match everything because no conditions exist to fail
-                    } else {
-                        subClauseString = '1 = 0'; // Match nothing because no conditions exist to succeed
-                    }
-                }
-                andClauses = [...andClauses, subClauseString];
-            }
-        }
-        
-        return andClauses.length===1? andClauses[0]! : `(${andClauses.join(' AND ')})`;
-
-    } else {
-        const key = keys[0];
-        if( typeof key!=='string' ) throw new Error("Bad number of keys - should have gone to logic filter.");
-
-        return propertySqlMap.generateSql(key, filter[key] as WhereFilterDefinition, statementArguments);
-
-
-    }
-}
-
-
 type SpreadedJsonbArrays = {sql: string, output_column: string, output_identifier:string};
 /**
  * Builds a FROM clause that spreads nested JSONB arrays using `jsonb_array_elements`, joined via CROSS JOIN.
@@ -412,15 +345,6 @@ export function spreadJsonbArrays(column:string, nodesDesc:TreeNode[]):SpreadedJ
         output_identifier: `${output_column} #>> '{}'` // This uses the JSONB text extraction operator (#>>) with an empty array ({}) as the path, which converts the JSONB element into text if it is a scalar (like a string or a number).
     }
 }
-
-export type PreparedWhereClauseStatement = {whereClauseStatement:string, statementArguments:PreparedStatementArgument[]};
-export type PreparedStatementArgument = string | number | boolean | null;
-type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
-/** Typeguard: value is a primitive that can be used as a parameterised query argument. */
-function isPreparedStatementArgument(x: any): x is PreparedStatementArgument {
-    return ['string', 'number', 'boolean'].includes(typeof x);
-}
-
 
 
 type ValueComparisonRangeNumericOperatorSqlTyped = {

@@ -217,7 +217,7 @@ standardTests({ test, expect, matchJavascriptObject: matchJavascriptObjectInDb }
 
 _Check off as completed. Stop after each phase to ask whether to continue._
 
-### [ ] Phase 3a — Extract shared engine
+### [x] Phase 3a — Extract shared engine
 
 - Create `whereClauseEngine.ts` with the dialect-agnostic recursive engine and shared types
 - Update `postgresWhereClauseBuilder.ts` to import from the engine (no public API change)
@@ -227,7 +227,7 @@ _Check off as completed. Stop after each phase to ask whether to continue._
 - NEW: `src/where-filter/whereClauseEngine.ts`
 - MOD: `src/where-filter/postgresWhereClauseBuilder.ts`
 
-### [ ] Phase 3b — SQLite JSON path converter
+### [x] Phase 3b — SQLite JSON path converter
 
 - Implement `convertDotPropPathToSqliteJsonPath`
 - Unit test: verify path output for scalar, nested, object, array paths
@@ -235,7 +235,7 @@ _Check off as completed. Stop after each phase to ask whether to continue._
 **Files created:**
 - NEW: `src/where-filter/convertDotPropPathToSqliteJsonPath.ts`
 
-### [ ] Phase 3c — SQLite property map + builder
+### [x] Phase 3c — SQLite property map + builder
 
 - Implement `SqliteBasePropertyMap`, `SqlitePropertyMapSchema`, `SqlitePropertyMap`
 - Implement `spreadJsonArraysSqlite`
@@ -244,7 +244,7 @@ _Check off as completed. Stop after each phase to ask whether to continue._
 **Files created:**
 - NEW: `src/where-filter/sqliteWhereClauseBuilder.ts`
 
-### [ ] Phase 3d — Test harness + pass all standardTests
+### [x] Phase 3d — Test harness + pass all standardTests
 
 - Add `better-sqlite3` devDependency
 - Create test file with in-memory SQLite, run `standardTests`
@@ -254,7 +254,7 @@ _Check off as completed. Stop after each phase to ask whether to continue._
 - NEW: `src/where-filter/sqliteWhereClauseBuilder.test.ts`
 - MOD: `package.json` (devDependency)
 
-### [ ] Phase 3e — Exports + cleanup
+### [x] Phase 3e — Exports + cleanup
 
 - Add `sqliteWhereClauseBuilder` exports to `src/where-filter/index.ts`
 - Add JSDoc to all new exports

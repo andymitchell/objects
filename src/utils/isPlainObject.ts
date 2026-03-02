@@ -1,7 +1,7 @@
 
 // This is about 30% faster than lodash _.isPlainObject
 
-export default function isPlainObject(value:unknown):boolean {
+export default function isPlainObject(value:unknown): value is Record<string, unknown> {
 
     
     if (value === null || typeof value !== "object") {

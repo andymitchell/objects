@@ -182,11 +182,15 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
                 return ValueComparisonRangeOperators.filter(x => x in filterValue).every(x => {
                     const filterValueForX = filterValue[x];
 
+                    // Narrow to string | number (also rejects mismatched types like boolean/object)
+                    if (typeof filterValueForX !== 'string' && typeof filterValueForX !== 'number') {
+                         throw new Error(`Range operator '${x}' requires a string or number filter value, got ${typeof filterValueForX}`);
+                    }
+
                     // Critical Check: Ensure we aren't comparing a String to a Number
                     if (typeof filterValueForX !== typeof value) {
                          throw new Error(`Cannot compare value of type ${typeof value} with filter of type ${typeof filterValueForX}`);
                     }
-
 
                     return ValueComparisonRangeOperatorsJavascriptFunctions[x](value, filterValueForX)
                 });

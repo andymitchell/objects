@@ -1,6 +1,6 @@
 
 import { z } from "zod";
-import type {  ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
+import type {  ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
 import {isArrayValueComparisonElemMatch, isValueComparisonContains, isWhereFilterDefinition } from './schemas.ts';
 import {  convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
 import type {  TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
@@ -145,10 +145,8 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                         // Scalar value comparison — output_identifier extracts text via #>> '{}',
                         // but numeric comparisons need an explicit ::numeric cast.
                         const testArrayContainsString = typeof elemVal==='string';
-                        // generateComparison accepts WhereFilterDefinition<T> but handles all value
-                        // types at runtime (scalar, contains, range). Cast needed here.
                         if( testArrayContainsString ) {
-                            return this.generateComparison(dotpropPath, elemVal as WhereFilterDefinition<T>, statementArguments, undefined, testArrayContainsString);
+                            return this.generateComparison(dotpropPath, elemVal, statementArguments, undefined, testArrayContainsString);
                         } else {
                             // Determine if numeric cast is needed for range operators
                             let customId = sa.output_identifier;
@@ -160,7 +158,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
                             } else if( typeof elemVal === 'number' ) {
                                 customId = `(${sa.output_identifier})::numeric`;
                             }
-                            subClause = this.generateComparison(dotpropPath, elemVal as WhereFilterDefinition<T>, statementArguments, customId);
+                            subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, customId);
                         }
                     } else if( isWhereFilterDefinition(elemVal) ) {
                         // Object array: recurse with sub-PropertyMap
@@ -221,7 +219,7 @@ class BasePropertyMap<T extends Record<string, any> = Record<string, any>> imple
      * Emits a leaf-level SQL comparison for a single value (contains → LIKE, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
-    protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
+    protected generateComparison(dotpropPath:string, filter:WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?:string, testArrayContainsString?:boolean):string {
         
         const optionalWrapper = (sqlIdentifier:string, query:string) => {
             if( !this.nodeMap[dotpropPath] ) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);

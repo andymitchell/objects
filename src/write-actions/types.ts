@@ -88,8 +88,15 @@ export type WriteError =
     } |
     {
         type: 'permission_denied',
-        reason: 'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email' | 'not-authenticated'
+        reason: CorePermissionDeniedReason | (string & {})
     };
+
+/**
+ * The set of permission-denied reasons produced by this library.
+ * Consumers may pass any string as a reason (e.g. `'not-authenticated'`);
+ * core reasons are provided here for autocomplete and exhaustive matching.
+ */
+export type CorePermissionDeniedReason = 'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email';
 
 /**
  * A `WriteError` enriched with the item context where the error occurred.

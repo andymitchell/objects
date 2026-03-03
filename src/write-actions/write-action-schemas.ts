@@ -108,7 +108,7 @@ export const WriteErrorSchema = z.discriminatedUnion('type', [
     }),
     z.object({
         type: z.literal('permission_denied'),
-        reason: z.union([z.literal('no-owner-id'), z.literal('not-owner'), z.literal('unknown-permission'), z.literal('invalid-permissions'), z.literal('expected-owner-email'), z.literal('not-authenticated')])
+        reason: z.string()
     })
 ])
 isTypeEqual<z.infer<typeof WriteErrorSchema>, WriteError>(true);

@@ -307,12 +307,9 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                                             primary_key: rules.primary_key
                                         })
                                     } else {
-                                        const unvalidatedMutableUpdatedItem = writeStrategy.update_handler(action.payload, mutableUpdatedItem);
-
-                                        const schemaOk = failureTracker.testSchema(action, unvalidatedMutableUpdatedItem);
-                                        if( schemaOk ) {
-                                            mutableUpdatedItem = unvalidatedMutableUpdatedItem; // Default lww handler has just mutated mutableUpdatedItem (no new object), because options.mutate decides whether to have cloned it originally or be editing an existing object (e.g. for Immer efficiency)
-                                        } // #fail_continues
+                                        writeStrategy.update_handler(action.payload, mutableUpdatedItem);
+                                        failureTracker.testSchema(action, mutableUpdatedItem);
+                                        // #fail_continues — if schema failed, shouldHalt() prevents commit
                                     }
 
                                     break;

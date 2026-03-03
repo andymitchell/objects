@@ -29,9 +29,6 @@ const writeLww: WriteStrategy<Record<string, any>> = {
             Object.assign(target, writeActionPayload.data); // MUTATION
         }
         deleteUnusedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
-
-
-        return target;
     }
 }
 

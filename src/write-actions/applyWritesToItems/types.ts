@@ -12,9 +12,16 @@ export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 
 
 
+/**
+ * Strategy for applying create/update payloads to items.
+ *
+ * `update_handler` MUST mutate `target` in-place — the caller owns the cloning
+ * decision (via `getMutableItem`), so the handler always receives a safe-to-mutate object.
+ */
 export interface WriteStrategy<T extends Record<string, any>> {
     create_handler: (writeActionPayload: WritePayloadCreate<T>) => T;
-    update_handler: (writeActionPayload: WritePayloadUpdate<T>, target: T) => T
+    /** Mutate `target` in-place with the payload data. */
+    update_handler: (writeActionPayload: WritePayloadUpdate<T>, target: T) => void
 }
 
 

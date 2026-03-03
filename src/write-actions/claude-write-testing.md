@@ -862,7 +862,7 @@ Implement the plan in `Implementation Plan`
 
 **Test counts:** 149 tests in write-actions (85 + 44 + 19 checkPermission + 1 equivalentCreateOccurs). 956 total tests across 20 files, all passing.
 
-# [ ] Phase 7 (post-testing)
+# [x] Phase 7 (post-testing)
 
 **Investigate extensible `WriteError` union for consumers.**
 
@@ -873,7 +873,25 @@ Tasks:
 - Consider whether `not-authenticated` should be removed from the core union and instead added by the consumer's extension.
 - Ensure backward compatibility for existing consumers.
 
-# [ ] Phase 8 (post-testing)
+**Resolution:**
+
+Approach chosen: **Remove `'not-authenticated'` + widen reason with `(string & {})`**.
+
+- Extracted `CorePermissionDeniedReason` type (`'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email'`) — the 5 reasons this library actually produces.
+- Changed `permission_denied.reason` to `CorePermissionDeniedReason | (string & {})` — preserves IDE autocomplete for core reasons while allowing consumers to pass any string (e.g. `'not-authenticated'`).
+- Schema uses `z.string()` for reason — accepts any string at runtime validation.
+- `CorePermissionDeniedReason` exported from barrel for consumers who want to reference the known set.
+- `isTypeEqual<z.infer<typeof WriteErrorSchema>, WriteError>(true)` still passes — both sides are structurally `string`.
+- All 149 write-actions tests pass, no new typecheck errors.
+
+**Consumer migration** (breaking): `breef/store`'s `ExtensionContentToBackgroundDatabase.ts:84` uses `reason: 'not-authenticated'` — this still works at runtime (string is accepted) and at the type level (widened union accepts it). No changes needed in consumers.
+
+**Files modified:**
+- `src/write-actions/types.ts` — Extracted `CorePermissionDeniedReason`, widened `permission_denied.reason`
+- `src/write-actions/write-action-schemas.ts` — Changed reason schema to `z.string()`
+- `src/write-actions/index.ts` — Exported `CorePermissionDeniedReason`
+
+# [x] Phase 8 (post-testing)
 
 **Investigate `WriteStrategy.update_handler` mutation vs immutability contract.**
 
@@ -884,10 +902,18 @@ Initial findings from code analysis:
 - The caller reassigns `mutableUpdatedItem = writeStrategy.update_handler(...)` so it *would* work with a return-new handler in clone mode. But in mutate mode, a return-new handler would silently break the contract (original item unchanged, new object discarded after leaving scope in some paths).
 - Suspicion: mutation is correct because `writeToItemsArray` owns the cloning decision, and the handler should be a fast in-place transform. The handler returning the same reference is a convenience, not the primary mechanism.
 
-Suggestions to investigate:
-- Document that `update_handler` MUST mutate `target` and return it.
-- Consider whether the interface should be `(payload, target) => void` to make this explicit (return value ignored).
-- Custom strategies are currently unused — consider removing from public API until needed.
+**Resolution:**
+
+Changed `update_handler` to return `void` to make the mutation contract explicit:
+
+1. **`applyWritesToItems/types.ts`** — `WriteStrategy.update_handler` signature changed from `=> T` to `=> void`. Added JSDoc: "MUST mutate `target` in-place — the caller owns the cloning decision."
+2. **`writeStrategies/lww.ts`** — Removed `return target;` from `update_handler`.
+3. **`applyWritesToItems.ts`** — Removed return-value capture and reassignment. Now calls `writeStrategy.update_handler(...)` as void, then validates `mutableUpdatedItem` directly.
+4. **`applyWritesToItems.test.ts`** — Added 2 implementation-specific tests (section 4: WriteStrategy mutation contract):
+   - Mutable mode: verifies original object is mutated in-place and is the same reference in final_items
+   - Immutable mode: verifies original is untouched, clone was mutated
+
+All 151 tests pass. Custom strategies remain internal and unused (not exported from barrel).
 
 # [ ] Phase 9 (post-testing)
 

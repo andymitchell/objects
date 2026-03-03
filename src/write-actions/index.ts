@@ -40,6 +40,7 @@ export type {
     WriteAction,
     WritePayload,
     WriteError,
+    CorePermissionDeniedReason,
     WriteErrorContext,
     WriteAffectedItem,
     WriteOutcomeOk,

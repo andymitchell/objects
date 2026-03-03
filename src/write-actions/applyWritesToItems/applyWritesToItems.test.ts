@@ -299,10 +299,43 @@ describe('writeToItemsArray', () => {
         });
 
         // ───────────────────────────────────────────────────────────
-        // 4. Regression: Immer-specific edge cases
+        // 4. WriteStrategy mutation contract
         // ───────────────────────────────────────────────────────────
 
-        describe('4. Immer-specific edge cases', () => {
+        describe('4. WriteStrategy mutation contract', () => {
+
+            test('update_handler mutates target in-place (mutable mode)', () => {
+                const item = { id: '1', text: 'original' };
+                const items = [item];
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '1' } } }],
+                    items, ObjSchema, ddl, undefined, { mutate: true },
+                );
+                // In mutable mode, the original object should be mutated in-place
+                expect(item.text).toBe('changed');
+                expect(result.changes.final_items[0]).toBe(item);
+            });
+
+            test('update_handler mutates cloned target (immutable mode)', () => {
+                const item = { id: '1', text: 'original' };
+                const items = [item];
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '1' } } }],
+                    items, ObjSchema, ddl,
+                );
+                // Original untouched — mutation happened on a clone
+                expect(item.text).toBe('original');
+                // The clone was mutated and is now in final_items
+                expect(result.changes.final_items[0]!.text).toBe('changed');
+                expect(result.changes.final_items[0]).not.toBe(item);
+            });
+        });
+
+        // ───────────────────────────────────────────────────────────
+        // 5. Regression: Immer-specific edge cases
+        // ───────────────────────────────────────────────────────────
+
+        describe('5. Immer-specific edge cases', () => {
 
             test('Immer flags objects even if no material change', () => {
                 const originalItems = [{ id: 1, text: 'Bob' }, { id: 2, text: '' }];

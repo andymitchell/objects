@@ -1,60 +1,60 @@
-import { applyWritesToItems, applyWritesToItemsTyped, checkPermission } from "./applyWritesToItems/index.js";
+import { writeToItemsArray, writeToItemsArrayPreserveInputType, checkWritePermission } from "./applyWritesToItems/index.js";
 import { isIUser } from "./auth/index.js";
-import { assertArrayScope, getFailedActions, getSuccessfulActions, getAllErrors } from "./helpers.ts";
-import { WriteActionErrorSchema, WriteActionAffectedItemSchema, WriteActionOutcomeOkSchema, WriteActionOutcomeFailedSchema, WriteActionOutcomeSchema, WriteResultSchema, makeWriteActionSchema, makeWriteActionOutcomeOkSchema, makeWriteActionOutcomeFailedSchema, makeWriteActionOutcomeSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
+import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
+import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
 
 // ─── Functions ───
 export {
-    applyWritesToItems,
-    applyWritesToItemsTyped,
-    checkPermission,
+    writeToItemsArray,
+    writeToItemsArrayPreserveInputType,
+    checkWritePermission,
     isIUser,
 }
 
 // ─── Helpers ───
 export {
-    assertArrayScope,
-    getFailedActions,
-    getSuccessfulActions,
-    getAllErrors,
+    assertWriteArrayScope,
+    getWriteFailures,
+    getWriteSuccesses,
+    getWriteErrors,
 }
 
 // ─── Schemas ───
 export {
     WriteResultSchema,
-    WriteActionErrorSchema,
-    WriteActionOutcomeSchema,
-    WriteActionOutcomeOkSchema,
-    WriteActionOutcomeFailedSchema,
-    WriteActionAffectedItemSchema,
+    WriteErrorSchema,
+    WriteOutcomeSchema,
+    WriteOutcomeOkSchema,
+    WriteOutcomeFailedSchema,
+    WriteAffectedItemSchema,
     WriteActionSchema,
     makeWriteActionSchema,
-    makeWriteActionOutcomeSchema,
-    makeWriteActionOutcomeOkSchema,
-    makeWriteActionOutcomeFailedSchema,
+    makeWriteOutcomeSchema,
+    makeWriteOutcomeOkSchema,
+    makeWriteOutcomeFailedSchema,
     makeWriteResultSchema,
 }
 
 // ─── Types ───
 export type {
     WriteAction,
-    WriteActionPayload,
-    WriteActionError,
-    WriteActionErrorContext,
-    WriteActionAffectedItem,
-    WriteActionOutcomeOk,
-    WriteActionOutcomeFailed,
-    WriteActionOutcome,
+    WritePayload,
+    WriteError,
+    WriteErrorContext,
+    WriteAffectedItem,
+    WriteOutcomeOk,
+    WriteOutcomeFailed,
+    WriteOutcome,
     WriteResult,
 } from "./types.ts";
 
 export type {
-    WriteChangesBase,
-    ApplyWritesToItemsChanges,
-    ApplyWritesToItemsResult,
+    WriteChanges,
+    WriteToItemsArrayChanges,
+    WriteToItemsArrayResult,
     DDL,
     ListOrdering,
-    ApplyWritesToItemsOptions,
+    WriteToItemsArrayOptions,
 } from './applyWritesToItems/types.ts';
 
 export type { IUser } from "./auth/index.js";

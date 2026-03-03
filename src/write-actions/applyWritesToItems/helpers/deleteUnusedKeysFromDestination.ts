@@ -8,7 +8,7 @@ We need a way to stipulate that a key should be deleted. The problems are:
 The solution is deleteUnusedKeysFromDestination... It recurses the keys of the source, and if it has an explicit undefined/null value, it removes it from the final object (aka destination). 
 
 The choice to use undefined or null is set in types: VALUE_TO_DELETE_KEY 
-- If you choose null, you'll have to update the WriteActionPayloadUpdate type to allow a Nullable T 
+- If you choose null, you'll have to update the WritePayloadUpdate type to allow a Nullable T 
 
 A totally different approach: 
 - Create a new WriteAction just to delete keys explicitly. 

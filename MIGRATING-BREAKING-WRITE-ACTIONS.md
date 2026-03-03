@@ -9,10 +9,10 @@ It is written as instructions for an LLM performing the migration, but is equall
 The response type system was redesigned for ergonomic, flat access. The key changes:
 
 1. **`status: 'ok' | 'error'` discriminated union replaced with flat `ok: boolean`** — data is always accessible without narrowing.
-2. **`successful_actions` and `failed_actions` merged into a single `actions` array** — each entry is a discriminated union on `ok`. Use helper functions `getFailedActions()` / `getSuccessfulActions()` for filtered access.
-3. **Error details flattened** — old `FailedWriteAction.error_details` + `FailedWriteActionAffectedItem.error_details` duplication replaced by a single `errors: WriteActionErrorContext<T>[]` on `WriteActionOutcomeFailed`.
-4. **Affected item types unified** — `WriteActionAffectedItem` and `FailedWriteActionAffectedItem` merged into one generic `WriteActionAffectedItem<T>`.
-5. **`referential_comparison_ok` removed** from `ApplyWritesToItemsChanges`.
+2. **`successful_actions` and `failed_actions` merged into a single `actions` array** — each entry is a discriminated union on `ok`. Use helper functions `getWriteFailures()` / `getWriteSuccesses()` for filtered access.
+3. **Error details flattened** — old `FailedWriteAction.error_details` + `FailedWriteActionAffectedItem.error_details` duplication replaced by a single `errors: WriteErrorContext<T>[]` on `WriteOutcomeFailed`.
+4. **Affected item types unified** — `WriteActionAffectedItem` and `FailedWriteActionAffectedItem` merged into one generic `WriteAffectedItem<T>`.
+5. **`referential_comparison_ok` removed** from `WriteToItemsArrayChanges` (was `ApplyWritesToItemsChanges`).
 6. **`CombineWriteActionsWhereFiltersResponse` dropped** (was unused dead code).
 7. **`SerializableCommonError` removed** from the response surface — replaced by a lightweight `error?: { message: string }`.
 8. **Deprecated type aliases removed** — `WriteCommonError`, `SuccessfulWriteAction`, `FailedWriteAction`, `FailedWriteActionAffectedItem`, `WriteActionsResponse`, `WriteActionsResponseOk`, `WriteActionsResponseError`, `ApplyWritesToItemsResponse` are no longer exported. Use the new names directly.
@@ -20,6 +20,7 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 10. **`WriteActions` namespace object removed** — import functions and schemas individually (tree-shakeable).
 11. **`convertWriteResultToLegacy` removed** — no backward compatibility shim; migrate directly to the new types.
 12. **`./write-actions-old-types` sub-path removed** — the legacy generation-old type system is gone entirely.
+13. **Naming convention pass** — all types, schemas, and functions renamed for consistency under the `Write` prefix. See tables below for the full mapping.
 
 ---
 
@@ -30,43 +31,59 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 | `WriteActionsResponse<T>` | `WriteResult<T>` | No longer a discriminated union. `ok` is informational. |
 | `WriteActionsResponseOk` | _(eliminated)_ | Just `WriteResult` with `ok: true` |
 | `WriteActionsResponseError<T>` | _(eliminated)_ | Just `WriteResult` with `ok: false` |
-| `SuccessfulWriteAction<T>` | `WriteActionOutcomeOk<T>` | Discriminated union branch (`ok: true`) |
-| `FailedWriteAction<T>` | `WriteActionOutcomeFailed<T>` | Discriminated union branch (`ok: false`) |
-| `WriteCommonError` | `WriteActionError` | Renamed. Same discriminated union on `type`. |
-| `WriteActionAffectedItem` (non-generic) | `WriteActionAffectedItem<T>` | Now generic, has optional `item?: T` |
-| `FailedWriteActionAffectedItem<T>` | _(eliminated)_ | Merged into `WriteActionAffectedItem<T>` |
-| `ApplyWritesToItemsResponse<T>` | `ApplyWritesToItemsResult<T>` | `changes` always present, no narrowing needed |
-| `ApplyWritesToItemsChanges<T>` | `ApplyWritesToItemsChanges<T>` | Same name. `referential_comparison_ok` removed. |
+| `SuccessfulWriteAction<T>` | `WriteOutcomeOk<T>` | Discriminated union branch (`ok: true`) |
+| `FailedWriteAction<T>` | `WriteOutcomeFailed<T>` | Discriminated union branch (`ok: false`) |
+| `WriteCommonError` | `WriteError` | Renamed. Same discriminated union on `type`. |
+| `WriteActionAffectedItem` (non-generic) | `WriteAffectedItem<T>` | Now generic, has optional `item?: T` |
+| `FailedWriteActionAffectedItem<T>` | _(eliminated)_ | Merged into `WriteAffectedItem<T>` |
+| `ApplyWritesToItemsResponse<T>` | `WriteToItemsArrayResult<T>` | `changes` always present, no narrowing needed |
+| `ApplyWritesToItemsChanges<T>` | `WriteToItemsArrayChanges<T>` | `referential_comparison_ok` removed. |
+| `ApplyWritesToItemsOptions<T>` | `WriteToItemsArrayOptions<T>` | Renamed for consistency |
+| `WriteActionPayload<T>` | `WritePayload<T>` | Renamed |
 | `CombineWriteActionsWhereFiltersResponse<T>` | _(dropped)_ | Dead code, no replacement. |
+
+### Function Mapping
+
+| Old Function | New Function |
+|---|---|
+| `applyWritesToItems` | `writeToItemsArray` |
+| `applyWritesToItemsTyped` | `writeToItemsArrayPreserveInputType` |
+| `checkPermission` | `checkWritePermission` |
+| `getFailedActions` | `getWriteFailures` |
+| `getSuccessfulActions` | `getWriteSuccesses` |
+| `getAllErrors` | `getWriteErrors` |
+| `assertArrayScope` | `assertWriteArrayScope` |
 
 ### Schema Mapping
 
 | Old Schema | New Schema |
 |---|---|
-| `WriteCommonErrorSchema` | `WriteActionErrorSchema` |
-| `SuccessfulWriteActionSchema` | `WriteActionOutcomeOkSchema` |
-| `makeSuccessfulWriteActionSchema` | `makeWriteActionOutcomeOkSchema` |
-| `FailedWriteActionSchema` | `WriteActionOutcomeFailedSchema` |
-| `makeFailedWriteActionSchema` | `makeWriteActionOutcomeFailedSchema` |
+| `WriteCommonErrorSchema` | `WriteErrorSchema` |
+| `SuccessfulWriteActionSchema` | `WriteOutcomeOkSchema` |
+| `makeSuccessfulWriteActionSchema` | `makeWriteOutcomeOkSchema` |
+| `FailedWriteActionSchema` | `WriteOutcomeFailedSchema` |
+| `makeFailedWriteActionSchema` | `makeWriteOutcomeFailedSchema` |
 | `WriteActionsResponseSchema` | `WriteResultSchema` |
 | `WriteActionsResponseOkSchema` | _(eliminated; use `WriteResultSchema`)_ |
 | `WriteActionsResponseErrorSchema` | _(eliminated; use `WriteResultSchema`)_ |
 
+Note: `WriteActionSchema`, `makeWriteActionSchema`, `WriteResultSchema`, and `makeWriteResultSchema` are unchanged.
+
 ### New Helper Functions
 
-These are the primary ergonomic API. Import them alongside `applyWritesToItems`:
+These are the primary ergonomic API. Import them alongside `writeToItemsArray`:
 
 ```ts
-import { getFailedActions, getSuccessfulActions, getAllErrors } from '@andyrmitchell/objects/write-actions';
+import { getWriteFailures, getWriteSuccesses, getWriteErrors } from '@andyrmitchell/objects/write-actions';
 
-// Returns WriteActionOutcomeFailed<T>[] — already narrowed
-getFailedActions(result)
+// Returns WriteOutcomeFailed<T>[] — already narrowed
+getWriteFailures(result)
 
-// Returns WriteActionOutcomeOk<T>[] — already narrowed
-getSuccessfulActions(result)
+// Returns WriteOutcomeOk<T>[] — already narrowed
+getWriteSuccesses(result)
 
-// Returns WriteActionErrorContext<T>[] — all errors flattened across all failed actions
-getAllErrors(result)
+// Returns WriteErrorContext<T>[] — all errors flattened across all failed actions
+getWriteErrors(result)
 ```
 
 ---
@@ -87,25 +104,33 @@ import type { WriteActionsResponse, WriteActionsResponseOk, WriteActionsResponse
 
 **Replace with:**
 ```ts
-import type { WriteResult, WriteActionOutcomeOk, WriteActionOutcomeFailed, WriteActionOutcome,
-  WriteActionError, WriteActionErrorContext, WriteActionAffectedItem,
-  ApplyWritesToItemsResult, ApplyWritesToItemsChanges } from '...'
+import type { WriteResult, WriteOutcomeOk, WriteOutcomeFailed, WriteOutcome,
+  WriteError, WriteErrorContext, WriteAffectedItem,
+  WriteToItemsArrayResult, WriteToItemsArrayChanges } from '...'
 ```
 
 Also import the helper functions where needed:
 ```ts
-import { getFailedActions, getSuccessfulActions, getAllErrors } from '...'
+import { getWriteFailures, getWriteSuccesses, getWriteErrors } from '...'
+```
+
+Also rename the main function:
+```ts
+import { writeToItemsArray } from '...'  // was applyWritesToItems
 ```
 
 **Specific renames:**
 - `WriteActionsResponse<T>` → `WriteResult<T>`
 - `WriteActionsResponseOk` → remove (use `WriteResult` with `ok: true`)
 - `WriteActionsResponseError<T>` → remove (use `WriteResult` with `ok: false`)
-- `SuccessfulWriteAction<T>` → `WriteActionOutcomeOk<T>`
-- `FailedWriteAction<T>` → `WriteActionOutcomeFailed<T>`
-- `WriteCommonError` → `WriteActionError`
-- `FailedWriteActionAffectedItem<T>` → `WriteActionAffectedItem<T>`
-- `ApplyWritesToItemsResponse<T>` → `ApplyWritesToItemsResult<T>`
+- `SuccessfulWriteAction<T>` → `WriteOutcomeOk<T>`
+- `FailedWriteAction<T>` → `WriteOutcomeFailed<T>`
+- `WriteCommonError` → `WriteError`
+- `FailedWriteActionAffectedItem<T>` → `WriteAffectedItem<T>`
+- `ApplyWritesToItemsResponse<T>` → `WriteToItemsArrayResult<T>`
+- `ApplyWritesToItemsChanges<T>` → `WriteToItemsArrayChanges<T>`
+- `ApplyWritesToItemsOptions<T>` → `WriteToItemsArrayOptions<T>`
+- `WriteActionPayload<T>` → `WritePayload<T>`
 
 ### Step 2: Update the status check pattern
 
@@ -122,7 +147,7 @@ result.changes.final_items ...
 **New:**
 ```ts
 expect(result.ok).toBe(true);
-result.changes.final_items ... // accessible without narrowing on ApplyWritesToItemsResult
+result.changes.final_items ... // accessible without narrowing on WriteToItemsArrayResult
 ```
 
 For error checks:
@@ -137,11 +162,11 @@ result.failed_actions[0]! ...
 **New:**
 ```ts
 expect(result.ok).toBe(false);
-const failures = getFailedActions(result);
+const failures = getWriteFailures(result);
 failures[0]! ...
 ```
 
-**Key insight**: With `ApplyWritesToItemsResult`, `changes` is always present on the type — no narrowing needed. You can access `result.changes.final_items` regardless of `result.ok`.
+**Key insight**: With `WriteToItemsArrayResult`, `changes` is always present on the type — no narrowing needed. You can access `result.changes.final_items` regardless of `result.ok`.
 
 ### Step 3: Update `successful_actions` / `failed_actions` access
 
@@ -160,28 +185,28 @@ result.failed_actions.length
 
 **New:**
 ```ts
-const successes = getSuccessfulActions(result);
+const successes = getWriteSuccesses(result);
 successes[0]!.action.uuid
 successes[0]!.affected_items![0]!.item_pk
 successes.length
 
-const failures = getFailedActions(result);
+const failures = getWriteFailures(result);
 failures[0]!.action.uuid
 failures[0]!.errors[0]!.type    // note: .errors not .error_details
 failures.length
 ```
 
 **Search-replace pattern for `result.successful_actions`:**
-1. Add `const successes = getSuccessfulActions(result);` before first use.
+1. Add `const successes = getWriteSuccesses(result);` before first use.
 2. Replace `result.successful_actions` → `successes`.
 
 **Search-replace pattern for `result.failed_actions`:**
-1. Add `const failures = getFailedActions(result);` before first use.
+1. Add `const failures = getWriteFailures(result);` before first use.
 2. Replace `result.failed_actions` → `failures`.
 
 ### Step 4: Update error detail access
 
-The old system had `error_details: WriteCommonError[]` on both the action and the affected item. The new system has `errors: WriteActionErrorContext<T>[]` only on the failed outcome.
+The old system had `error_details: WriteCommonError[]` on both the action and the affected item. The new system has `errors: WriteErrorContext<T>[]` only on the failed outcome.
 
 **Old — action-level errors:**
 ```ts
@@ -191,7 +216,7 @@ result.failed_actions[0]!.error_details[0]!.type === 'missing_key'
 
 **New — same data, renamed:**
 ```ts
-const failures = getFailedActions(result);
+const failures = getWriteFailures(result);
 failures[0]!.errors[0]!.type
 failures[0]!.errors[0]!.type === 'missing_key'
 ```
@@ -203,14 +228,14 @@ result.failed_actions[0]!.affected_items![0]!.error_details[0]!.type
 
 **New — errors are flat on the outcome, enriched with item context:**
 ```ts
-const failures = getFailedActions(result);
+const failures = getWriteFailures(result);
 // Each error in .errors may have .item_pk and .item for context
 failures[0]!.errors[0]!.type
 failures[0]!.errors[0]!.item_pk  // was on the affected_item, now on the error itself
 failures[0]!.errors[0]!.item     // the offending item, right on the error
 ```
 
-The key difference: old code drilled through `affected_items[n].error_details[n]` to get per-item errors. New code has errors flat on the outcome with `item_pk` and `item` directly on the error via `WriteActionErrorContext<T>`.
+The key difference: old code drilled through `affected_items[n].error_details[n]` to get per-item errors. New code has errors flat on the outcome with `item_pk` and `item` directly on the error via `WriteErrorContext<T>`.
 
 If old code was iterating affected items to find their specific errors, the new pattern is:
 ```ts
@@ -244,18 +269,18 @@ type FailedWriteActionAffectedItem<T> = WriteActionAffectedItem & {
 **New:**
 ```ts
 // Single unified generic type
-type WriteActionAffectedItem<T> = {
+type WriteAffectedItem<T> = {
   item_pk: PrimaryKeyValue;
   item?: T;  // optional, provided when available
 }
-// No error_details on affected items — errors live on WriteActionOutcomeFailed.errors
+// No error_details on affected items — errors live on WriteOutcomeFailed.errors
 ```
 
-If code references `FailedWriteActionAffectedItem`, replace with `WriteActionAffectedItem<T>` and note that `error_details` is no longer on the affected item — it's on the parent `WriteActionOutcomeFailed.errors` array.
+If code references `FailedWriteActionAffectedItem`, replace with `WriteAffectedItem<T>` and note that `error_details` is no longer on the affected item — it's on the parent `WriteOutcomeFailed.errors` array.
 
 ### Step 6: Remove `referential_comparison_ok`
 
-This property was removed from `ApplyWritesToItemsChanges`. Delete any code that reads it:
+This property was removed from `WriteToItemsArrayChanges` (was `ApplyWritesToItemsChanges`). Delete any code that reads it:
 
 **Old:**
 ```ts
@@ -301,7 +326,7 @@ type MyResult<T> = ApplyWritesToItemsResponse<T>;
 ```ts
 type WriteResponse<T> = WriteResult<T>;
 // or
-type MyResult<T> = ApplyWritesToItemsResult<T>;
+type MyResult<T> = WriteToItemsArrayResult<T>;
 ```
 
 ### Step 9: Update manual construction of response/failure objects
@@ -320,7 +345,7 @@ const failure: FailedWriteAction<T> = {
 
 **New:**
 ```ts
-const failure: WriteActionOutcomeFailed<T> = {
+const failure: WriteOutcomeFailed<T> = {
   ok: false,
   action: writeAction,
   errors: [{ type: 'custom', message: 'Something went wrong', item_pk: '123', item: theItem }],
@@ -331,7 +356,7 @@ const failure: WriteActionOutcomeFailed<T> = {
 
 Note:
 - Added `ok: false`
-- `error_details` → `errors` (with `WriteActionErrorContext<T>` shape: error + `item_pk?` + `item?`)
+- `error_details` → `errors` (with `WriteErrorContext<T>` shape: error + `item_pk?` + `item?`)
 - `affected_items` no longer carries `error_details`
 
 For constructing success objects:
@@ -346,7 +371,7 @@ const success: SuccessfulWriteAction<T> = {
 
 **New:**
 ```ts
-const success: WriteActionOutcomeOk<T> = {
+const success: WriteOutcomeOk<T> = {
   ok: true,
   action: writeAction,
   affected_items: [{ item_pk: '123' }]
@@ -389,13 +414,33 @@ WriteCommonErrorSchema.parse(errorData);
 
 **New:**
 ```ts
-import { WriteActionErrorSchema, WriteResultSchema, WriteActionOutcomeFailedSchema } from '...';
+import { WriteErrorSchema, WriteResultSchema, WriteOutcomeFailedSchema } from '...';
 
 WriteResultSchema.parse(data);
-WriteActionErrorSchema.parse(errorData);
+WriteErrorSchema.parse(errorData);
 ```
 
-### Step 12: Remove `combineWriteActionsWhereFilters` usage
+### Step 12: Update function calls
+
+**Old:**
+```ts
+import { applyWritesToItems, checkPermission, assertArrayScope } from '...';
+
+const result = applyWritesToItems(actions, items, schema, ddl);
+const denied = checkPermission(item, ddl, user);
+const payload = assertArrayScope(action);
+```
+
+**New:**
+```ts
+import { writeToItemsArray, checkWritePermission, assertWriteArrayScope } from '...';
+
+const result = writeToItemsArray(actions, items, schema, ddl);
+const denied = checkWritePermission(item, ddl, user);
+const payload = assertWriteArrayScope(action);
+```
+
+### Step 13: Remove `combineWriteActionsWhereFilters` usage
 
 If any code imports or calls `combineWriteActionsWhereFilters`, it must be removed or replaced. This function and its response type `CombineWriteActionsWhereFiltersResponse` have been dropped entirely.
 
@@ -419,11 +464,11 @@ expect(result.successful_actions[0]!.affected_items![0]!.item_pk).toBe('1');
 
 **After:**
 ```ts
-const result = applyWritesToItems(actions, items, schema, ddl);
+const result = writeToItemsArray(actions, items, schema, ddl);
 expect(result.ok).toBe(true);
 expect(result.changes.final_items.length).toBe(2);
 expect(result.changes.insert.length).toBe(1);
-const successes = getSuccessfulActions(result);
+const successes = getWriteSuccesses(result);
 expect(successes.length).toBe(1);
 expect(successes[0]!.action.uuid).toBe('0');
 expect(successes[0]!.affected_items![0]!.item_pk).toBe('1');
@@ -445,9 +490,9 @@ expect(firstFailedAction.affected_items![0]!.item.id).toBe('bad');
 
 **After:**
 ```ts
-const result = applyWritesToItems(actions, items, schema, ddl);
+const result = writeToItemsArray(actions, items, schema, ddl);
 expect(result.ok).toBe(false);
-const failures = getFailedActions(result);
+const failures = getWriteFailures(result);
 const firstFailure = failures[0]!;
 expect(firstFailure.errors[0]!.type).toBe('missing_key');
 expect(firstFailure.unrecoverable).toBe(true);
@@ -472,10 +517,10 @@ expect(result.changes.final_items.length).toBe(1);
 
 **After:**
 ```ts
-const result = applyWritesToItems(actions, items, schema, ddl, user, { atomic: false });
+const result = writeToItemsArray(actions, items, schema, ddl, user, { atomic: false });
 expect(result.ok).toBe(false);
-expect(getFailedActions(result).length).toBe(1);
-expect(getSuccessfulActions(result).length).toBe(2);
+expect(getWriteFailures(result).length).toBe(1);
+expect(getWriteSuccesses(result).length).toBe(2);
 expect(result.changes.final_items.length).toBe(1);  // no narrowing needed
 ```
 
@@ -517,7 +562,7 @@ function logResult<T>(result: WriteActionsResponse<T>) {
 function logResult<T>(result: WriteResult<T>) {
   if (!result.ok) {
     console.error(result.error?.message);
-    for (const f of getFailedActions(result)) {
+    for (const f of getWriteFailures(result)) {
       console.error(`Action ${f.action.uuid} failed:`, f.errors);
     }
   }
@@ -537,7 +582,7 @@ if (result.status === 'error') {
 
 **After:**
 ```ts
-const schemaErrors = getAllErrors(result).filter(e => e.type === 'schema');
+const schemaErrors = getWriteErrors(result).filter(e => e.type === 'schema');
 // Each error also has .item_pk and .item if available
 ```
 
@@ -560,7 +605,7 @@ type WriteResponse<T> = WriteResult<T>;
 
 function handleResponse<T>(response: WriteResponse<T>) {
   if (!response.ok) {
-    getFailedActions(response).forEach(f => { ... });
+    getWriteFailures(response).forEach(f => { ... });
   }
 }
 ```
@@ -575,8 +620,8 @@ function handleResponse<T>(response: WriteResponse<T>) {
 | `result.status === 'ok'` | `result.ok === true` (or just `result.ok`) |
 | `result.status === 'error'` | `result.ok === false` (or `!result.ok`) |
 | `result.message` | `result.error?.message` |
-| `result.successful_actions` | `getSuccessfulActions(result)` |
-| `result.failed_actions` | `getFailedActions(result)` |
+| `result.successful_actions` | `getWriteSuccesses(result)` |
+| `result.failed_actions` | `getWriteFailures(result)` |
 | `failedAction.error_details` | `failedOutcome.errors` |
 | `failedAction.affected_items[n].error_details` | `failedOutcome.errors` (item context on error itself) |
 | `failedAction.affected_items[n].item` | `failedOutcome.affected_items[n].item` or `failedOutcome.errors[n].item` |

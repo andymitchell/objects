@@ -2,12 +2,12 @@
 import { z } from "zod";
 
 import { test } from 'vitest';
-import type { WriteAction, WriteActionPayloadArrayScope } from "../types.js";
-import { assertArrayScope, getFailedActions, getSuccessfulActions } from "../helpers.ts";
-import type { ApplyWritesToItemsOptions, ApplyWritesToItemsResult, DDL } from "./types.js";
+import type { WriteAction, WritePayloadArrayScope } from "../types.js";
+import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses } from "../helpers.ts";
+import type { WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL } from "./types.js";
 import { produce, type Draft } from "immer";
 import type { IUser } from "../auth/types.js";
-import { applyWritesToItems } from "./applyWritesToItems.ts";
+import { writeToItemsArray } from "./applyWritesToItems.ts";
 
 
 
@@ -61,32 +61,32 @@ const obj2: Obj = {
     id: '2'
 };
 
-export type ApplyWritesToItemsInTestingFn<T extends Record<string, any>> = (
+export type WriteToItemsArrayInTestingFn<T extends Record<string, any>> = (
     writeActions: WriteAction<T>[],
     items: T[],
     schema: z.ZodType<T, any, any>,
     ddl: DDL<T>,
     user?: IUser,
-    options?: ApplyWritesToItemsOptions<T>
+    options?: WriteToItemsArrayOptions<T>
 ) => {
     /**
      * The result, but in the case of Immer `produce` it has had its `changes.final_items` replaced with the finalised drafts. 
      * You can access the real final_items as `draft_final_items`
      */
-    result: ApplyWritesToItemsResult<T>,
+    result: WriteToItemsArrayResult<T>,
 
     /**
-     * In the case of Immer `produce` this is what is passed to `applyWritesToItems`
+     * In the case of Immer `produce` this is what is passed to `writeToItemsArray`
      */
     draft_items?: Draft<T>[],
     /**
-     * In the case of Immer `produce` this is what is received from `applyWritesToItems` as `changes.final_items`
+     * In the case of Immer `produce` this is what is received from `writeToItemsArray` as `changes.final_items`
      */
     draft_final_items?: Draft<T>[]
 };
 
-function castApplyWritesToItemsInTestingFn<T extends Record<string, any>>(applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<any>): ApplyWritesToItemsInTestingFn<T> {
-    return applyWritesToItemsInTesting;
+function castWriteToItemsArrayInTestingFn<T extends Record<string, any>>(writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<any>): WriteToItemsArrayInTestingFn<T> {
+    return writeToItemsArrayInTesting;
 }
 
 type UseCase = 'immutable' | 'mutable' | 'immer-mutable';
@@ -96,7 +96,7 @@ type Immer = 'immer' | 'non-immer';
 /**
  * Generic test runner for different use cases. 
  * 
- * Put the tests inside the callback, and use `applyWritesToItemsInTesting` in place of `applyWritesToItems`.
+ * Put the tests inside the callback, and use `writeToItemsArrayInTesting` in place of `writeToItemsArray`.
  * @note It alters Immer's behaviour - by default, no `changes` work in Immer after `produce` is complete; but for the test it sets `changes.final_items` to the result of Immer's `produce`
  * 
  * @param callback 
@@ -105,45 +105,45 @@ function testUseCases<
     T extends Record<string, any> = Obj
 >
     (
-        callback: (name: UseCase, mutable: Mutable, immer: Immer, applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T>, useCaseBaseOptions: ApplyWritesToItemsOptions<T>) => void
+        callback: (name: UseCase, mutable: Mutable, immer: Immer, writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T>, useCaseBaseOptions: WriteToItemsArrayOptions<T>) => void
     ) {
 
     {
         const useCaseBaseOptions = { mutate: false };
         // The immutable options
-        const applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            const result = applyWritesToItems(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
+        const writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
+            const result = writeToItemsArray(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
             return {
                 result
             }
         }
-        callback('immutable', 'immutable', 'non-immer', applyWritesToItemsInTesting, useCaseBaseOptions)
+        callback('immutable', 'immutable', 'non-immer', writeToItemsArrayInTesting, useCaseBaseOptions)
     }
     {
 
         // The mutable options
         const useCaseBaseOptions = { mutate: true };
-        const applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            const result = applyWritesToItems(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
+        const writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
+            const result = writeToItemsArray(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
             return {
                 result
             }
         }
-        callback('mutable', 'mutable', 'non-immer', applyWritesToItemsInTesting, useCaseBaseOptions)
+        callback('mutable', 'mutable', 'non-immer', writeToItemsArrayInTesting, useCaseBaseOptions)
     }
     {
 
         // The immer-mutable options
         const useCaseBaseOptions = { mutate: true };
-        const applyWritesToItemsInTesting: ApplyWritesToItemsInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
+        const writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
 
-            let result: ApplyWritesToItemsResult<T>;
+            let result: WriteToItemsArrayResult<T>;
             let draft_items: Draft<T>[];
             let draft_final_items: Draft<T>[];
             const finalItems = produce(items, draft => {
 
                 draft_items = draft;
-                result = applyWritesToItems(writeActions, draft as T[], schema, ddl, user, { ...useCaseBaseOptions, ...options })
+                result = writeToItemsArray(writeActions, draft as T[], schema, ddl, user, { ...useCaseBaseOptions, ...options })
 
                 draft_final_items = result.changes.final_items as Draft<T>[];
 
@@ -155,7 +155,7 @@ function testUseCases<
             return { result, draft_final_items, draft_items };
 
         }
-        callback('immer-mutable', 'mutable', 'immer', applyWritesToItemsInTesting, useCaseBaseOptions)
+        callback('immer-mutable', 'mutable', 'immer', writeToItemsArrayInTesting, useCaseBaseOptions)
     }
 
 }
@@ -163,11 +163,11 @@ function testUseCases<
 
 
 
-describe('applyWritesToItems', () => {
+describe('writeToItemsArray', () => {
 
 
 
-    testUseCases((name, mutable, immer, applyWritesToItemsInTesting, options) => {
+    testUseCases((name, mutable, immer, writeToItemsArrayInTesting, options) => {
 
         describe(name, () => {
             describe('basic happy path', () => {
@@ -175,7 +175,7 @@ describe('applyWritesToItems', () => {
 
                     const data2 = JSON.parse(JSON.stringify(obj2)); //structuredClone(obj2);
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write',
@@ -216,7 +216,7 @@ describe('applyWritesToItems', () => {
                 test(`update`, (cx) => {
                     if (name !== 'immer-mutable') cx.skip();
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -252,7 +252,7 @@ describe('applyWritesToItems', () => {
                 });
 
                 test(`delete`, () => {
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -295,7 +295,7 @@ describe('applyWritesToItems', () => {
                     }
 
 
-                    const payload: WriteActionPayloadArrayScope<Obj, 'children.children'> = {
+                    const payload: WritePayloadArrayScope<Obj, 'children.children'> = {
 
                         type: 'array_scope',
                         scope: 'children.children',
@@ -311,7 +311,7 @@ describe('applyWritesToItems', () => {
                         }
 
                     }
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write',
@@ -344,7 +344,7 @@ describe('applyWritesToItems', () => {
                     const data1: Obj = JSON.parse(JSON.stringify(obj1)); //structuredClone(obj2);
                     data1.arr_items = ['1'];
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write',
@@ -367,7 +367,7 @@ describe('applyWritesToItems', () => {
                         result.changes.insert[0]!
                     ).toEqual(data1);
 
-                    const { result: result2 } = applyWritesToItemsInTesting(
+                    const { result: result2 } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write',
@@ -391,7 +391,7 @@ describe('applyWritesToItems', () => {
                     );
 
 
-                    const { result: result3 } = applyWritesToItemsInTesting(
+                    const { result: result3 } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write',
@@ -429,7 +429,7 @@ describe('applyWritesToItems', () => {
 
                 test(`specifies successful_actions`, () => {
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -468,7 +468,7 @@ describe('applyWritesToItems', () => {
 
                     expect(result.ok).toBe(true);
 
-                    const successes = getSuccessfulActions(result);
+                    const successes = getWriteSuccesses(result);
                     expect(successes.length).toEqual(1);
                     expect(successes[0]!.action.uuid).toEqual('0');
                     expect(successes[0]!.affected_items!.length).toEqual(2);
@@ -489,7 +489,7 @@ describe('applyWritesToItems', () => {
                     const initialObj1 = structuredClone(obj1);
                     const items = [initialObj1];
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -542,7 +542,7 @@ describe('applyWritesToItems', () => {
 
 
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -597,7 +597,7 @@ describe('applyWritesToItems', () => {
 
                 test(`update break schema`, () => {
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -621,7 +621,7 @@ describe('applyWritesToItems', () => {
                     );
 
                     expect(result.ok).toBe(false);
-                    const failures = getFailedActions(result);
+                    const failures = getWriteFailures(result);
                     const failedActionItem = failures[0]!.affected_items![0]!;
                     expect(
                         failedActionItem.item
@@ -634,7 +634,7 @@ describe('applyWritesToItems', () => {
                     // Have 2 failing updates, at 1 and 3
                     // Failing update 1 should affect 2 items
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -700,7 +700,7 @@ describe('applyWritesToItems', () => {
 
 
                     expect(result.ok).toBe(false);
-                    const failures = getFailedActions(result);
+                    const failures = getWriteFailures(result);
                     const firstFailedAction = failures[0]!;
                     expect(firstFailedAction.action.payload.type).toBe('create'); if (firstFailedAction.action.payload.type !== 'create') throw new Error("noop - create");
                     // @ts-ignore wilfully breaking schema here
@@ -729,7 +729,7 @@ describe('applyWritesToItems', () => {
                     expect(result.changes.final_items[0]!.id).toBe('1');
                     expect(result.changes.final_items[1]!.id).toBe('a1');
 
-                    const successes = getSuccessfulActions(result);
+                    const successes = getWriteSuccesses(result);
                     expect(successes.length).toEqual(1);
                     expect(successes[0]!.action.uuid).toEqual('0');
                     expect(successes[0]!.affected_items!.length).toEqual(1);
@@ -744,7 +744,7 @@ describe('applyWritesToItems', () => {
                         const originalItems = [
                             structuredClone(obj1)
                         ] as Draft<Obj>[];
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -784,7 +784,7 @@ describe('applyWritesToItems', () => {
                         expect(result.changes.final_items[0]!.id).toBe('1');
                         expect(result.changes.final_items === originalItems).toBe(true);
                         expect(result.changes.final_items).toEqual(originalItems);
-                        expect(getSuccessfulActions(result).length).toBe(0);
+                        expect(getWriteSuccesses(result).length).toBe(0);
 
 
                     });
@@ -795,7 +795,7 @@ describe('applyWritesToItems', () => {
                             structuredClone(obj1)
                         ];
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -841,8 +841,8 @@ describe('applyWritesToItems', () => {
                         expect(result.changes.final_items.length).toBe(1);
                         expect(result.changes.final_items[0]!.id).toBe('a1');
 
-                        expect(getFailedActions(result).length).toBe(1);
-                        expect(getSuccessfulActions(result).length).toBe(2);
+                        expect(getWriteFailures(result).length).toBe(1);
+                        expect(getWriteSuccesses(result).length).toBe(2);
                     });
 
                     test(`handles failure on array_scope, with atomic=false`, (cx) => {
@@ -856,10 +856,10 @@ describe('applyWritesToItems', () => {
                                 ]
                             }
                         ];
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
-                                    type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
+                                    type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
                                         type: 'array_scope',
                                         scope: 'children',
                                         action: {
@@ -916,7 +916,7 @@ describe('applyWritesToItems', () => {
                         expect(result.changes.final_items[0]!.id).toBe('1');
                         expect(result.changes.final_items[0]!.children![0]!.name).toBe('Bob'); // update applied
                         // @ts-ignore
-                        expect(getFailedActions(result)[0]!.affected_items![0]!.item.bad_key).toBe('expect fail');
+                        expect(getWriteFailures(result)[0]!.affected_items![0]!.item.bad_key).toBe('expect fail');
 
                     });
 
@@ -933,10 +933,10 @@ describe('applyWritesToItems', () => {
                         ];
                         const originalItemsClone = structuredClone(originalItems);
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
-                                    type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
+                                    type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
                                         type: 'array_scope',
                                         scope: 'children',
                                         action: {
@@ -1008,7 +1008,7 @@ describe('applyWritesToItems', () => {
                         const obj1Ref = originalItems[0]!;
                         const obj2Ref = originalItems[1];
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1057,7 +1057,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0]!;
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1117,7 +1117,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0]!;
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1159,7 +1159,7 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0]!;
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
                                     type: 'write', ts: 0, uuid: '0', payload: {
@@ -1219,10 +1219,10 @@ describe('applyWritesToItems', () => {
                         ];
                         const obj1Ref = originalItems[0];
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             [
                                 {
-                                    type: 'write', ts: 0, uuid: '0', payload: assertArrayScope<Obj, 'children'>({
+                                    type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
                                         type: 'array_scope',
                                         scope: 'children',
                                         action: {
@@ -1287,7 +1287,7 @@ describe('applyWritesToItems', () => {
             describe('Integrity', () => {
                 test(`cannot dupe primary key`, () => {
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -1318,7 +1318,7 @@ describe('applyWritesToItems', () => {
 
                     expect(result.ok).toBe(false);
 
-                    const failures = getFailedActions(result);
+                    const failures = getWriteFailures(result);
                     const firstFailedAction = failures[0]!;
                     expect(firstFailedAction.unrecoverable).toBe(true);
                     expect(firstFailedAction.errors[0]!.type).toBe('create_duplicated_key');
@@ -1327,7 +1327,7 @@ describe('applyWritesToItems', () => {
                 test(`not allowed to change primary key`, (cx) => {
 
                     const originalItems = [structuredClone(obj1)];
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         [
                             {
                                 type: 'write', ts: 0, uuid: '0', payload: {
@@ -1349,7 +1349,7 @@ describe('applyWritesToItems', () => {
 
 
                     expect(result.ok).toBe(false);
-                    const failures = getFailedActions(result);
+                    const failures = getWriteFailures(result);
                     const firstFailedAction = failures[0]!;
                     expect(firstFailedAction.action.payload.type).toBe('update'); if (firstFailedAction.action.payload.type !== 'update') throw new Error("noop - update");
                     expect(firstFailedAction.affected_items![0]!.item!.id).toBe('1');
@@ -1385,7 +1385,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Right'
                         }
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1436,7 +1436,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Right'
                         }
 
-                        const result2 = applyWritesToItems(
+                        const result2 = writeToItemsArray(
                             actions,
                             [existing2],
                             ObjSchema,
@@ -1451,7 +1451,7 @@ describe('applyWritesToItems', () => {
                         expect(result2.changes.final_items[0]!.text).toBe('Right2');
 
 
-                        const result3 = applyWritesToItems(
+                        const result3 = writeToItemsArray(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1490,7 +1490,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Alice'
                         }
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1529,7 +1529,7 @@ describe('applyWritesToItems', () => {
                             'text': 'Alice'
                         }
 
-                        const { result } = applyWritesToItemsInTesting(
+                        const { result } = writeToItemsArrayInTesting(
                             actions,
                             [existing],
                             ObjSchema,
@@ -1588,7 +1588,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         actions,
                         [],
                         ObjSchema,
@@ -1635,7 +1635,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         actions,
                         [],
                         ObjSchema,
@@ -1644,7 +1644,7 @@ describe('applyWritesToItems', () => {
                     );
 
                     expect(result.ok).toBe(false);
-                    expect(getFailedActions(result)[0]!.errors[0]!.type).toBe('permission_denied');
+                    expect(getWriteFailures(result)[0]!.errors[0]!.type).toBe('permission_denied');
 
 
                 })
@@ -1689,7 +1689,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1742,7 +1742,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const result = applyWritesToItems(
+                    const result = writeToItemsArray(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1751,7 +1751,7 @@ describe('applyWritesToItems', () => {
                     );
 
                     expect(result.ok).toBe(false);
-                    expect(getFailedActions(result)[0]!.errors[0]!.type).toBe('permission_denied');
+                    expect(getWriteFailures(result)[0]!.errors[0]!.type).toBe('permission_denied');
 
 
 
@@ -1810,7 +1810,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1822,7 +1822,7 @@ describe('applyWritesToItems', () => {
                     );
 
                     expect(result.ok).toBe(false);
-                    const successes = getSuccessfulActions(result);
+                    const successes = getWriteSuccesses(result);
                     expect(successes.length).toBe(1);
                     expect(successes[0]!.action.uuid).toBe('0');
 
@@ -1883,7 +1883,7 @@ describe('applyWritesToItems', () => {
                         getID: () => 'user1'
                     }
 
-                    const { result } = applyWritesToItemsInTesting(
+                    const { result } = writeToItemsArrayInTesting(
                         actions,
                         [existing],
                         ObjSchema,
@@ -1895,7 +1895,7 @@ describe('applyWritesToItems', () => {
                     );
 
                     expect(result.ok).toBe(false);
-                    expect(getSuccessfulActions(result).length).toBe(0);
+                    expect(getWriteSuccesses(result).length).toBe(0);
 
 
                 })
@@ -1922,7 +1922,7 @@ describe('applyWritesToItems', () => {
                     ]
 
                     expect(() => produce(originalItems, draft => {
-                        applyWritesToItems(
+                        writeToItemsArray(
                             actions,
                             draft,
                             ObjSchema,
@@ -1966,9 +1966,9 @@ describe('applyWritesToItems', () => {
                         }
                     }
 
-                    const retypedApplyWritesToItemsInTesting = castApplyWritesToItemsInTestingFn<Regress>(applyWritesToItemsInTesting);
+                    const retypedWriteToItemsArrayInTesting = castWriteToItemsArrayInTestingFn<Regress>(writeToItemsArrayInTesting);
 
-                    const { result } = retypedApplyWritesToItemsInTesting(
+                    const { result } = retypedWriteToItemsArrayInTesting(
                         actions,
                         [],
                         RegressSchema1,
@@ -1981,7 +1981,7 @@ describe('applyWritesToItems', () => {
                     expect(result.ok).toBe(true);
 
 
-                    const { result: result2 } = retypedApplyWritesToItemsInTesting(
+                    const { result: result2 } = retypedWriteToItemsArrayInTesting(
                         actions,
                         [],
                         RegressSchema1,

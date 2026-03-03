@@ -2,7 +2,7 @@ import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValu
 import type { PrimaryKeyValue } from "../../utils/getKeyValue.js";
 import type { IfAny } from "../../types.js";
 import type { EnsureRecord } from "../../types.js";
-import type {  WriteActionPayloadCreate, WriteActionPayloadUpdate, WriteResult } from "../types.js";
+import type {  WritePayloadCreate, WritePayloadUpdate, WriteResult } from "../types.js";
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
 import type { ObjectsDelta } from "../../objects-delta/types.ts";
@@ -13,12 +13,12 @@ export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 
 
 export interface WriteStrategy<T extends Record<string, any>> {
-    create_handler: (writeActionPayload: WriteActionPayloadCreate<T>) => T;
-    update_handler: (writeActionPayload: WriteActionPayloadUpdate<T>, target: T) => T
+    create_handler: (writeActionPayload: WritePayloadCreate<T>) => T;
+    update_handler: (writeActionPayload: WritePayloadUpdate<T>, target: T) => T
 }
 
 
-export type ApplyWritesToItemsOptions<T extends Record<string, any> = Record<string, any>> = {
+export type WriteToItemsArrayOptions<T extends Record<string, any> = Record<string, any>> = {
   
     /**
      * Define what will happen if the create action has the same ID as an existing item
@@ -205,26 +205,26 @@ const c:PrimaryKeyValue = a.lists['.'].primary_key
  * Minimal changes base for any apply function. Future apply functions can extend this
  * without being forced to provide `final_items`.
  */
-export type WriteChangesBase<T extends Record<string, any>> = ObjectsDelta<T> & {
+export type WriteChanges<T extends Record<string, any>> = ObjectsDelta<T> & {
     changed: boolean;
 };
 
 /**
- * The changes to the original items passed to `applyWritesToItems`, after the actions are run.
+ * The changes to the original items passed to `writeToItemsArray`, after the actions are run.
  */
-export type ApplyWritesToItemsChanges<T extends Record<string, any>> = WriteChangesBase<T> & {
+export type WriteToItemsArrayChanges<T extends Record<string, any>> = WriteChanges<T> & {
     /** The final version of the input items, with all the changes applied. */
     final_items: T[];
 };
 
 /**
- * The response to `applyWritesToItems`. Extends `WriteResult` with `changes` always present.
+ * The response to `writeToItemsArray`. Extends `WriteResult` with `changes` always present.
  * No narrowing needed to access `changes` or `actions`.
  *
  * @example
  * result.changes.final_items // always accessible
- * if (!result.ok) getFailedActions(result)[0].errors[0].type;
+ * if (!result.ok) getWriteFailures(result)[0].errors[0].type;
  */
-export type ApplyWritesToItemsResult<T extends Record<string, any>> = WriteResult<T> & {
-    changes: ApplyWritesToItemsChanges<T>;
+export type WriteToItemsArrayResult<T extends Record<string, any>> = WriteResult<T> & {
+    changes: WriteToItemsArrayChanges<T>;
 };

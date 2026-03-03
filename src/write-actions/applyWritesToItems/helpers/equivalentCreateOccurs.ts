@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { DDL } from "../types.js";
 import type { WriteAction } from "../../types.js";
 import { isMatch } from "lodash-es";
-import {applyWritesToItems} from "../applyWritesToItems.js";
+import {writeToItemsArray} from "../applyWritesToItems.js";
 
 
 export default function equivalentCreateOccurs<T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>, existing:Readonly<T>, createAction:WriteAction<T>, writeActions:WriteAction<T>[]):boolean {
@@ -20,7 +20,7 @@ export default function equivalentCreateOccurs<T extends Record<string, any>>(sc
         if( isMatch(existing, current) ) {
             return true;
         } else {
-            const result = applyWritesToItems([action], [current], schema, ddl);
+            const result = writeToItemsArray([action], [current], schema, ddl);
             if( !result.ok ) return false;
             current = result.changes.final_items[0] as T
         }

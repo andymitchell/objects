@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WriteAction, WriteActionPayloadArrayScope } from "./types.js";
+import type { WriteAction, WritePayloadArrayScope } from "./types.js";
 import { makeWriteActionSchema, WriteResultSchema } from "./write-action-schemas.ts";
 
 
@@ -43,7 +43,7 @@ describe('write-actions type check', () => {
                 }
             }
         }
-        const actionBPayload: WriteActionPayloadArrayScope<Real, 'sub_tasks.siblings'> = {
+        const actionBPayload: WritePayloadArrayScope<Real, 'sub_tasks.siblings'> = {
             type: "array_scope",
             scope: 'sub_tasks.siblings',
             action: {
@@ -83,7 +83,7 @@ describe('write-actions type check', () => {
         }
 
 
-        const actionFakeBPayload: WriteActionPayloadArrayScope<Fake, 'bub_sasks.riblings'> = {
+        const actionFakeBPayload: WritePayloadArrayScope<Fake, 'bub_sasks.riblings'> = {
             type: "array_scope",
             scope: 'bub_sasks.riblings',
             action: {
@@ -108,7 +108,7 @@ describe('write-actions type check', () => {
 
         
         type RealOptional = { id: string, text: string, owner: { age: number, name: string }, sub_tasks?: { text: string, siblings: {id:string, text:string}[] }[] };
-        const actionCPayload: WriteActionPayloadArrayScope<RealOptional, 'sub_tasks.siblings'> = {
+        const actionCPayload: WritePayloadArrayScope<RealOptional, 'sub_tasks.siblings'> = {
             type: "array_scope",
             scope: 'sub_tasks.siblings',
             action: {

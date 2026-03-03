@@ -625,9 +625,210 @@ It will need to update MIGRATING-BREAKING-WRITE-ACTIONS.md too, e.g. for schema 
 - `src/write-actions/schemas-deprecated.ts`
 - `src/write-actions/convertWriteResultToLegacy.ts`
 
-# [ ] Phase 10
+# [x] Phase 10
 
-If you look at the exported barrel for write-actions you'll see the function and type naming schema isn't the most coherent, guessable thing. A LLM would have a hard time inferring their purpose from the name alone, and a developer would have a hard time remembering them (no consistent prefix to start auto complete; no consistent order of verbs). 
+If you look at the exported barrel for write-actions you'll see the function and type naming schema isn't the most coherent, guessable thing. A LLM would have a hard time inferring their purpose from the name alone, and a developer would have a hard time remembering them (no consistent prefix to start auto complete; no consistent order of verbs).
 
-Make a plan for a better approach and add to Phase 10a. 
-It will need to update MIGRATING-BREAKING-WRITE-ACTIONS.md too. 
+Make a plan for a better approach and add to Phase 10a.
+It will need to update MIGRATING-BREAKING-WRITE-ACTIONS.md too.
+
+# [x] Phase 10a: Naming Convention Plan
+
+## Implementation Complete
+
+All renames applied. Typecheck passes. All 113 tests pass (7 skipped).
+
+### Files Modified
+- `src/write-actions/types.ts` — Renamed: `WritePayload*`, `WriteError*`, `WriteAffectedItem`, `WriteOutcome*`
+- `src/write-actions/applyWritesToItems/types.ts` — Renamed: `WriteChanges`, `WriteToItemsArrayChanges`, `WriteToItemsArrayResult`, `WriteToItemsArrayOptions`
+- `src/write-actions/write-action-schemas.ts` — Renamed: `WriteErrorSchema`, `WriteAffectedItemSchema`, `WriteOutcome*Schema`, `makeWriteOutcome*Schema`
+- `src/write-actions/helpers.ts` — Renamed: `assertWriteArrayScope`, `getWriteFailures`, `getWriteSuccesses`, `getWriteErrors`
+- `src/write-actions/applyWritesToItems/helpers/checkPermission.ts` — Renamed: `checkWritePermission`
+- `src/write-actions/applyWritesToItems/applyWritesToItems.ts` — Renamed: `writeToItemsArray`, `writeToItemsArrayPreserveInputType`, all internal references
+- `src/write-actions/applyWritesToItems/helpers/equivalentCreateOccurs.ts` — Updated import symbol
+- `src/write-actions/applyWritesToItems/helpers/deleteUnusedKeysFromDestination.ts` — Updated comment
+- `src/write-actions/applyWritesToItems/index.ts` — Updated all export symbols
+- `src/write-actions/index.ts` — Updated all imports and exports (barrel)
+- `src/write-actions/types.test.ts` — Updated type references
+- `src/write-actions/applyWritesToItems/applyWritesToItems.test.ts` — Updated all function/type references
+- `src/write-actions/applyWritesToItems/helpers/checkPermission.test.ts` — Updated function references
+- `MIGRATING-BREAKING-WRITE-ACTIONS.md` — Full rewrite with final names, added function mapping table and Step 12
+
+## Problems
+
+### P1: Inconsistent prefix — 3 naming families
+
+| Prefix | Examples |
+|---|---|
+| `WriteAction*` | `WriteActionError`, `WriteActionOutcomeOk`, `WriteActionAffectedItem` (8 types) |
+| `ApplyWritesToItems*` | `ApplyWritesToItemsChanges`, `ApplyWritesToItemsResult`, `ApplyWritesToItemsOptions` |
+| Unprefixed | `DDL`, `ListOrdering`, `IUser` |
+
+Typing `WriteAction` in autocomplete gives 8 hits. Typing `Apply` gives 3. Typing `DDL` gives 1. No unified entry point.
+
+### P2: `WriteAction` prefix overloaded
+
+`WriteAction` is a concrete type (the action envelope), but it's also used as prefix for unrelated concepts: errors, outcomes, affected items. Only `WriteAction` and `WriteActionPayload` actually describe the action — the rest are domain-level write concepts.
+
+### P3: Schema double-exports (12 exports)
+
+7 pre-instantiated constants (`*Schema`) + 5 generic factories (`make*Schema`). The constants are all `<any>` — useful for untyped parsing but pollute the barrel.
+
+### P4: Functions lack domain prefix
+
+`checkPermission`, `assertArrayScope`, `getFailedActions`, `getAllErrors` — nothing says these are write-action helpers. `getFailedActions` in particular is generic enough to collide conceptually.
+
+## Naming Rules
+
+1. **All types use `Write` prefix** — single autocomplete entry point (exception: `DDL`, `IUser` — standalone established concepts)
+2. **Drop `Action` from derived types** — only `WriteAction` (the envelope) and `WritePayload` keep the action concept. Errors, outcomes, affected items are domain concepts
+3. **`ApplyWritesToItems*` → `WriteItems*`** — consistent prefix, shorter
+4. **Bare names get `Write` prefix where appropriate** — `ListOrdering` → `WriteListOrdering`
+5. **Helper functions get `Write` infix** — `getWriteFailures` not `getFailedActions`
+6. **Main function renamed** — `applyWritesToItems` → `writeToItemsArray`
+7. **Schema constants flat, renamed to match types** — `WriteActionErrorSchema` → `WriteErrorSchema`
+
+## Type Renames
+
+| Current | New | Why |
+|---|---|---|
+| `WriteAction<T>` | keep | IS the action envelope |
+| `WriteActionPayload<T>` | `WritePayload<T>` | `Action` implied by `Write` context |
+| `WriteActionError` | `WriteError` | Domain error, not action-specific |
+| `WriteActionErrorContext<T>` | `WriteErrorContext<T>` | Follows `WriteError` |
+| `WriteActionAffectedItem<T>` | `WriteAffectedItem<T>` | Domain concept |
+| `WriteActionOutcome<T>` | `WriteOutcome<T>` | Domain concept |
+| `WriteActionOutcomeOk<T>` | `WriteOutcomeOk<T>` | Domain concept |
+| `WriteActionOutcomeFailed<T>` | `WriteOutcomeFailed<T>` | Domain concept |
+| `WriteResult<T>` | keep | Already clean |
+| `WriteChangesBase<T>` | `WriteChanges<T>` | Drop `Base` suffix |
+| `ApplyWritesToItemsChanges<T>` | `WriteToItemsArrayChanges<T>` | Mirrors function name |
+| `ApplyWritesToItemsResult<T>` | `WriteToItemsArrayResult<T>` | Mirrors function name |
+| `ApplyWritesToItemsOptions<T>` | `WriteToItemsArrayOptions<T>` | Mirrors function name |
+| `DDL<T>` | keep | Standalone, established concept |
+| `ListOrdering<T>` | keep | Collection concept, not write-specific |
+| `IUser` | keep | Auth domain, not write domain |
+
+Internal types (not in barrel, but rename for consistency):
+
+| Current | New |
+|---|---|
+| `WriteActionPayloadCreate<T>` | `WritePayloadCreate<T>` |
+| `WriteActionPayloadUpdate<T>` | `WritePayloadUpdate<T>` |
+| `WriteActionPayloadDelete<T>` | `WritePayloadDelete<T>` |
+| `WriteActionPayloadArrayScope<T>` | `WritePayloadArrayScope<T>` |
+
+## Function Renames
+
+| Current | New | Why |
+|---|---|---|
+| `applyWritesToItems` | `writeToItemsArray` | Shorter, `Write*` prefix, clear |
+| `applyWritesToItemsTyped` | `writeToItemsArrayPreserveInputType` | Wordy but accurate for a niche function |
+| `checkPermission` | `checkWritePermission` | Adds domain context |
+| `isIUser` | keep | Auth domain |
+| `assertArrayScope` | `assertWriteArrayScope` | Adds domain |
+| `getFailedActions` | `getWriteFailures` | Domain prefix + shorter |
+| `getSuccessfulActions` | `getWriteSuccesses` | Domain prefix + shorter |
+| `getAllErrors` | `getWriteErrors` | Domain prefix + shorter |
+
+### `writeToItemsArrayPreserveInputType` JSDoc
+
+```ts
+/**
+ * Aliases `writeToItemsArray`. Preserves the exact input item type (e.g. Immer `Draft<T>`)
+ * in the return type, instead of collapsing it to `T`.
+ *
+ * Use this when passing Immer drafts and you need the result typed as `WriteItemsResult<Draft<T>>`.
+ * Requires specifying both generics `<T, I>` explicitly — that's why it's a separate function
+ * rather than an overload.
+ *
+ * @example
+ * produce(draft => {
+ *   const result = writeToItemsArrayPreserveInputType<MyItem, Draft<MyItem>>(actions, draft.items, schema, ddl);
+ *   // result.changes.final_items is Draft<MyItem>[] — not MyItem[]
+ * });
+ */
+```
+
+## Schema Renames
+
+### Constants — flat, renamed to match types
+
+| Current | New |
+|---|---|
+| `WriteActionSchema` | keep |
+| `WriteActionErrorSchema` | `WriteErrorSchema` |
+| `WriteActionOutcomeSchema` | `WriteOutcomeSchema` |
+| `WriteActionOutcomeOkSchema` | `WriteOutcomeOkSchema` |
+| `WriteActionOutcomeFailedSchema` | `WriteOutcomeFailedSchema` |
+| `WriteActionAffectedItemSchema` | `WriteAffectedItemSchema` |
+| `WriteResultSchema` | keep |
+
+### Factory renames
+
+| Current | New |
+|---|---|
+| `makeWriteActionSchema` | keep |
+| `makeWriteActionOutcomeOkSchema` | `makeWriteOutcomeOkSchema` |
+| `makeWriteActionOutcomeFailedSchema` | `makeWriteOutcomeFailedSchema` |
+| `makeWriteActionOutcomeSchema` | `makeWriteOutcomeSchema` |
+| `makeWriteResultSchema` | keep |
+
+## New Barrel Shape
+
+```
+Functions:  writeToItemsArray, writeToItemsArrayPreserveInputType, checkWritePermission, isIUser
+Helpers:    getWriteFailures, getWriteSuccesses, getWriteErrors, assertWriteArrayScope
+Schemas:    WriteActionSchema, WriteErrorSchema, WriteAffectedItemSchema,
+            WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema,
+            WriteResultSchema
+Factories:  makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema,
+            makeWriteOutcomeSchema, makeWriteResultSchema
+Types:      WriteAction, WritePayload, WriteError, WriteErrorContext,
+            WriteAffectedItem, WriteOutcomeOk, WriteOutcomeFailed, WriteOutcome,
+            WriteResult, WriteChanges, WriteToItemsArrayChanges, WriteToItemsArrayResult,
+            DDL, ListOrdering, WriteToItemsArrayOptions, IUser
+```
+
+~33 exports. All types/schemas discoverable under `Write` prefix. Functions cluster under `write`/`getWrite`/`check`/`assert`.
+
+## Autocomplete Experience
+
+```
+Type "Write" →
+  WriteAction              WriteActionSchema        makeWriteActionSchema
+  WritePayload             WriteErrorSchema         makeWriteOutcomeSchema
+  WriteError               WriteAffectedItemSchema  makeWriteOutcomeOkSchema
+  WriteErrorContext         WriteOutcomeSchema       makeWriteOutcomeFailedSchema
+  WriteAffectedItem        WriteOutcomeOkSchema     makeWriteResultSchema
+  WriteOutcome             WriteOutcomeFailedSchema
+  WriteOutcomeOk           WriteResultSchema
+  WriteOutcomeFailed
+  WriteResult
+  WriteChanges
+  WriteToItemsArrayChanges
+  WriteToItemsArrayResult
+  WriteToItemsArrayOptions
+
+Type "write" (functions) →
+  writeToItemsArray
+  writeToItemsArrayPreserveInputType
+
+Type "getWrite" →
+  getWriteFailures
+  getWriteSuccesses
+  getWriteErrors
+```
+
+## Implementation Steps
+
+1. Rename types in `types.ts` (source of truth)
+2. Rename types in `applyWritesToItems/types.ts`
+3. Rename schemas in `write-action-schemas.ts`, add `WriteSchemas` grouped object
+4. Rename helpers in `helpers.ts`
+5. Rename `checkPermission` → `checkWritePermission` in `checkPermission.ts`
+6. Update all internal imports across write-actions module
+7. Update barrel `index.ts`
+8. Update test files
+9. Update `MIGRATING-BREAKING-WRITE-ACTIONS.md` with new names
+10. Run typecheck + tests

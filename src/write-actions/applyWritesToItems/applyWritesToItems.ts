@@ -1,10 +1,10 @@
 
-import type  {  WriteAction,  WriteActionOutcomeOk, WriteActionOutcome } from "../types.js";
-import {isUpdateOrDeleteWriteActionPayload, getFailedActions} from '../helpers.ts';
+import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome } from "../types.js";
+import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter/index-old.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.js";
-import type { ApplyWritesToItemsChanges, ApplyWritesToItemsOptions, ApplyWritesToItemsResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.js";
+import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.js";
 import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe.js";
 import writeLww from "./writeStrategies/lww.js";
 import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.js";
@@ -13,7 +13,7 @@ import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker.js"
 import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.js";
 import { type Draft, current, isDraft } from "immer";
 import { type IUser } from "../auth/types.js";
-import { checkPermission } from "./helpers/checkPermission.js";
+import { checkWritePermission } from "./helpers/checkPermission.js";
 
 
 
@@ -33,7 +33,7 @@ function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectClon
 }
 
 
-function getOptionDefaults<T extends Record<string, any>>(options?:Partial<ApplyWritesToItemsOptions<T>>):Required<ApplyWritesToItemsOptions<T>> {
+function getOptionDefaults<T extends Record<string, any>>(options?:Partial<WriteToItemsArrayOptions<T>>):Required<WriteToItemsArrayOptions<T>> {
     return {
         attempt_recover_duplicate_create: 'never',
         mutate: false,
@@ -44,7 +44,7 @@ function getOptionDefaults<T extends Record<string, any>>(options?:Partial<Apply
 
 class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     private pk:PrimaryKeyGetter<T>;
-    private actionsMap:Record<string, WriteActionOutcomeOk<T>>;
+    private actionsMap:Record<string, WriteOutcomeOk<T>>;
     constructor(primaryKey:keyof T) {
         this.pk = makePrimaryKeyGetter(primaryKey);
         this.actionsMap = {};
@@ -64,7 +64,7 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
         }
     }
 
-    get():WriteActionOutcomeOk<T>[] {
+    get():WriteOutcomeOk<T>[] {
         return JSON.parse(JSON.stringify(Object.values(this.actionsMap)));
     }
 }
@@ -74,8 +74,8 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
 /**
  * Applies the write actions (`WriteAction`) to an array of items, returning a new or mutated array.
  *
- * **This is an alias of `applyWritesToItems`** but it correctly returns Immer Drafts if they were passed in.
- * It's split into its own function (instead of being an overload of `applyWritesToItems`) due to a higher DX cost: if you want to explicitly specify T as a generic, it requires 2 to be specified.
+ * **This is an alias of `writeToItemsArray`** but it correctly returns Immer Drafts if they were passed in.
+ * It's split into its own function (instead of being an overload of `writeToItemsArray`) due to a higher DX cost: if you want to explicitly specify T as a generic, it requires 2 to be specified.
  *
  * Purity and Referential Comparison:
  * - It defaults to returning a new array and new objects (only if the write actions affect them)
@@ -102,11 +102,11 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
-export function applyWritesToItemsTyped<T extends Record<string, any>, I extends T | Draft<T>>(writeActions: WriteAction<T>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResult<I> {
-    // This function works as overload for applyWritesToItems (instead of the 'Typed' suffix);
+export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, I extends T | Draft<T>>(writeActions: WriteAction<T>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>): WriteToItemsArrayResult<I> {
+    // This function works as overload for writeToItemsArray (instead of the 'PreserveInputType' suffix);
     // but with the cost of requiring the user to specify 2 generics instead of just 1 T.
     // So decided to give the consumer the choice.
-    return applyWritesToItems(writeActions, items as T[], schema, ddl, user, options) as ApplyWritesToItemsResult<I>;
+    return writeToItemsArray(writeActions, items as T[], schema, ddl, user, options) as WriteToItemsArrayResult<I>;
 }
 
 /**
@@ -137,22 +137,22 @@ export function applyWritesToItemsTyped<T extends Record<string, any>, I extends
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
-export function applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>): ApplyWritesToItemsResult<T>  {
+export function writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>): WriteToItemsArrayResult<T>  {
 
-    return _applyWritesToItems(writeActions, items, schema, ddl, user, options);
+    return _writeToItemsArray(writeActions, items, schema, ddl, user, options);
 }
-function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: ApplyWritesToItemsOptions<T>, scoped?:boolean): ApplyWritesToItemsResult<T> {
+function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>, scoped?:boolean): WriteToItemsArrayResult<T> {
 
 
     if( writeActions.length===0 ) {
         return {
             ok: true,
             actions: [],
-            changes: emptyApplyWritesToItemsChanges(items),
+            changes: emptyWriteToItemsArrayChanges(items),
         };
     }
 
-    const optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>> = getOptionDefaults<T>(options);
+    const optionsIncDefaults:Required<WriteToItemsArrayOptions<T>> = getOptionDefaults<T>(options);
     if( isDraft(items) && !optionsIncDefaults.mutate ) {
         throw new Error("When using Immer drafts you need to use mutate. Immer does not support replacing the array.");
     }
@@ -247,7 +247,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                         failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                     }
                 } else {
-                    const permissionFailure = scoped? undefined : checkPermission(action.payload.data, ddl, user);
+                    const permissionFailure = scoped? undefined : checkWritePermission(action.payload.data, ddl, user);
                     if( permissionFailure ) {
                         failureTracker.report(action, action.payload.data, permissionFailure);
                     } else {
@@ -277,8 +277,8 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                 const pkValue = pk(item);
 
 
-                if ( !deletedHash[pkValue] && isUpdateOrDeleteWriteActionPayload<T>(action.payload) && (WhereFilter.matchJavascriptObject(item, action.payload.where)) ) {
-                    const permissionFailure = scoped? undefined : checkPermission(item, ddl, user);
+                if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && (WhereFilter.matchJavascriptObject(item, action.payload.where)) ) {
+                    const permissionFailure = scoped? undefined : checkWritePermission(item, ddl, user);
                     if( permissionFailure ) {
                         failureTracker.report(action, item, permissionFailure);
                     } else {
@@ -320,7 +320,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                     if (!mutableUpdatedItem) {
                                         mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                     }
-                                    // Get all arrays that match the scope, then recurse into applyWritesToItems for them
+                                    // Get all arrays that match the scope, then recurse into writeToItemsArray for them
                                     const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
 
 
@@ -332,12 +332,12 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                         // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.
                                         // In Immer, any update to an object or property flags the whole draft, and it cannot be undone.
                                         // At the moment, Immer+atomic can rollback because it clones the object before updating it, only accepting it if all actions succeed.
-                                        // The problem is when it recurses into _applyWritesToItems: the recursed level succeeds and mutates an object.
+                                        // The problem is when it recurses into _writeToItemsArray: the recursed level succeeds and mutates an object.
                                         // Now it can no longer be rolled back, even if the top level now fails on a subsequent action.
                                         // To workaround this, in the case of (`atomic` + Immer + array_scope), it must clone the target before recursing into it
                                         const preventMutation = optionsIncDefaults.mutate && optionsIncDefaults.atomic && isDraft(scopedArray.items);
 
-                                        const arrayResponse = _applyWritesToItems(
+                                        const arrayResponse = _writeToItemsArray(
                                             [scopedArray.writeAction],
                                             preventMutation? structuredClone(current(scopedArray.items)) : scopedArray.items,
                                             scopedArray.schema,
@@ -348,7 +348,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
                                             );
 
                                         if( !arrayResponse.ok ) {
-                                            failureTracker.mergeUnderAction(action, getFailedActions(arrayResponse));
+                                            failureTracker.mergeUnderAction(action, getWriteFailures(arrayResponse));
                                         }
 
                                         setProperty(
@@ -410,21 +410,21 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
         actionsBlockedByFailure.forEach(action => failureTracker.blocked(action, failedActionUUID));
 
 
-        let successfulActions: WriteActionOutcomeOk<T>[] = [];
-        let changes: ApplyWritesToItemsChanges<T>;
+        let successfulActions: WriteOutcomeOk<T>[] = [];
+        let changes: WriteToItemsArrayChanges<T>;
         if( optionsIncDefaults.atomic ) {
             if( mutatedItemsRollback ) {
                 items = mutatedItemsRollback.rollback();
             }
-            changes = emptyApplyWritesToItemsChanges(items);
+            changes = emptyWriteToItemsArrayChanges(items);
         } else {
-            // Thought: if addedHash/updatedHash/deletedHash/etc ends up reading ahead, it's still possible to generate the output by re-running applyWritesItems with just the actions in successTracker.get
-            changes = generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults);
+            // Thought: if addedHash/updatedHash/deletedHash/etc ends up reading ahead, it's still possible to generate the output by re-running writeToItemsArray with just the actions in successTracker.get
+            changes = generateWriteToItemsArrayChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults);
             successfulActions = successTracker.get();
         }
 
         // Combine successful + failed into ordered actions array
-        const allActions: WriteActionOutcome<T>[] = [...successfulActions, ...failureTracker.get()];
+        const allActions: WriteOutcome<T>[] = [...successfulActions, ...failureTracker.get()];
 
         // FUTURE IDEA: DETECT WHICH SUBSEQUENT ACTIONS WOULD STILL HAVE FAILED. Find out in one go what won't work (e.g. subsequent schema fails). Solution: take out the initial failing error, then run the remaining actions against the current mutableState, but passed in a recursive call in a way that it won't be mutated. Roll the returned failed actions into failureTracker, replacing any marked as blocked.
 
@@ -438,7 +438,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
         return {
             ok: true,
             actions: successTracker.get(),
-            changes: generateApplyWritesToItemsChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults),
+            changes: generateWriteToItemsArrayChanges(addedHash, updatedHash, deletedHash, items, pk, optionsIncDefaults),
         };
     }
 
@@ -446,7 +446,7 @@ function _applyWritesToItems<T extends Record<string, any>>(writeActions: WriteA
 
 }
 
-function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>) {
+function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<WriteToItemsArrayOptions<T>>) {
     let finalItems = optionsIncDefaults.mutate? originalItems as T[] : [...originalItems] as T[];
     for( let i = 0; i < finalItems.length; i++ ) {
         if( !finalItems[i] ) throw new Error(`finalItems[i] was empty, suggesting either an item has been nullified, or splicing has shortened the length such that i is beyond the end. i: ${i}, length: ${finalItems.length}`);
@@ -465,12 +465,12 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
     return finalItems;
 }
 
-function emptyApplyWritesToItemsChanges<T extends Record<string, any>>(originalItems:T[]):ApplyWritesToItemsChanges<T> {
+function emptyWriteToItemsArrayChanges<T extends Record<string, any>>(originalItems:T[]):WriteToItemsArrayChanges<T> {
     return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems, created_at: Date.now()};
 }
-function generateApplyWritesToItemsChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<ApplyWritesToItemsOptions<T>>):ApplyWritesToItemsChanges<T> {
+function generateWriteToItemsArrayChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<WriteToItemsArrayOptions<T>>):WriteToItemsArrayChanges<T> {
 
-    const changes: ApplyWritesToItemsChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now() };
+    const changes: WriteToItemsArrayChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now() };
     const newChange = !!(changes.insert.length || changes.update.length || changes.remove_keys.length);
     changes.changed = newChange;
     if( newChange ) {

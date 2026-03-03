@@ -1,6 +1,6 @@
 import type { IUser } from "../../auth/types.js";
 import type { DDL } from "../types.js";
-import { checkPermission } from "./checkPermission.js";
+import { checkWritePermission } from "./checkPermission.js";
 
 type TestItem = {
     id: string, 
@@ -94,29 +94,29 @@ describe('Can write', () => {
     describe('checkPermissions TestItem', () => {
 
         test('checkPermissions TestItem success', () => {
-            const failures = checkPermission(testItems, ddl, user1);
+            const failures = checkWritePermission(testItems, ddl, user1);
             expect(failures).toBe(undefined);
         })
     
         test('checkPermissions TestItem fail', () => {
-            const failures = checkPermission(testItems, ddl, user2);
+            const failures = checkWritePermission(testItems, ddl, user2);
             expect(!!failures).toBe(true);
         })
     
         test('TestItem path is undefined', () => {
             // @ts-ignore breaking for test
-            const failures = checkPermission({}, ddl, user1);
+            const failures = checkWritePermission({}, ddl, user1);
             expect(!!failures).toBe(true);
         });
     
         test('TestItem path is array', () => {
             // @ts-ignore breaking for test
-            const failures = checkPermission({owner: ['user1']}, ddl, user1);
+            const failures = checkWritePermission({owner: ['user1']}, ddl, user1);
             expect(!!failures).toBe(true);
         });
     
         test('TestItem path empty user', () => {
-            const failures = checkPermission(testItems, ddl, userEmpty);
+            const failures = checkWritePermission(testItems, ddl, userEmpty);
             expect(!!failures).toBe(true);
         });
     
@@ -125,7 +125,7 @@ describe('Can write', () => {
             // @ts-ignore breaking for test
             ddl2.permissions = {};
             
-            const failures = checkPermission(testItems, ddl2, user1);
+            const failures = checkWritePermission(testItems, ddl2, user1);
             expect(!!failures).toBe(true);
         });
     });
@@ -133,31 +133,31 @@ describe('Can write', () => {
     describe('checkPermissions TestItemOwnerArray', () => {
     
         test('checkPermissions TestItemOwnerArray success', () => {
-            const failures = checkPermission(testItemsWithOwnerArray, ddlWithOwnerArray, user1)
+            const failures = checkWritePermission(testItemsWithOwnerArray, ddlWithOwnerArray, user1)
             expect(failures).toBe(undefined);
         })
     
         test('checkPermissions TestItemOwnerArray fail', () => {
-            const failures = checkPermission(testItemsWithOwnerArray, ddlWithOwnerArray, user2);
+            const failures = checkWritePermission(testItemsWithOwnerArray, ddlWithOwnerArray, user2);
             expect(!!failures).toBe(true);
         })
     
         test('TestItemOwnerArray path is undefined', () => {
             // @ts-ignore breaking for test
-            const failures = checkPermission({}, ddlWithOwnerArray, user1)
+            const failures = checkWritePermission({}, ddlWithOwnerArray, user1)
             expect(!!failures).toBe(true);
         });
     
         test('TestItemOwnerArray path is not array', () => {
             // @ts-ignore breaking for test
-            const failures = checkPermission({owner: 'user1'}, ddlWithOwnerArray, user1)
+            const failures = checkWritePermission({owner: 'user1'}, ddlWithOwnerArray, user1)
             expect(!!failures).toBe(true);
         });
     
     
         test('TestItem path empty user', () => {
             
-            const failures = checkPermission(testItemsWithOwnerArray, ddlWithOwnerArray, userEmpty);
+            const failures = checkWritePermission(testItemsWithOwnerArray, ddlWithOwnerArray, userEmpty);
             expect(!!failures).toBe(true);
         });
     
@@ -165,30 +165,30 @@ describe('Can write', () => {
     
     describe('checkPermissions TestItemOwnerObjectArray', () => {
         test('checkPermissions TestItemOwnerObjectArray success', () => {
-            const failures = checkPermission(testItemsWithObjectOwnersArray, ddlWithObjectOwnersArray, user1);
+            const failures = checkWritePermission(testItemsWithObjectOwnersArray, ddlWithObjectOwnersArray, user1);
             expect(failures).toBe(undefined);
         })
     
         test('checkPermissions TestItemOwnerObjectArray fail', () => {
-            const failures = checkPermission(testItemsWithObjectOwnersArray, ddlWithObjectOwnersArray, user2);
+            const failures = checkWritePermission(testItemsWithObjectOwnersArray, ddlWithObjectOwnersArray, user2);
             expect(!!failures).toBe(true);
         })
     
         test('TestItemOwnerObjectArray path is undefined', () => {
             // @ts-ignore breaking for test
-            const failures = checkPermission({}, ddlWithObjectOwnersArray, user1);
+            const failures = checkWritePermission({}, ddlWithObjectOwnersArray, user1);
             expect(!!failures).toBe(true);
         });
     
         test('TestItemObjectOwnersArray path is not array', () => {
             // @ts-ignore breaking for test
-            const failures = checkPermission({owner: 'user1'}, ddlWithObjectOwnersArray, user1);
+            const failures = checkWritePermission({owner: 'user1'}, ddlWithObjectOwnersArray, user1);
             expect(!!failures).toBe(true);
         });
     
     
         test('TestItem path empty user', () => {
-            const failures = checkPermission(testItemsWithObjectOwnersArray, ddlWithObjectOwnersArray, userEmpty);
+            const failures = checkWritePermission(testItemsWithObjectOwnersArray, ddlWithObjectOwnersArray, userEmpty);
             expect(!!failures).toBe(true);
         });
     
@@ -212,11 +212,11 @@ describe('Transfer Ownership', () => {
             };
 
             // Verify user1 can make the change:
-            const failures1 = checkPermission(testItemsTransferring, ddl, user1);
+            const failures1 = checkWritePermission(testItemsTransferring, ddl, user1);
             expect(failures1).toBe(undefined);
 
             // Verify user2 can remove user 1 to complete it
-            const failures2 = checkPermission(testItemsTransferring, ddl, user2);
+            const failures2 = checkWritePermission(testItemsTransferring, ddl, user2);
             expect(failures2).toBe(undefined);
 
             const testItemsTransferred:TestItem = {
@@ -224,12 +224,12 @@ describe('Transfer Ownership', () => {
                 owner: user2.getUuid()!
             };
 
-            const failures3 = checkPermission(testItemsTransferred, ddl, user2)
+            const failures3 = checkWritePermission(testItemsTransferred, ddl, user2)
             expect(failures3).toBe(undefined);
 
             // Verify user1 can no longer use it
 
-            const failures4 = checkPermission(testItemsTransferred, ddl, user1)
+            const failures4 = checkWritePermission(testItemsTransferred, ddl, user1)
             expect(failures4).toEqual({
                 "reason": "not-owner",
                 "type": "permission_denied",
@@ -245,7 +245,7 @@ describe('Transfer Ownership', () => {
             };
 
             // Verify user1 can make the change:
-            const failures1 = checkPermission(testItemsTransferring, ddl, user1);
+            const failures1 = checkWritePermission(testItemsTransferring, ddl, user1);
             expect(failures1).toEqual({
                 "reason": "not-owner",
                 "type": "permission_denied",
@@ -265,7 +265,7 @@ describe('Transfer Ownership', () => {
             }
 
             // Verify user1 can make the change:
-            const failures1 = checkPermission(testItemsWithOwnerArrayTransferring, ddlWithOwnerArray, user1);
+            const failures1 = checkWritePermission(testItemsWithOwnerArrayTransferring, ddlWithOwnerArray, user1);
             expect(failures1).toBe(undefined);
 
             // Verify user2 can remove user 1 to complete it
@@ -274,12 +274,12 @@ describe('Transfer Ownership', () => {
                 owners: [user2.getUuid()!]
             }
 
-            const failures2 = checkPermission(testItemsWithOwnerArrayTransferred, ddlWithOwnerArray, user2)
+            const failures2 = checkWritePermission(testItemsWithOwnerArrayTransferred, ddlWithOwnerArray, user2)
             expect(failures2).toBe(undefined);
 
             // Verify user1 can no longer use it
 
-            const failures3 = checkPermission(testItemsWithOwnerArrayTransferred, ddlWithOwnerArray, user1)
+            const failures3 = checkWritePermission(testItemsWithOwnerArrayTransferred, ddlWithOwnerArray, user1)
             expect(failures3).toEqual({
                 "reason": "not-owner",
                 "type": "permission_denied",

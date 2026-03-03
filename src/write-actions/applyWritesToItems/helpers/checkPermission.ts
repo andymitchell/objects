@@ -3,20 +3,20 @@ import type { IUser } from "../../auth/types.js";
 import { type DDL, DDLPermissionsSchema } from "../types.js";
 
 import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.js";
-import type { WriteActionError } from "../../types.ts";
+import type { WriteError } from "../../types.ts";
 
 
 /**
  * Check whether a user has permission to modify an item, based on the DDL's ownership rules.
  *
- * Returns `undefined` if permitted, or a `WriteActionError` describing the denial reason.
+ * Returns `undefined` if permitted, or a `WriteError` describing the denial reason.
  * Use before executing a write action to predict whether it will be allowed.
  *
  * @example
- * const denied = checkPermission(item, ddl, user);
+ * const denied = checkWritePermission(item, ddl, user);
  * if (denied) console.log(denied.reason); // e.g. 'not-owner'
  */
-export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteActionError | undefined {
+export function checkWritePermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteError | undefined {
     if( !ddl.permissions || ddl.permissions.type==='none' ) return undefined;
     if( !verifiedPermissionsSchema ) {
         if( !DDLPermissionsSchema.safeParse(ddl.permissions).success ) {

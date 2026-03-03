@@ -1,17 +1,16 @@
-
 import { z } from "zod";
-
-import { test } from 'vitest';
-import type { WriteAction, WritePayloadArrayScope } from "../types.js";
+import { test, describe, expect } from 'vitest';
+import type { WriteAction, WritePayloadArrayScope } from "../types.ts";
 import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses } from "../helpers.ts";
-import type { WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL } from "./types.js";
+import type { WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL } from "./types.ts";
 import { produce, type Draft } from "immer";
-import type { IUser } from "../auth/types.js";
+import type { IUser } from "../auth/types.ts";
 import { writeToItemsArray } from "./applyWritesToItems.ts";
+import { standardTests, type AdapterFactory } from "../standardTests.ts";
 
-
-
-
+// ═══════════════════════════════════════════════════════════════════
+// Shared fixtures for implementation-specific tests
+// ═══════════════════════════════════════════════════════════════════
 
 const ObjSchema = z.object({
     id: z.string(),
@@ -36,1990 +35,320 @@ type Obj = z.infer<typeof ObjSchema>;
 const ddl: DDL<Obj> = {
     version: 1,
     lists: {
-        '.': {
-            primary_key: 'id',
-            order_by: {key: 'id'}
-        },
-        'children': {
-            primary_key: 'cid',
-            order_by: {key: 'cid'}
-        },
-        'children.children': {
-            primary_key: 'ccid',
-            order_by: {key: 'ccid'}
-        }
+        '.': { primary_key: 'id', order_by: { key: 'id' } },
+        'children': { primary_key: 'cid', order_by: { key: 'cid' } },
+        'children.children': { primary_key: 'ccid', order_by: { key: 'ccid' } },
     },
-    permissions: {
-        type: 'none'
-    }
-}
-
-const obj1: Obj = {
-    id: '1'
-};
-const obj2: Obj = {
-    id: '2'
+    permissions: { type: 'none' },
 };
 
-export type WriteToItemsArrayInTestingFn<T extends Record<string, any>> = (
-    writeActions: WriteAction<T>[],
-    items: T[],
-    schema: z.ZodType<T, any, any>,
-    ddl: DDL<T>,
-    user?: IUser,
-    options?: WriteToItemsArrayOptions<T>
-) => {
-    /**
-     * The result, but in the case of Immer `produce` it has had its `changes.final_items` replaced with the finalised drafts. 
-     * You can access the real final_items as `draft_final_items`
-     */
-    result: WriteToItemsArrayResult<T>,
+const obj1: Obj = { id: '1' };
+const obj2: Obj = { id: '2' };
 
-    /**
-     * In the case of Immer `produce` this is what is passed to `writeToItemsArray`
-     */
-    draft_items?: Draft<T>[],
-    /**
-     * In the case of Immer `produce` this is what is received from `writeToItemsArray` as `changes.final_items`
-     */
-    draft_final_items?: Draft<T>[]
-};
+// ═══════════════════════════════════════════════════════════════════
+// Adapter factory for standardTests
+// ═══════════════════════════════════════════════════════════════════
 
-function castWriteToItemsArrayInTestingFn<T extends Record<string, any>>(writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<any>): WriteToItemsArrayInTestingFn<T> {
-    return writeToItemsArrayInTesting;
-}
-
-type UseCase = 'immutable' | 'mutable' | 'immer-mutable';
-type Mutable = 'immutable' | 'mutable';
-type Immer = 'immer' | 'non-immer';
-
-/**
- * Generic test runner for different use cases. 
- * 
- * Put the tests inside the callback, and use `writeToItemsArrayInTesting` in place of `writeToItemsArray`.
- * @note It alters Immer's behaviour - by default, no `changes` work in Immer after `produce` is complete; but for the test it sets `changes.final_items` to the result of Immer's `produce`
- * 
- * @param callback 
- */
-function testUseCases<
-    T extends Record<string, any> = Obj
->
-    (
-        callback: (name: UseCase, mutable: Mutable, immer: Immer, writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T>, useCaseBaseOptions: WriteToItemsArrayOptions<T>) => void
-    ) {
-
-    {
-        const useCaseBaseOptions = { mutate: false };
-        // The immutable options
-        const writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            const result = writeToItemsArray(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
-            return {
-                result
-            }
-        }
-        callback('immutable', 'immutable', 'non-immer', writeToItemsArrayInTesting, useCaseBaseOptions)
+const createAdapter: AdapterFactory = <T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>) => ({
+    apply: async ({ initialItems, writeActions, user, options }) => {
+        const items = structuredClone(initialItems);
+        const result = writeToItemsArray(writeActions, items, schema, ddl, user, {
+            atomic: options?.atomic,
+            attempt_recover_duplicate_create: options?.attempt_recover_duplicate_create,
+        });
+        return {
+            result,
+            changes: result.changes,
+            finalItems: result.changes.final_items,
+        };
     }
-    {
+});
 
-        // The mutable options
-        const useCaseBaseOptions = { mutate: true };
-        const writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-            const result = writeToItemsArray(writeActions, items, schema, ddl, user, { ...useCaseBaseOptions, ...options });
-            return {
-                result
-            }
-        }
-        callback('mutable', 'mutable', 'non-immer', writeToItemsArrayInTesting, useCaseBaseOptions)
-    }
-    {
-
-        // The immer-mutable options
-        const useCaseBaseOptions = { mutate: true };
-        const writeToItemsArrayInTesting: WriteToItemsArrayInTestingFn<T> = (writeActions, items, schema, ddl, user, options) => {
-
-            let result: WriteToItemsArrayResult<T>;
-            let draft_items: Draft<T>[];
-            let draft_final_items: Draft<T>[];
-            const finalItems = produce(items, draft => {
-
-                draft_items = draft;
-                result = writeToItemsArray(writeActions, draft as T[], schema, ddl, user, { ...useCaseBaseOptions, ...options })
-
-                draft_final_items = result.changes.final_items as Draft<T>[];
-
-            });
-            if (!result! || !draft_items! || !draft_final_items!) throw new Error("noop");
-
-            result.changes.final_items = finalItems
-
-            return { result, draft_final_items, draft_items };
-
-        }
-        callback('immer-mutable', 'mutable', 'immer', writeToItemsArrayInTesting, useCaseBaseOptions)
-    }
-
-}
-
-
-
+// ═══════════════════════════════════════════════════════════════════
+// Standard tests
+// ═══════════════════════════════════════════════════════════════════
 
 describe('writeToItemsArray', () => {
 
+    describe('standard tests', () => {
+        standardTests({ test, expect, createAdapter, implementationName: 'writeToItemsArray' });
+    });
 
+    // ═══════════════════════════════════════════════════════════════
+    // Implementation-specific tests
+    // ═══════════════════════════════════════════════════════════════
 
-    testUseCases((name, mutable, immer, writeToItemsArrayInTesting, options) => {
+    describe('implementation-specific', () => {
 
-        describe(name, () => {
-            describe('basic happy path', () => {
-                test(`create`, () => {
+        // ───────────────────────────────────────────────────────────
+        // 1. Execution Modes
+        // ───────────────────────────────────────────────────────────
 
-                    const data2 = JSON.parse(JSON.stringify(obj2)); //structuredClone(obj2);
+        describe('1. Execution Modes', () => {
 
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'create',
-                                    data: data2
-                                }
-                            }
-                        ]
-                        ,
-                        [
-                            obj1
-                        ],
-                        ObjSchema,
-                        ddl
+            describe('1.1 Immutable mode (default)', () => {
+
+                test('returns new array reference', () => {
+                    const items = [structuredClone(obj1)];
+                    const result = writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } }],
+                        items, ObjSchema, ddl,
                     );
-
-
-
-                    expect(result.ok).toBe(true);
-                    expect(
-                        result.changes.insert[0]!
-                    ).toEqual(obj2);
-
-
-                    expect(
-                        result.changes.final_items[1]
-                    ).toEqual(obj2);
-
-                    expect(
-                        result.changes.final_items.length
-                    ).toEqual(2);
-
+                    expect(result.changes.final_items).not.toBe(items);
                 });
 
-                test(`update`, (cx) => {
-                    if (name !== 'immer-mutable') cx.skip();
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-
-                                        text: 'T1'
-                                    },
-                                    where: {
-                                        id: '1'
-                                    }
-                                }
-                            }
-                        ],
-                        [
-                            structuredClone(obj1)
-                        ],
-                        ObjSchema,
-                        ddl
+                test('original items array is unmodified', () => {
+                    const items = [structuredClone(obj1)];
+                    const originalLength = items.length;
+                    writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } }],
+                        items, ObjSchema, ddl,
                     );
-
-                    expect(result.ok).toBe(true);
-                    if (immer !== 'immer') { // With Immer the draft objects added to 'changes' are cancelled #immer_changes_cancelled_post_produce
-                        expect(
-                            result.changes.update[0]!
-                        ).toEqual({ ...obj1, text: 'T1' });
-                    }
-
-                    expect(
-                        result.changes.final_items[0]!
-                    ).toEqual({ ...obj1, text: 'T1' });
+                    expect(items.length).toBe(originalLength);
                 });
 
-                test(`delete`, () => {
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'delete',
-                                    where: {
-                                        id: '1'
-                                    }
-                                }
-                            }
-                        ],
-                        [
-                            structuredClone(obj1)
-                        ],
-                        ObjSchema,
-                        ddl
+                test('unchanged items keep same reference', () => {
+                    const item1 = structuredClone(obj1);
+                    const item2 = structuredClone(obj2);
+                    const items = [item1, item2];
+                    const result = writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'new' }, where: { id: '2' } } }],
+                        items, ObjSchema, ddl,
                     );
-
-                    expect(result.ok).toBe(true);
-                    expect(
-                        result.changes.remove_keys.length
-                    ).toEqual(1);
-
-                    expect(
-                        result.changes.final_items.length
-                    ).toEqual(0);
+                    expect(result.changes.final_items[0]).toBe(item1); // unchanged
                 });
 
-
-                test(`array_scoped create (existing structure in place) `, (cx) => {
-
-
-                    const objWithChildren: Obj = {
-                        id: 'p1',
-                        children: [
-                            {
-                                cid: 'c1',
-                                children: []
-                            }
-                        ]
-                    }
-
-
-                    const payload: WritePayloadArrayScope<Obj, 'children.children'> = {
-
-                        type: 'array_scope',
-                        scope: 'children.children',
-                        action: {
-                            type: 'create',
-                            data: {
-                                ccid: 'cc1'
-                            }
-
-                        },
-                        where: {
-                            id: 'p1'
-                        }
-
-                    }
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload
-                            }
-                        ],
-                        [
-                            objWithChildren
-                        ],
-                        ObjSchema,
-                        ddl
+                test('changed items get new reference', () => {
+                    const item1 = structuredClone(obj1);
+                    const items = [item1];
+                    const result = writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'new' }, where: { id: '1' } } }],
+                        items, ObjSchema, ddl,
                     );
-
-                    expect(result.ok).toBe(true);
-                    expect(
-                        result.changes.final_items[0]!.children![0]!.children[0]!.ccid
-                    ).toEqual('cc1');
-
-
-                    expect(
-                        result.changes.final_items[0]!.children![0]!.children.length
-                    ).toEqual(1);
-
+                    expect(result.changes.final_items[0]).not.toBe(item1);
+                    expect(result.changes.final_items[0]!.text).toBe('new');
                 });
-
-
-                test(`scalar array updates ok`, () => {
-                    const data1: Obj = JSON.parse(JSON.stringify(obj1)); //structuredClone(obj2);
-                    data1.arr_items = ['1'];
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'create',
-                                    data: data1
-                                }
-                            }
-                        ]
-                        ,
-                        [],
-                        ObjSchema,
-                        ddl
-                    );
-
-                    expect(result.ok).toBe(true);
-                    expect(
-                        result.changes.insert[0]!
-                    ).toEqual(data1);
-
-                    const { result: result2 } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'update',
-                                    data: {
-                                        arr_items: ['1', '2']
-                                    },
-                                    where: {
-                                        id: data1.id
-                                    }
-                                }
-                            }
-                        ]
-                        ,
-                        result.changes.final_items,
-                        ObjSchema,
-                        ddl
-                    );
-
-
-                    const { result: result3 } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'update',
-                                    data: {
-                                        arr_items: ['z'],
-                                        'owner': 'Bob'
-                                    },
-                                    where: {
-                                        id: data1.id
-                                    }
-                                }
-                            }
-                        ]
-                        ,
-                        result2.changes.final_items,
-                        ObjSchema,
-                        ddl
-                    );
-
-                    expect(result3.ok).toBe(true);
-                    expect(
-                        result3.changes.final_items[0]!
-                    ).toEqual({
-                        ...data1,
-                        arr_items: ['z'],
-                        owner: 'Bob'
-                    });
-
-
-                });
-
-                test(`specifies successful_actions`, () => {
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    data: {
-                                        text: 'Alice',
-                                    },
-                                    where: {
-                                        text: 'Bob'
-                                    }
-                                }
-                            },
-                        ],
-                        [
-                            {
-                                id: '1',
-                                text: 'Bob'
-                            },
-                            {
-                                id: '2',
-                                text: 'Bob'
-                            },
-                            {
-                                id: '3',
-                                text: 'Alice'
-                            }
-                        ],
-                        ObjSchema,
-                        ddl,
-                        undefined,
-                        {
-                            atomic: true
-                        }
-                    );
-
-
-                    expect(result.ok).toBe(true);
-
-                    const successes = getWriteSuccesses(result);
-                    expect(successes.length).toEqual(1);
-                    expect(successes[0]!.action.uuid).toEqual('0');
-                    expect(successes[0]!.affected_items!.length).toEqual(2);
-                    expect(successes[0]!.affected_items![0]!.item_pk).toEqual('1');
-                    expect(successes[0]!.affected_items![1]!.item_pk).toEqual('2');
-                    expect(result.changes.final_items.every(x => x.text === 'Alice')).toBe(true);
-
-
-                });
-
             });
 
-            describe('purity', () => {
+            describe('1.2 Mutable mode (mutate: true)', () => {
 
-                test('never mutates', (cx) => {
-                    if (mutable !== 'immutable' && immer !== 'immer') cx.skip(); // Allow immer here: see #immer_mutates_in_produce_but_then_is_immutable
-
-                    const initialObj1 = structuredClone(obj1);
-                    const items = [initialObj1];
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        text: 'T1'
-                                    },
-                                    where: {
-                                        id: '1'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: '2',
-                                        text: 'T1'
-                                    }
-                                }
-                            }
-                        ],
-                        items,
-                        ObjSchema,
-                        ddl
+                test('returns same array reference', () => {
+                    const items = [structuredClone(obj1)];
+                    const result = writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } }],
+                        items, ObjSchema, ddl, undefined, { mutate: true },
                     );
-
-                    expect(result.ok).toBe(true);
-
-                    expect(items).not.toBe(result.changes.final_items);
-                    const returnedObj1 = result.changes.final_items[0]!;
-                    expect(initialObj1.id).toBe(returnedObj1.id);
-                    expect(initialObj1).not.toBe(returnedObj1);
-
-                    const testId = 'justhere';
-                    items.push({ id: testId });
-                    expect(items.find(x => x.id === testId)).toBeDefined();
-                    expect(result.changes.final_items.find(x => x.id === testId)).toBeUndefined();
-
-                })
-
-                test('mutates in place', (cx) => {
-                    if (mutable !== 'mutable') cx.skip();
-                    // Immer is counter-intuitive because despite it running as a mutate operation, it's final output behaves with perfect referential comparison; so it needs to be judged as non-mutate. #immer_mutates_in_produce_but_then_is_immutable
-                    if (immer === 'immer') cx.skip();
-
-                    const initialObj1 = structuredClone(obj1);
-                    const items = [initialObj1];
-
-
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        text: 'T1'
-                                    },
-                                    where: {
-                                        id: '1'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: '2',
-                                        text: 'T1'
-                                    }
-                                }
-                            }
-                        ],
-                        items,
-                        ObjSchema,
-                        ddl
-                    );
-
-                    expect(result.ok).toBe(true);
-
-
-                    expect(items).toBe(result.changes.final_items);
-                    const returnedObj1 = result.changes.final_items[0]!;
-                    expect(initialObj1.id).toBe(returnedObj1.id);
-                    expect(initialObj1).toBe(returnedObj1);
-
-
-                    // Skip this for immer as it freezes the items
-                    if (name !== 'immer-mutable') {
-                        const testId = 'inboth';
-                        items.push({ id: testId });
-                        expect(items.find(x => x.id === testId)).toBeDefined();
-                        expect(result.changes.final_items.find(x => x.id === testId)).toBeDefined();
-                    }
-
-                })
-
-            })
-
-            describe('error handling', () => {
-
-
-                test(`update break schema`, () => {
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        // @ts-ignore wilfully breaking schema here 
-                                        none_key: 'T1'
-                                    },
-                                    where: {
-                                        id: '1'
-                                    }
-                                }
-                            }
-                        ],
-                        [
-                            structuredClone(obj1)
-                        ],
-                        ObjSchema,
-                        ddl
-                    );
-
-                    expect(result.ok).toBe(false);
-                    const failures = getWriteFailures(result);
-                    const failedActionItem = failures[0]!.affected_items![0]!;
-                    expect(
-                        failedActionItem.item
-                    ).toEqual({ ...obj1, none_key: 'T1' });
+                    expect(result.changes.final_items).toBe(items);
                 });
 
-                test(`identify failed actions`, () => {
+                test('items are mutated in-place', () => {
+                    const item1 = structuredClone(obj1);
+                    const items = [item1];
+                    const result = writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'new' }, where: { id: '1' } } }],
+                        items, ObjSchema, ddl, undefined, { mutate: true },
+                    );
+                    expect(result.changes.final_items[0]).toBe(item1);
+                    expect(item1.text).toBe('new');
+                });
+            });
 
-                    // Add 2 writes that should work, at position 0 and 2 
-                    // Have 2 failing updates, at 1 and 3
-                    // Failing update 1 should affect 2 items
+            describe('1.3 Immer compatibility (mutate: true inside produce)', () => {
 
-                    const { result } = writeToItemsArrayInTesting(
+                test('works inside immer produce', () => {
+                    const items: Obj[] = [structuredClone(obj1)];
+                    const finalItems = produce(items, draft => {
+                        writeToItemsArray(
+                            [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'immer' }, where: { id: '1' } } }],
+                            draft as Obj[], ObjSchema, ddl, undefined, { mutate: true },
+                        );
+                    });
+                    expect(finalItems[0]!.text).toBe('immer');
+                    expect(finalItems).not.toBe(items); // immer returns new reference
+                });
+
+                test('throws if mutate:false with Immer draft', () => {
+                    const items: Obj[] = [structuredClone(obj1)];
+                    expect(() => produce(items, draft => {
+                        writeToItemsArray(
+                            [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } }],
+                            draft as Obj[], ObjSchema, ddl, undefined, { mutate: false },
+                        );
+                    })).toThrow('When using Immer drafts you need to use mutate.');
+                });
+            });
+        });
+
+        // ───────────────────────────────────────────────────────────
+        // 2. Referential Stability
+        // ───────────────────────────────────────────────────────────
+
+        describe('2. Referential Stability (React-friendly shallow comparison)', () => {
+
+            test('mixed success/fail non-atomic: only affected items get new references', () => {
+                const item1 = structuredClone(obj1);
+                const item2 = structuredClone(obj2);
+                const items = [item1, item2];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '2' } } },
+                        { type: 'write', ts: 0, uuid: '1', payload: { type: 'create', data: { id: '3' } } },
+                    ],
+                    items, ObjSchema, ddl,
+                );
+                expect(result.ok).toBe(true);
+                expect(result.changes.final_items[0]).toBe(item1); // unchanged
+                expect(result.changes.final_items[1]).not.toBe(item2); // changed
+            });
+
+            test('no-op batch: all references preserved', () => {
+                const item1 = structuredClone(obj1);
+                const items = [item1];
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'x' }, where: { id: 'nonexistent' } } }],
+                    items, ObjSchema, ddl,
+                );
+                expect(result.changes.final_items).toBe(items);
+                expect(result.changes.final_items[0]).toBe(item1);
+            });
+
+            test('atomic rollback: original array reference preserved', () => {
+                const item1 = structuredClone(obj1);
+                const items = [item1];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } },
+                        // @ts-ignore wilfully breaking schema
+                        { type: 'write', ts: 0, uuid: '1', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
+                    ],
+                    items, ObjSchema, ddl, undefined, { atomic: true },
+                );
+                expect(result.ok).toBe(false);
+                expect(result.changes.final_items).toBe(items);
+                expect(result.changes.final_items[0]).toBe(item1);
+            });
+
+            test('atomic rollback on array_scope: original references preserved', () => {
+                const originalItems: Obj[] = [{ id: '1', children: [{ cid: 'c1', children: [] }] }];
+                const obj1Ref = originalItems[0];
+                const result = writeToItemsArray(
+                    [
+                        {
+                            type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
+                                type: 'array_scope', scope: 'children',
+                                action: { type: 'update', data: { name: 'Bob' }, where: { cid: 'c1' } },
+                                where: { id: '1' },
+                            })
+                        },
+                        // @ts-ignore wilfully breaking schema
+                        { type: 'write', ts: 0, uuid: '1', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
+                    ],
+                    originalItems, ObjSchema, ddl, undefined, { atomic: true },
+                );
+                expect(result.ok).toBe(false);
+                expect(result.changes.final_items).toBe(originalItems);
+                expect(result.changes.final_items[0]).toBe(obj1Ref);
+            });
+
+            test('Immer produces correct referential stability after produce', () => {
+                const items: Obj[] = [{ id: '1' }, { id: '2' }];
+                const finalItems = produce(items, draft => {
+                    writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '2' } } }],
+                        draft as Obj[], ObjSchema, ddl, undefined, { mutate: true },
+                    );
+                });
+                // Immer gives new top-level reference
+                expect(finalItems).not.toBe(items);
+                // Unchanged item keeps identity (Immer optimisation)
+                expect(finalItems[0]).toBe(items[0]);
+                // Changed item gets new reference
+                expect(finalItems[1]).not.toBe(items[1]);
+                expect(finalItems[1]!.text).toBe('changed');
+            });
+        });
+
+        // ───────────────────────────────────────────────────────────
+        // 3. WriteToItemsArrayResult extras
+        // ───────────────────────────────────────────────────────────
+
+        describe('3. WriteToItemsArrayResult extras', () => {
+
+            test('changes.final_items present and correct', () => {
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '1', text: 'hello' } } },
+                    ],
+                    [], ObjSchema, ddl,
+                );
+                expect(result.changes.final_items).toBeDefined();
+                expect(result.changes.final_items).toHaveLength(1);
+                expect(result.changes.final_items[0]!.text).toBe('hello');
+            });
+
+            test('changes.created_at is a timestamp', () => {
+                const before = Date.now();
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '1' } } }],
+                    [], ObjSchema, ddl,
+                );
+                const after = Date.now();
+                expect(result.changes.created_at).toBeGreaterThanOrEqual(before);
+                expect(result.changes.created_at).toBeLessThanOrEqual(after);
+            });
+        });
+
+        // ───────────────────────────────────────────────────────────
+        // 4. Regression: Immer-specific edge cases
+        // ───────────────────────────────────────────────────────────
+
+        describe('4. Immer-specific edge cases', () => {
+
+            test('Immer flags objects even if no material change', () => {
+                const originalItems = [{ id: 1, text: 'Bob' }, { id: 2, text: '' }];
+                const finalItems = produce(originalItems, () => {
+                    // no-op
+                });
+                expect(finalItems).toBe(originalItems);
+
+                const flaggedItems = produce(originalItems, draft => {
+                    draft[1]!.text = 'Alice';
+                    draft[1]!.text = ''; // Restore
+                });
+                expect(flaggedItems).not.toBe(originalItems);
+            });
+
+            test('atomic + Immer: rollback restores original references', () => {
+                const items: Obj[] = [{ id: '1', children: [{ cid: 'c1', children: [] }] }];
+                const finalItems = produce(items, draft => {
+                    const result = writeToItemsArray(
                         [
                             {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a1',
-                                        text: 'bob'
-                                    }
-                                }
+                                type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
+                                    type: 'array_scope', scope: 'children',
+                                    action: { type: 'update', data: { name: 'Bob' }, where: { cid: 'c1' } },
+                                    where: { id: '1' },
+                                })
                             },
                             {
                                 type: 'write', ts: 0, uuid: '1', payload: {
-                                    type: 'create',
-                                    data: {
-                                        // @ts-ignore wilfully breaking schema here 
-                                        none_key: 'T1'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '2', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a2',
-                                        text: 'bob'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '3', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        // @ts-ignore wilfully breaking schema here 
-                                        none_key: 'T2'
+                                    type: 'array_scope', scope: 'children',
+                                    action: {
+                                        type: 'create',
+                                        // @ts-ignore
+                                        data: { bad_key: 'fail' },
                                     },
-                                    where: {
-                                        text: 'bob'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '4', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a3',
-                                        text: 'bob'
-                                    }
+                                    where: { id: '1' },
                                 }
                             },
                         ],
-                        [
-                            structuredClone(obj1)
-                        ],
-                        ObjSchema,
-                        ddl,
-                        undefined,
-                        {
-                            atomic: false
-                        }
-
+                        draft as Obj[], ObjSchema, ddl, undefined, { atomic: true, mutate: true },
                     );
-
-
                     expect(result.ok).toBe(false);
-                    const failures = getWriteFailures(result);
-                    const firstFailedAction = failures[0]!;
-                    expect(firstFailedAction.action.payload.type).toBe('create'); if (firstFailedAction.action.payload.type !== 'create') throw new Error("noop - create");
-                    // @ts-ignore wilfully breaking schema here
-                    expect(firstFailedAction.action.payload.data.none_key).toBe('T1');
-                    // @ts-ignore wilfully breaking schema here
-                    expect(firstFailedAction.affected_items![0]!.item.none_key).toBe('T1');
-                    expect(firstFailedAction.errors[0]!.type).toBe('missing_key');
-                    expect(firstFailedAction.unrecoverable).toBe(true);
-
-
-                    const secondFailedAction = failures[1]!;
-                    expect(secondFailedAction.action.payload.type).toBe('create'); if (secondFailedAction.action.payload.type !== 'create') throw new Error("noop - create");
-                    // @ts-ignore wilfully breaking schema here
-                    expect(secondFailedAction.blocked_by_action_uuid).toBe('1');
-
-                    const thirdFailedAction = failures[2]!;
-                    expect(thirdFailedAction.action.payload.type).toBe('update'); if (thirdFailedAction.action.payload.type !== 'update') throw new Error("noop - update");
-                    // @ts-ignore wilfully breaking schema here
-                    expect(thirdFailedAction.action.payload.data.none_key).toBe('T2');
-                    expect(thirdFailedAction.affected_items!.length).toBe(0);
-
-                    // Now check that it partially succeeded
-                    expect(result.changes.insert.length).toBe(1);
-                    expect(result.changes.insert[0]!.id).toBe('a1');
-                    expect(result.changes.final_items.length).toBe(2);
-                    expect(result.changes.final_items[0]!.id).toBe('1');
-                    expect(result.changes.final_items[1]!.id).toBe('a1');
-
-                    const successes = getWriteSuccesses(result);
-                    expect(successes.length).toEqual(1);
-                    expect(successes[0]!.action.uuid).toEqual('0');
-                    expect(successes[0]!.affected_items!.length).toEqual(1);
-                    expect(successes[0]!.affected_items![0]!.item_pk).toEqual('a1');
-
-
                 });
-
-                describe('atomic', () => {
-                    test(`completely rolls back on failed actions with atomic=true`, () => {
-
-                        const originalItems = [
-                            structuredClone(obj1)
-                        ] as Draft<Obj>[];
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'create',
-                                        data: {
-                                            id: 'a1',
-                                            text: 'bob'
-                                        }
-                                    }
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '1', payload: {
-                                        type: 'create',
-                                        data: {
-                                            // @ts-ignore wilfully breaking schema here 
-                                            none_key: 'T1'
-                                        }
-                                    }
-                                }
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: true
-                            }
-
-                        );
-
-                        expect(result.ok).toBe(false);
-
-
-                        // Now check that it failed
-                        expect(result.changes.insert.length).toBe(0);
-                        expect(result.changes.final_items.length).toBe(1);
-                        expect(result.changes.final_items[0]!.id).toBe('1');
-                        expect(result.changes.final_items === originalItems).toBe(true);
-                        expect(result.changes.final_items).toEqual(originalItems);
-                        expect(getWriteSuccesses(result).length).toBe(0);
-
-
-                    });
-
-                    test(`rolls back failed items partially with atomic===false`, () => {
-
-                        const originalItems = [
-                            structuredClone(obj1)
-                        ];
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'create',
-                                        data: {
-                                            id: 'a1',
-                                            text: 'bob'
-                                        }
-                                    }
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '1', payload: {
-                                        type: 'delete',
-                                        where: { id: obj1.id }
-                                    }
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '2', payload: {
-                                        type: 'update',
-                                        method: 'merge',
-                                        data: {
-                                            // @ts-ignore wilfully breaking schema here 
-                                            none_key: 'T2'
-                                        },
-                                        where: {
-                                            text: 'bob'
-                                        }
-                                    }
-                                },
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: false
-                            }
-                        );
-
-                        expect(result.ok).toBe(false);
-
-
-                        expect(result.changes.final_items.length).toBe(1);
-                        expect(result.changes.final_items[0]!.id).toBe('a1');
-
-                        expect(getWriteFailures(result).length).toBe(1);
-                        expect(getWriteSuccesses(result).length).toBe(2);
-                    });
-
-                    test(`handles failure on array_scope, with atomic=false`, (cx) => {
-
-
-                        const originalItems: Obj[] = [
-                            {
-                                id: '1',
-                                children: [
-                                    { cid: '1', children: [] }
-                                ]
-                            }
-                        ];
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
-                                        type: 'array_scope',
-                                        scope: 'children',
-                                        action: {
-                                            type: 'update',
-                                            method: 'merge',
-                                            data: {
-                                                name: 'Bob'
-                                            },
-                                            where: {
-                                                cid: '1'
-                                            }
-                                        },
-                                        where: {
-                                            id: '1'
-                                        }
-                                    })
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '1', payload: {
-                                        type: 'array_scope',
-                                        scope: 'children',
-                                        action: {
-                                            type: 'create',
-                                            data: {
-                                                // @ts-ignore
-                                                bad_key: 'expect fail'
-                                            }
-                                        },
-                                        where: {
-                                            id: '1'
-                                        }
-                                    }
-                                }
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: false
-                            }
-
-                        );
-
-                        expect(result.ok).toBe(false);
-
-
-                        // Now check that it failed
-                        if (immer !== 'immer') { // Immer prevents access to objects after produce finishes. #immer_changes_cancelled_post_produce
-                            expect(result.changes.update.length).toBe(1);
-                            expect(result.changes.update[0]!.id).toBe('1');
-                        }
-                        expect(result.changes.final_items.length).toBe(1);
-                        expect(result.changes.final_items[0]!.id).toBe('1');
-                        expect(result.changes.final_items[0]!.children![0]!.name).toBe('Bob'); // update applied
-                        // @ts-ignore
-                        expect(getWriteFailures(result)[0]!.affected_items![0]!.item.bad_key).toBe('expect fail');
-
-                    });
-
-                    test(`handles rollback on failure of array_scope, with atomic=true`, (cx) => {
-                        //if( name!=='immer-mutable' ) cx.skip()
-
-                        const originalItems: Obj[] = [
-                            {
-                                id: '1',
-                                children: [
-                                    { cid: '1', children: [] }
-                                ]
-                            }
-                        ];
-                        const originalItemsClone = structuredClone(originalItems);
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
-                                        type: 'array_scope',
-                                        scope: 'children',
-                                        action: {
-                                            type: 'update',
-                                            method: 'merge',
-                                            data: {
-                                                name: 'Bob'
-                                            },
-                                            where: {
-                                                cid: '1'
-                                            }
-                                        },
-                                        where: {
-                                            id: '1'
-                                        }
-                                    })
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '1', payload: {
-                                        type: 'array_scope',
-                                        scope: 'children',
-                                        action: {
-                                            type: 'create',
-                                            data: {
-                                                // @ts-ignore
-                                                bad_key: 'expect fail'
-                                            }
-                                        },
-                                        where: {
-                                            id: '1'
-                                        }
-                                    }
-                                }
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: true
-                            }
-
-                        );
-
-                        expect(result.ok).toBe(false);
-
-
-                        // Now check that it failed, and nothing is changed
-                        expect(result.changes.update.length).toBe(0);
-                        expect(result.changes.final_items.length).toBe(1);
-                        expect(result.changes.final_items[0]!.id).toBe('1');
-                        expect(result.changes.final_items[0]!.children![0]!.name).toBeUndefined();
-                        expect(result.changes.final_items).toEqual(originalItemsClone);
-
-                    });
-                })
-            })
-
-            describe('Referential comparison (react friendly shallow references)', () => {
-                describe('some changes', () => {
-                    test(`reference changes only whats updated by write changes`, (cx) => {
-
-
-                        const originalItems = [
-                            structuredClone(obj1),
-                            structuredClone(obj2)
-                        ];
-
-                        const obj1Ref = originalItems[0]!;
-                        const obj2Ref = originalItems[1];
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'create',
-                                        data: {
-                                            id: 'a1',
-                                            text: 'bob'
-                                        }
-                                    }
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'update',
-                                        method: 'merge',
-                                        data: {
-                                            text: 'sue'
-                                        },
-                                        where: {
-                                            id: obj2.id
-                                        }
-                                    }
-                                },
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl
-                        );
-
-                        if (mutable === 'mutable' && immer !== 'immer') {
-                            // Mutable without immer does not support referential comparison
-                        } else {
-                            expect(result.ok).toBe(true);
-
-                            expect(result.changes.final_items === originalItems).toBe(false);
-                            expect(result.changes.final_items[0] === obj1Ref).toBe(true);
-                            expect(result.changes.final_items[1] === obj2Ref).toBe(false);
-                        }
-
-
-                    });
-
-                    test(`changes references with 1 write, 1 fail and atomic=false`, (cx) => {
-
-                        const originalItems = [
-                            structuredClone(obj1)
-                        ];
-                        const obj1Ref = originalItems[0]!;
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'create',
-                                        data: {
-                                            id: 'new2',
-                                            text: 'sue'
-                                        }
-                                    }
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'update',
-                                        method: 'merge',
-                                        data: {
-
-                                            // @ts-ignore wilfully breaking schema here 
-                                            none_key: 'T1'
-                                        },
-                                        where: {
-                                            id: obj1.id
-                                        }
-                                    }
-                                },
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: false
-                            }
-                        );
-                        if (mutable === 'mutable' && immer !== 'immer') {
-                            // Mutable without immer does not support referential comparison
-                        } else {
-                            expect(result.ok).toBe(false);
-
-                            expect(result.changes.final_items === originalItems).toBe(false);
-                            expect(result.changes.final_items).not.toEqual(originalItems);
-                            expect(originalItems[0] === obj1Ref).toBe(true);
-                            expect(originalItems.length).toBe(1);
-                            expect(result.changes.final_items.length).toBe(2);
-                        }
-
-
-
-                    });
-
-                })
-
-                describe('no change', () => {
-                    test(`no reference changes with 0 writes`, (cx) => {
-
-                        const originalItems = [
-                            structuredClone(obj1)
-                        ];
-                        const obj1Ref = originalItems[0]!;
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'update',
-                                        method: 'merge',
-                                        data: {
-                                            text: 'sue'
-                                        },
-                                        where: {
-                                            id: 'never match'
-                                        }
-                                    }
-                                },
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl
-                        );
-                        if (mutable === 'mutable' && immer !== 'immer') {
-                            // Mutable without immer does not support referential comparison
-                        } else {
-                            expect(result.ok).toBe(true);
-
-                            expect(result.changes.final_items === originalItems).toBe(true);
-                            expect(result.changes.final_items).toEqual(originalItems);
-                            expect(originalItems[0] === obj1Ref).toBe(true);
-                        }
-
-
-
-                    });
-
-                    test(`no reference changes with 1 write, 1 fail and atomic=true`, (cx) => {
-
-
-
-                        const originalItems = [
-                            structuredClone(obj1)
-                        ];
-                        const obj1Ref = originalItems[0]!;
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'create',
-                                        data: {
-                                            id: 'new2',
-                                            text: 'sue'
-                                        }
-                                    }
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'update',
-                                        method: 'merge',
-                                        data: {
-                                            // @ts-ignore wilfully breaking schema here 
-                                            none_key: 'T1'
-                                        },
-                                        where: {
-                                            id: obj1.id
-                                        }
-                                    }
-                                },
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: true
-                            }
-                        );
-                        if (mutable === 'mutable' && immer !== 'immer') {
-                            // Mutable without immer does not support referential comparison
-                        } else {
-                            expect(result.ok).toBe(false);
-
-
-                            expect(result.changes.final_items === originalItems).toBe(true);
-                            expect(result.changes.final_items).toEqual(originalItems);
-                            expect(originalItems[0] === obj1Ref).toBe(true);
-                        }
-
-
-
-                    });
-
-                    test(`no reference changes with 1 write on array_scope (recursed), 1 fail and atomic=true`, (cx) => {
-
-                        const originalItems: Obj[] = [
-                            {
-                                id: '1',
-                                children: [
-                                    { cid: '1', children: [] }
-                                ]
-                            }
-                        ];
-                        const obj1Ref = originalItems[0];
-
-                        const { result } = writeToItemsArrayInTesting(
-                            [
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: assertWriteArrayScope<Obj, 'children'>({
-                                        type: 'array_scope',
-                                        scope: 'children',
-                                        action: {
-                                            type: 'update',
-                                            method: 'merge',
-                                            data: {
-                                                name: 'Bob'
-                                            },
-                                            where: {
-                                                cid: '1'
-                                            }
-                                        },
-                                        where: {
-                                            id: '1'
-                                        }
-                                    })
-                                },
-                                {
-                                    type: 'write', ts: 0, uuid: '0', payload: {
-                                        type: 'update',
-                                        method: 'merge',
-                                        data: {
-                                            // @ts-ignore wilfully breaking schema here 
-                                            none_key: 'T1'
-                                        },
-                                        where: {
-                                            id: obj1.id
-                                        }
-                                    }
-                                },
-                            ],
-                            originalItems,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                atomic: true
-                            }
-
-                        );
-                        if (mutable === 'mutable' && immer !== 'immer') {
-                            // Mutable without immer does not support referential comparison
-                        } else {
-                            expect(result.ok).toBe(false);
-
-
-                            expect(result.changes.final_items === originalItems).toBe(true);
-                            expect(result.changes.final_items).toEqual(originalItems);
-                            expect(originalItems[0] === obj1Ref).toBe(true);
-                            expect(originalItems[0] === result.changes.final_items[0]).toBe(true);
-                        }
-
-
-
-                    });
-
-                })
-
-            })
-
-
-            describe('Integrity', () => {
-                test(`cannot dupe primary key`, () => {
-
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a1',
-                                        text: 'bob'
-                                    }
-                                }
-                            },
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: 'a1',
-                                        text: 'sue'
-                                    }
-                                }
-                            },
-                        ],
-                        [
-                            structuredClone(obj1)
-                        ],
-                        ObjSchema,
-                        ddl
-                    );
-
-
-                    expect(result.ok).toBe(false);
-
-                    const failures = getWriteFailures(result);
-                    const firstFailedAction = failures[0]!;
-                    expect(firstFailedAction.unrecoverable).toBe(true);
-                    expect(firstFailedAction.errors[0]!.type).toBe('create_duplicated_key');
-                });
-
-                test(`not allowed to change primary key`, (cx) => {
-
-                    const originalItems = [structuredClone(obj1)];
-                    const { result } = writeToItemsArrayInTesting(
-                        [
-                            {
-                                type: 'write', ts: 0, uuid: '0', payload: {
-                                    type: 'update',
-                                    method: 'merge',
-                                    data: {
-                                        id: 'a2'
-                                    },
-                                    where: {
-                                        id: obj1.id
-                                    }
-                                }
-                            },
-                        ],
-                        originalItems,
-                        ObjSchema,
-                        ddl
-                    );
-
-
-                    expect(result.ok).toBe(false);
-                    const failures = getWriteFailures(result);
-                    const firstFailedAction = failures[0]!;
-                    expect(firstFailedAction.action.payload.type).toBe('update'); if (firstFailedAction.action.payload.type !== 'update') throw new Error("noop - update");
-                    expect(firstFailedAction.affected_items![0]!.item!.id).toBe('1');
-                    expect(firstFailedAction.errors[0]!.type).toBe('update_altered_key');
-                    expect(firstFailedAction.unrecoverable).toBe(true);
-
-                    // Make sure when there's an error, it doesn't change the original items
-                    expect(originalItems[0]!.id).toBe(obj1.id);
-                    expect(result.changes.final_items[0]!.id).toBe(obj1.id);
-
-                });
-
-                describe('attempt_recover_duplicate_create', () => {
-                    test(`recovers with if-identical`, () => {
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: '1',
-                                        'text': 'Wrong'
-                                    }
-                                }
-                            }
-                        ]
-
-                        const existing: Obj = {
-                            'id': '1',
-                            'text': 'Right'
-                        }
-
-                        const { result } = writeToItemsArrayInTesting(
-                            actions,
-                            [existing],
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                attempt_recover_duplicate_create: 'if-identical',
-                            }
-                        );
-
-                        expect(result.ok).toBe(false);
-
-                        // This action creates parity with the existing, allowing the create to work
-                        actions.push({
-                            type: 'write',
-                            ts: 0,
-                            uuid: '1',
-                            payload: {
-                                type: 'update',
-                                method: 'merge',
-                                data: {
-                                    text: 'Right'
-                                },
-                                where: {
-                                    id: '1'
-                                }
-                            }
-                        })
-
-                        actions.push({
-                            type: 'write',
-                            ts: 0,
-                            uuid: '2',
-                            payload: {
-                                type: 'update',
-                                method: 'merge',
-                                data: {
-                                    text: 'Right2'
-                                },
-                                where: {
-                                    id: '1'
-                                }
-                            }
-                        })
-
-                        const existing2: Obj = {
-                            'id': '1',
-                            'text': 'Right'
-                        }
-
-                        const result2 = writeToItemsArray(
-                            actions,
-                            [existing2],
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                attempt_recover_duplicate_create: 'if-identical',
-                                ...options
-                            }
-                        );
-                        expect(result2.ok).toBe(true);
-                        expect(result2.changes.final_items[0]!.text).toBe('Right2');
-
-
-                        const result3 = writeToItemsArray(
-                            actions,
-                            [existing],
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                attempt_recover_duplicate_create: 'never',
-                                ...options
-                            }
-                        );
-                        expect(result3.ok).toBe(false);
-
-
-                    })
-
-
-                    test(`fails for if-identical if not identical`, () => {
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: '1',
-                                        'text': 'Bob'
-                                    }
-                                }
-                            }
-                        ]
-
-                        const existing: Obj = {
-                            'id': '1',
-                            'text': 'Alice'
-                        }
-
-                        const { result } = writeToItemsArrayInTesting(
-                            actions,
-                            [existing],
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                attempt_recover_duplicate_create: 'if-identical',
-                            }
-                        );
-
-                        expect(result.ok).toBe(false);
-                        expect(result.changes.final_items[0]!.text).toBe('Alice');
-
-
-                    })
-
-                    test(`recovers for always-update`, () => {
-
-                        const actions: WriteAction<Obj>[] = [
-                            {
-                                type: 'write',
-                                ts: 0,
-                                uuid: '0',
-                                payload: {
-                                    type: 'create',
-                                    data: {
-                                        id: '1',
-                                        'text': 'Bob'
-                                    }
-                                }
-                            }
-                        ]
-
-                        const existing: Obj = {
-                            'id': '1',
-                            'text': 'Alice'
-                        }
-
-                        const { result } = writeToItemsArrayInTesting(
-                            actions,
-                            [existing],
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            {
-                                attempt_recover_duplicate_create: 'always-update',
-                            }
-                        );
-
-                        expect(result.ok).toBe(true);
-                        expect(result.changes.final_items[0]!.text).toBe('Bob');
-
-
-                    })
-                })
-            })
-
-
-
-            describe('permissions', () => {
-
-
-
-                test(`create succeed`, () => {
-
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '0',
-                            payload: {
-                                type: 'create',
-                                data: {
-                                    id: '1',
-                                    owner: 'user1',
-                                    'text': 'Wrong'
-                                }
-                            }
-                        }
-                    ]
-
-
-                    const ddlP = structuredClone(ddl);
-                    ddlP.permissions = {
-                        type: 'basic_ownership_property',
-                        property_type: 'id',
-                        path: 'owner',
-                        format: 'uuid'
-
-                    }
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-
-                    const { result } = writeToItemsArrayInTesting(
-                        actions,
-                        [],
-                        ObjSchema,
-                        ddlP,
-                        user1
-                    );
-
-                    expect(result.ok).toBe(true);
-
-
-                })
-
-                test(`create fail`, () => {
-
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '0',
-                            payload: {
-                                type: 'create',
-                                data: {
-                                    id: '1',
-                                    owner: 'user2',
-                                    'text': 'Wrong'
-                                }
-                            }
-                        }
-                    ]
-
-
-                    const ddlP = structuredClone(ddl);
-                    ddlP.permissions = {
-                        type: 'basic_ownership_property',
-                        property_type: 'id',
-                        path: 'owner',
-                        format: 'uuid'
-
-                    }
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-
-                    const { result } = writeToItemsArrayInTesting(
-                        actions,
-                        [],
-                        ObjSchema,
-                        ddlP,
-                        user1
-                    );
-
-                    expect(result.ok).toBe(false);
-                    expect(getWriteFailures(result)[0]!.errors[0]!.type).toBe('permission_denied');
-
-
-                })
-
-                test(`update succeed`, () => {
-
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '0',
-                            payload: {
-                                type: 'update',
-                                data: {
-                                    'text': 'Wrong'
-                                },
-                                where: {
-                                    id: '1'
-                                }
-                            }
-                        }
-                    ]
-
-                    const existing: Obj = {
-                        'id': '1',
-                        'owner': 'user1',
-                        'text': 'Right'
-                    }
-
-                    const ddlP = structuredClone(ddl);
-                    ddlP.permissions = {
-                        type: 'basic_ownership_property',
-                        property_type: 'id',
-                        path: 'owner',
-                        format: 'uuid'
-
-                    }
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-
-                    const { result } = writeToItemsArrayInTesting(
-                        actions,
-                        [existing],
-                        ObjSchema,
-                        ddlP,
-                        user1
-                    );
-
-                    expect(result.ok).toBe(true);
-
-
-                })
-
-                test(`permissions update failed`, () => {
-
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '0',
-                            payload: {
-                                type: 'update',
-                                data: {
-                                    'text': 'Wrong'
-                                },
-                                where: {
-                                    id: '1'
-                                }
-                            }
-                        }
-                    ]
-
-                    const existing: Obj = {
-                        'id': '1',
-                        'owner': 'user2',
-                        'text': 'Right'
-                    }
-
-                    const ddlP = structuredClone(ddl);
-                    ddlP.permissions = {
-                        type: 'basic_ownership_property',
-                        property_type: 'id',
-                        path: 'owner',
-                        format: 'uuid'
-
-                    }
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-
-                    const result = writeToItemsArray(
-                        actions,
-                        [existing],
-                        ObjSchema,
-                        ddlP,
-                        user1
-                    );
-
-                    expect(result.ok).toBe(false);
-                    expect(getWriteFailures(result)[0]!.errors[0]!.type).toBe('permission_denied');
-
-
-
-                })
-
-                test(`atomic=false`, () => {
-
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '0',
-                            payload: {
-                                type: 'update',
-                                data: {
-                                    'text': 'Wrong'
-                                },
-                                where: {
-                                    id: '1'
-                                }
-                            }
-                        },
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '1',
-                            payload: {
-                                type: 'create',
-                                data: {
-                                    id: '1',
-                                    owner: 'user2',
-                                    'text': 'Wrong'
-                                }
-                            }
-                        }
-                    ]
-
-                    const existing: Obj = {
-                        'id': '1',
-                        'owner': 'user1',
-                        'text': 'Right'
-                    }
-
-                    const ddlP = structuredClone(ddl);
-                    ddlP.permissions = {
-                        type: 'basic_ownership_property',
-                        property_type: 'id',
-                        path: 'owner',
-                        format: 'uuid'
-
-                    }
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-
-                    const { result } = writeToItemsArrayInTesting(
-                        actions,
-                        [existing],
-                        ObjSchema,
-                        ddlP,
-                        user1,
-                        {
-                            atomic: false
-                        }
-                    );
-
-                    expect(result.ok).toBe(false);
-                    const successes = getWriteSuccesses(result);
-                    expect(successes.length).toBe(1);
-                    expect(successes[0]!.action.uuid).toBe('0');
-
-
-
-                })
-
-                test(`atomic=true`, () => {
-
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '0',
-                            payload: {
-                                type: 'update',
-                                data: {
-                                    'text': 'Wrong'
-                                },
-                                where: {
-                                    id: '1'
-                                }
-                            }
-                        },
-                        {
-                            type: 'write',
-                            ts: 0,
-                            uuid: '1',
-                            payload: {
-                                type: 'create',
-                                data: {
-                                    id: '1',
-                                    owner: 'user2',
-                                    'text': 'Wrong'
-                                }
-                            }
-                        }
-                    ]
-
-                    const existing: Obj = {
-                        'id': '1',
-                        'owner': 'user1',
-                        'text': 'Right'
-                    }
-
-                    const ddlP = structuredClone(ddl);
-                    ddlP.permissions = {
-                        type: 'basic_ownership_property',
-                        property_type: 'id',
-                        path: 'owner',
-                        format: 'uuid'
-
-                    }
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-
-                    const { result } = writeToItemsArrayInTesting(
-                        actions,
-                        [existing],
-                        ObjSchema,
-                        ddlP,
-                        user1,
-                        {
-                            atomic: true
-                        }
-                    );
-
-                    expect(result.ok).toBe(false);
-                    expect(getWriteSuccesses(result).length).toBe(0);
-
-
-                })
-            })
-
-
-
-
-
-
-            describe('config', () => {
-                test('throws error if trying to use immer and immutable', (cx) => {
-                    if (name !== 'immutable') cx.skip()
-                    const originalItems = [structuredClone(obj1), structuredClone(obj2)];
-                    const actions: WriteAction<Obj>[] = [
-                        {
-                            type: 'write', ts: 0, uuid: '0', payload: {
-                                type: 'create',
-                                data: {
-                                    id: 'a1'
-                                }
-                            }
-                        }
-                    ]
-
-                    expect(() => produce(originalItems, draft => {
-                        writeToItemsArray(
-                            actions,
-                            draft,
-                            ObjSchema,
-                            ddl,
-                            undefined,
-                            options
-                        );
-                    })).toThrow('When using Immer drafts you need to use mutate.');
-                })
-            })
-
-
-            describe('Regression Tests', () => {
-                test(`delete/create/delete/create works`, () => {
-
-                    const RegressSchema1 = z.object({ id: z.string(), name: z.string() })
-                    type Regress = z.infer<typeof RegressSchema1>;
-                    const actions: WriteAction<Regress>[] = [
-                        { "type": "write", "ts": 1721124239158, "uuid": "9de5231b-f5db-480a-8ede-9294d989fe47", "payload": { "type": "delete", "where": { "id": "1" } } },
-                        { "type": "write", "ts": 1721124239175, "uuid": "f087dc19-438e-4f52-875f-1e6c6e4e8e37", "payload": { "type": "create", "data": { "id": "1", "name": "Bob" } } },
-                        { "type": "write", "ts": 1721124239180, "uuid": "9e54e923-d0ed-4339-a910-f192eb5a8a2b", "payload": { "type": "delete", "where": { "id": "1" } } },
-                        { "type": "write", "ts": 1721124239183, "uuid": "ba90fbc0-5712-4e5d-98c6-ccb293a5cc89", "payload": { "type": "create", "data": { "id": "1", "name": "Alice" } } }
-                    ]
-
-
-                    const user1: IUser = {
-                        getUuid: () => 'user1',
-                        getEmail: () => 'user1@gmail.com',
-                        getID: () => 'user1'
-                    }
-                    const ddl: DDL<Regress> = {
-                        version: 1,
-                        lists: {
-                            '.': {
-                                primary_key: 'id',
-                                order_by: {key: 'id'}
-                            }
-                        },
-                        permissions: {
-                            type: 'none'
-                        }
-                    }
-
-                    const retypedWriteToItemsArrayInTesting = castWriteToItemsArrayInTestingFn<Regress>(writeToItemsArrayInTesting);
-
-                    const { result } = retypedWriteToItemsArrayInTesting(
-                        actions,
-                        [],
-                        RegressSchema1,
-                        ddl,
-                        user1,
-                        {
-                            attempt_recover_duplicate_create: 'never'
-                        }
-                    );
-                    expect(result.ok).toBe(true);
-
-
-                    const { result: result2 } = retypedWriteToItemsArrayInTesting(
-                        actions,
-                        [],
-                        RegressSchema1,
-                        ddl,
-                        user1,
-                        {
-                            attempt_recover_duplicate_create: 'if-identical'
-                        }
-                    );
-                    expect(result2.ok).toBe(true);
-
-
-
-                })
-            })
-
-
-
+                // Immer should not have changed anything since atomic rolled back
+                expect(finalItems[0]!.children![0]!.name).toBeUndefined();
+            });
         });
-
-
-    })
+    });
 });
-
-
-test('Prove Immer flags objects even if no material change #immer_cannot_mutate_in_atomic', () => {
-    const originalItems = [{ id: 1, text: 'Bob' }, { id: 2, text: '' }];
-    const finalItems = produce(originalItems, draft => {
-
-    });
-    // The final items have changed
-    expect(finalItems).toBe(originalItems);
-
-    const originalItemsFlagged = [{ id: 1, text: 'Bob' }, { id: 2, text: '' }];
-    const finalItemsFlagged = produce(originalItems, draft => {
-        draft[1]!.text = 'Alice';
-        draft[1]!.text = ''; // Restore
-    });
-    // The final items have changed
-    expect(finalItemsFlagged).not.toBe(originalItemsFlagged);
-})

@@ -850,9 +850,17 @@ Update plan with this response from Gemini with critiques/suggestions, asking me
 
 ```
 
-# [ ] Phase 6
+# [x] Phase 6
 
 Implement the plan in `Implementation Plan`
+
+**Files created/modified:**
+- `src/write-actions/standardTests.ts` — Shared standard tests with adapter-injected pattern. Contains adapter types (`WriteTestAdapter`, `AdapterFactory`, `StandardTestConfig`), 5 test schemas/DDLs (Flat, Nested, OwnerUuid, OwnerEmail, OwnerScalarArray), `expectOrAcknowledgeUnsupported` helper, and 8 numbered domain sections (Core Verbs, Result Shape, Error Handling, Sequential Halt & Blocking, Atomic vs Non-Atomic, Duplicate Create Recovery, Permissions, Edge Cases & Regression). 63 standard tests.
+- `src/write-actions/applyWritesToItems/applyWritesToItems.test.ts` — Rewritten to wire adapter + call `standardTests()` + implementation-specific tests. 4 implementation-specific sections (Execution Modes with immutable/mutable/Immer, Referential Stability, WriteToItemsArrayResult extras, Immer edge cases). 22 implementation-specific tests + 63 standard tests = 85 total.
+- `src/write-actions/types.test.ts` — Comprehensive rewrite with 44 type assertion tests across 8 sections (WritePayload construction, WriteAction envelope, WriteResult/WriteOutcome narrowing, WriteError discriminated union, DDL type constraints, helper function return types, path & property type helpers, schema-type alignment). Uses `@ts-expect-error` for negative assertions, `isTypeEqual` for schema-type bidirectional checks.
+- `src/write-actions/applyWritesToItems/types.test.ts` — Deleted (dead code).
+
+**Test counts:** 149 tests in write-actions (85 + 44 + 19 checkPermission + 1 equivalentCreateOccurs). 956 total tests across 20 files, all passing.
 
 # [ ] Phase 7 (post-testing)
 

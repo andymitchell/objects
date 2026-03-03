@@ -98,7 +98,7 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  * @param user Required if the `ddl` specifies permissions
  * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
-    - attempt_recover_duplicate_create: specify the conflict resolution strategy for creating an item that already exists in `items`
+    - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
@@ -133,7 +133,7 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  * @param user Required if the `ddl` specifies permissions
  * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
-    - attempt_recover_duplicate_create: specify the conflict resolution strategy for creating an item that already exists in `items`
+    - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
@@ -216,7 +216,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
             const pkValue = pk(action.payload.data, true);
             if( pkValue ) {
                 if (existingIds.has(pkValue)) {
-                    if( optionsIncDefaults.attempt_recover_duplicate_create==='if-identical' ) {
+                    if( optionsIncDefaults.attempt_recover_duplicate_create==='if-convergent' ) {
                         // Recovery = at any point, does the item, with updates applied, match the create payload? If so, skip this create but don't generate an error.
                         const existing = wipItems.find((x)=> pkValue===pk(x));
                         if( existing && equivalentCreateOccurs<T>(schema, ddl, existing, action, writeActions) ) {

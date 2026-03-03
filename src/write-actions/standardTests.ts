@@ -23,7 +23,7 @@ export type WriteTestAdapter<T extends Record<string, any>> = {
         schema: z.ZodType<T, any, any>,
         ddl: DDL<T>,
         user?: IUser,
-        options?: { atomic?: boolean, attempt_recover_duplicate_create?: 'never' | 'if-identical' | 'always-update' },
+        options?: { atomic?: boolean, attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update' },
     }) => Promise<WriteTestAdapterResult<T>>
 }
 
@@ -1233,7 +1233,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
         });
 
-        describe('6.2 if-identical', () => {
+        describe('6.2 if-convergent', () => {
 
             test('recovers when create data is subset of existing item', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
@@ -1242,12 +1242,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                     writeActions: [makeAction('a1', { type: 'create', data: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
-                    options: { attempt_recover_duplicate_create: 'if-identical' },
+                    options: { attempt_recover_duplicate_create: 'if-convergent' },
                 });
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(true);
                     expect(r.finalItems[0]!.text).toBe('hello'); // unchanged
-                }, implName, 'if-identical recovery');
+                }, implName, 'if-convergent recovery');
             });
 
             test('fails when create data contradicts existing item', async () => {
@@ -1257,12 +1257,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                     writeActions: [makeAction('a1', { type: 'create', data: { id: '1', text: 'different' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
-                    options: { attempt_recover_duplicate_create: 'if-identical' },
+                    options: { attempt_recover_duplicate_create: 'if-convergent' },
                 });
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(r.finalItems[0]!.text).toBe('existing');
-                }, implName, 'if-identical contradiction');
+                }, implName, 'if-convergent contradiction');
             });
 
             test('recovers when subsequent actions in batch bring items to convergence', async () => {
@@ -1275,11 +1275,11 @@ export function standardTests(testConfig: StandardTestConfig) {
                     ],
                     schema: FlatSchema,
                     ddl: flatDdl,
-                    options: { attempt_recover_duplicate_create: 'if-identical' },
+                    options: { attempt_recover_duplicate_create: 'if-convergent' },
                 });
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(true);
-                }, implName, 'if-identical convergence');
+                }, implName, 'if-convergent convergence');
             });
         });
 

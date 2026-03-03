@@ -28,12 +28,19 @@ export interface WriteStrategy<T extends Record<string, any>> {
 export type WriteToItemsArrayOptions<T extends Record<string, any> = Record<string, any>> = {
   
     /**
-     * Define what will happen if the create action has the same ID as an existing item
-     * - 'never': [default] the create will fail
-     * - 'if-identical': the create will only succeed if the existing item has the same properties as the new one
-     * - 'always': the created item will always succeed, effectively updating the existing item with the new properties
+     * Conflict-resolution strategy when a `create` action targets a PK that already exists.
+     *
+     * - `'never'` **(default)** — fail immediately with `create_duplicated_key`.
+     * - `'if-convergent'` — simulate applying the create payload **plus all subsequent
+     *   actions in this batch**. At each step check whether the simulated item is a
+     *   *subset* of the existing item (lodash `isMatch`, not strict equality). If the
+     *   two paths converge at any point the create is silently skipped (no error).
+     *   Otherwise the create fails with `create_duplicated_key`.
+     *   **Why subset?** A create of `{id:'1'}` should not fail against an existing
+     *   `{id:'1', text:'hello'}` — it doesn't contradict anything.
+     * - `'always-update'` — convert the duplicate create into an update and continue.
      */
-    attempt_recover_duplicate_create?: 'never' | 'if-identical' | 'always-update',
+    attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update',
 
 
         

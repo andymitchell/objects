@@ -21,6 +21,7 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 11. **`convertWriteResultToLegacy` removed** — no backward compatibility shim; migrate directly to the new types.
 12. **`./write-actions-old-types` sub-path removed** — the legacy generation-old type system is gone entirely.
 13. **Naming convention pass** — all types, schemas, and functions renamed for consistency under the `Write` prefix. See tables below for the full mapping.
+14. **`attempt_recover_duplicate_create: 'if-identical'` renamed to `'if-convergent'`** — the old name was misleading; the actual semantics are subset-convergence, not strict identity.
 
 ---
 
@@ -626,3 +627,21 @@ function handleResponse<T>(response: WriteResponse<T>) {
 | `failedAction.affected_items[n].error_details` | `failedOutcome.errors` (item context on error itself) |
 | `failedAction.affected_items[n].item` | `failedOutcome.affected_items[n].item` or `failedOutcome.errors[n].item` |
 | `result.changes.referential_comparison_ok` | _(removed)_ |
+
+---
+
+## `attempt_recover_duplicate_create`: `'if-identical'` → `'if-convergent'`
+
+The `'if-identical'` string literal in `WriteToItemsArrayOptions.attempt_recover_duplicate_create` has been renamed to `'if-convergent'`. The old name was misleading — the semantics are subset-convergence (lodash `isMatch`), not strict identity.
+
+**Find:**
+```ts
+attempt_recover_duplicate_create: 'if-identical'
+```
+
+**Replace with:**
+```ts
+attempt_recover_duplicate_create: 'if-convergent'
+```
+
+This is a type-level and runtime change. TypeScript will flag any remaining `'if-identical'` usage as a type error.

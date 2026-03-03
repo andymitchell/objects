@@ -915,21 +915,21 @@ Changed `update_handler` to return `void` to make the mutation contract explicit
 
 All 151 tests pass. Custom strategies remain internal and unused (not exported from barrel).
 
-# [ ] Phase 9 (post-testing)
+# [x] Phase 9 (post-testing)
 
-**Rename `if-identical` duplicate create recovery and improve JSDoc.**
+**Rename `if-identical` duplicate create recovery to `if-convergent` and improve JSDoc.**
 
-The `attempt_recover_duplicate_create: 'if-identical'` option name is misleading. The actual semantics:
+Renamed `'if-identical'` → `'if-convergent'` across the library. The old name was misleading — the semantics are subset-convergence, not strict identity.
 
-1. A `create` action has the same PK as an existing item → collision detected.
-2. The recovery simulates applying the create payload + all subsequent write actions in the batch.
-3. At each step, it checks `isMatch(existing, simulated)` — is the simulated item a *subset* of the existing?
-4. If at any point during simulation the two paths converge (simulated is consistent with existing), recovery succeeds: the create is silently skipped, and subsequent actions continue to apply.
-5. If they never converge, the create fails with `create_duplicated_key`.
+**Files modified:**
+- `src/write-actions/applyWritesToItems/types.ts` — Renamed string literal in `WriteToItemsArrayOptions.attempt_recover_duplicate_create` union. Rewrote JSDoc to explain the simulation algorithm, subset check (`isMatch` not `isEqual`), and why subset is correct.
+- `src/write-actions/applyWritesToItems/applyWritesToItems.ts` — Updated runtime comparison and JSDoc references.
+- `src/write-actions/applyWritesToItems/helpers/equivalentCreateOccurs.ts` — Added comprehensive JSDoc explaining the step-by-step algorithm, the subset rationale, and an `@example` showing convergence.
+- `src/write-actions/standardTests.ts` — Updated adapter type signature, describe block name, all option values, and acknowledgement strings.
 
-The subset check (`isMatch` not `isEqual`) is intentional: a create that sets `{id:'1'}` should recover against an existing `{id:'1', text:'hello'}` because it doesn't contradict anything.
+**Consumer migration** (breaking): 3 files in `breef/store` use `'if-identical'` and must be updated to `'if-convergent'`:
+- `store/src/collection/raw-store/implementations/memory-raw-store/MemoryRawStore.ts:291`
+- `store/src/collection/raw-store/implementations/sql-raw-stores/common/objects-strategy/read-modify-write/ReadModifyWrite.ts:113`
+- `store/src/collection/implementations/inbuilt/test-dumb-shared-user/TestDumbSharedUser.ts:163`
 
-Tasks:
-- Find a clearer name (e.g. `if-convergent`, `if-compatible`, `if-consistent`).
-- Write comprehensive JSDoc on the option explaining the simulation + subset semantics.
-- Update `equivalentCreateOccurs` with JSDoc explaining the algorithm.
+All 151 write-actions tests pass.

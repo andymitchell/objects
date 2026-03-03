@@ -1,7 +1,7 @@
 import { mergeWith } from "lodash-es";
 import type { WriteStrategy } from "../types.js";
 import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination.js";
-import { VALUE_TO_DELETE_KEY } from "../../types.js";
+import { VALUE_TO_DELETE_KEY } from "../../helpers.ts";
 
 
 const writeLww: WriteStrategy<Record<string, any>> = {

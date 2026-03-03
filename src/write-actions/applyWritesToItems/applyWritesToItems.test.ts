@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { test } from 'vitest';
 import type { WriteAction, WriteActionPayloadArrayScope } from "../types.js";
-import { assertArrayScope, getFailedActions, getSuccessfulActions } from "../types.js";
+import { assertArrayScope, getFailedActions, getSuccessfulActions } from "../helpers.ts";
 import type { ApplyWritesToItemsOptions, ApplyWritesToItemsResult, DDL } from "./types.js";
 import { produce, type Draft } from "immer";
 import type { IUser } from "../auth/types.js";

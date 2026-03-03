@@ -398,263 +398,6 @@ function getAllErrors<T>(result: WriteResult<T>): WriteActionErrorContext<T>[];
 These are the primary ergonomic API for accessing split results. The canonical
 `actions` array preserves execution order; helpers provide pre-filtered, narrowed views.
 
-### Zod Schemas (updated)
-
-| Old Schema | New Schema |
-|---|---|
-| `WriteCommonErrorSchema` | `WriteActionErrorSchema` (same content, rename) |
-| `FailedWriteActionSchema` / `SuccessfulWriteActionSchema` | `WriteActionOutcomeSchema` (discriminated union on `ok`) |
-| `WriteActionsResponseOkSchema` / `WriteActionsResponseErrorSchema` | _(eliminated)_ |
-| `WriteActionsResponseSchema` | `WriteResultSchema` |
-| `SerializableCommonErrorSchema` (local) | _(removed, import from utils)_ |
-| `FailedWriteActionAffectedItemSchema` | _(eliminated)_ |
-| `WriteActionAffectedItemSchema` | Updated: `item_pk` + optional `item` |
-
-### Files to Modify
-
-**1. `src/write-actions/types.ts`** — New type definitions
-- Define `WriteActionError` (rename from `WriteCommonError`)
-- Define `WriteActionErrorContext<T>`
-- Define `WriteActionAffectedItem<T>` (unified, generic)
-- Define `WriteActionOutcomeOk<T>`, `WriteActionOutcomeFailed<T>`, `WriteActionOutcome<T>` (discriminated union on `ok`)
-- Define `WriteResult<T>`
-- Remove: `SerializableCommonError` (local), `WriteActionsResponseOk`, `WriteActionsResponseError`, `WriteActionsResponse`, `SuccessfulWriteAction`, `FailedWriteAction`, `FailedWriteActionAffectedItem`, `CombineWriteActionsWhereFiltersResponse`
-- Keep: `WriteAction`, `WriteActionPayload*`, all payload-related types unchanged
-
-**2. `src/write-actions/applyWritesToItems/types.ts`** — Update changes/result types
-- Define `WriteChangesBase<T>`: `ObjectsDelta<T> & { changed: boolean }` — minimal base for any apply function
-- `ApplyWritesToItemsChanges<T>`: extends `WriteChangesBase<T>` with `final_items: T[]` (required). Remove `referential_comparison_ok`
-- `ApplyWritesToItemsResult<T>`: extends `WriteResult<T>` with `changes: ApplyWritesToItemsChanges<T>`
-- Remove old `ApplyWritesToItemsResponse`
-
-**3. `src/write-actions/write-action-schemas.ts`** — Update Zod schemas
-- `WriteActionErrorSchema` (rename)
-- `makeWriteActionOutcomeSchema<T>()` (unified)
-- `WriteResultSchema` (new base)
-- Remove old ok/error/failed/successful schemas
-- Import `SerializableCommonErrorSchema` from `@andyrmitchell/utils` (no longer local)
-
-**4. `src/write-actions/applyWritesToItems/helpers/WriteActionFailuresTracker.ts`** — Produce `WriteActionOutcomeFailed`
-- Replace `FailedWriteAction<T>` → `WriteActionOutcomeFailed<T>` internally
-- Replace `FailedWriteActionAffectedItem<T>` → `WriteActionAffectedItem<T>`
-- Move error details from per-item `error_details[]` to flat `errors: WriteActionErrorContext<T>[]` on the action outcome, with `item_pk`/`item` on each error
-- Remove duplication: each error pushed once
-
-**5. `src/write-actions/applyWritesToItems/applyWritesToItems.ts`** — Produce new response shape
-- `SuccessfulWriteActionesTracker`: produce `WriteActionOutcomeOk<T>` with `affected_items` including optional `item`
-- Success path: return `{ok: true, actions: [...all outcomes], changes: ...}`
-- Error path: return `{ok: false, actions: [...all outcomes], error: {message}, changes: ...}`
-- Remove `referential_comparison_ok` from `generateApplyWritesToItemsChanges`
-
-**6. `src/write-actions/index.ts`** — Update exports
-- Export new types: `WriteResult`, `WriteActionOutcome`, `WriteActionOutcomeOk`, `WriteActionOutcomeFailed`, `WriteActionError`, `WriteActionErrorContext`, `WriteActionAffectedItem`, `WriteChangesBase`, `ApplyWritesToItemsResult`
-- Export helpers: `getFailedActions`, `getSuccessfulActions`, `getAllErrors`
-- Export new schemas: `WriteResultSchema`, `WriteActionErrorSchema`, `WriteActionOutcomeSchema`
-- Re-export deprecated type aliases from `types-deprecated.ts`
-- Re-export deprecated schema aliases from `schemas-deprecated.ts`
-- Export `convertWriteResultToLegacy` converter function
-- Remove `combineWriteActionsWhereFilters` export
-- Update `WriteActions` namespace object to use new schema names (keep deprecated aliases available via direct import)
-
-**7. `src/write-actions/combineWriteActionsWhereFilters.ts`** — Delete or mark deprecated
-
-**8. `src/write-actions/types-deprecated.ts`** — Deprecated type aliases (NEW file)
-- `WriteCommonError` → `WriteActionError`
-- `SuccessfulWriteAction<T>` → `WriteActionOutcomeOk<T>`
-- `FailedWriteAction<T>` → `WriteActionOutcomeFailed<T>`
-- `FailedWriteActionAffectedItem<T>` → `WriteActionAffectedItem<T>`
-- `WriteActionsResponse<T>` → `WriteResult<T>`
-- `WriteActionsResponseOk` → stub `{ status: 'ok' }`
-- `WriteActionsResponseError<T>` → `WriteResult<T> & { ok: false }`
-- `ApplyWritesToItemsResponse<T>` → `ApplyWritesToItemsResult<T>`
-- All with `@deprecated` JSDoc pointing to the replacement
-
-**9. `src/write-actions/schemas-deprecated.ts`** — Deprecated schema aliases (NEW file)
-- `WriteCommonErrorSchema` → `WriteActionErrorSchema`
-- `FailedWriteActionSchema` / `SuccessfulWriteActionSchema` → extracted branches of `WriteActionOutcomeSchema`
-- `WriteActionsResponseSchema` → `WriteResultSchema`
-- `WriteActionsResponseOkSchema` / `WriteActionsResponseErrorSchema` → stubs or eliminated
-- `makeFailedWriteActionSchema` / `makeSuccessfulWriteActionSchema` → deprecated wrappers
-- All with `@deprecated` JSDoc
-
-**10. `src/write-actions/convertWriteResultToLegacy.ts`** — Converter function (NEW file)
-- `convertWriteResultToLegacy<T>(result: WriteResult<T>)` → old `WriteActionsResponse<T>` shape
-- Reconstructs `status`, `message`, `successful_actions`, `failed_actions` (with per-item `error_details`) from the new flat structure
-- Exported from `index.ts` for external consumers to use during migration
-
-**11. `src/write-actions/applyWritesToItems/applyWritesToItems.test.ts`** — Update all assertions
-- Replace `result.status === 'ok'` → `result.ok`
-- Replace `result.failed_actions[n]` → `getFailedActions(result)[n]` (returns `WriteActionOutcomeFailed<T>[]` — narrowed, `errors` is required)
-- Replace `result.successful_actions[n]` → `getSuccessfulActions(result)[n]` (returns `WriteActionOutcomeOk<T>[]`)
-- Replace `.error_details[n].type` → `.errors[n].type` (no `?.` needed after narrowing via helper or `!a.ok` guard)
-- Replace `.affected_items![n]!.error_details[n]!.type` → `.errors[n].type` (flat)
-- Remove assertions on `referential_comparison_ok`
-- Remove guard+throw boilerplate (data is always accessible)
-
-### Implementation Order
-
-1. Define new types in `types.ts` (remove old types from this file)
-2. Update Zod schemas in `write-action-schemas.ts`
-3. Update `ApplyWritesToItemsChanges` and `ApplyWritesToItemsResult` in `applyWritesToItems/types.ts`
-4. Update `WriteActionFailuresTracker` to produce new shape
-5. Update `SuccessfulWriteActionesTracker` to produce new shape
-6. Update `applyWritesToItems` to return `ApplyWritesToItemsResult`
-7. Add helper functions (`getFailedActions`, `getSuccessfulActions`, `getAllErrors`)
-8. Create `types-deprecated.ts` — deprecated type aliases mapping old → new
-9. Create `schemas-deprecated.ts` — deprecated schema aliases mapping old → new
-10. Create `convertWriteResultToLegacy.ts` — converter function
-11. Update `index.ts` exports (new types, new schemas, helpers, deprecated aliases, converter)
-12. Delete `combineWriteActionsWhereFilters.ts` and its test
-13. Update `applyWritesToItems.test.ts`
-14. Run `npm typecheck`, `npm test`, `npm lint` — fix issues
-
-# Breaking Changes Plan
-
-## Extent of Breaking Change
-
-**Within this repo**: All usage is internal to `src/write-actions/`. No files outside that directory import the response types directly. The only exposure is via barrel exports in `src/write-actions/index.ts` → `src/index.ts`.
-
-**External consumers**: The `@andyrmitchell/store` package is the primary external consumer (documented in Phase 2). It uses:
-- `WriteActionsResponse<T>` (aliased as `WriteResponse<T>`)
-- `FailedWriteAction<T>` (constructed manually in `logWriteActions.ts`)
-- `SuccessfulWriteAction<T>` (used in `ReadModifyWrite.ts`)
-- `WriteCommonError` (pushed into `error_details`)
-- Various schema exports (`WriteActionsResponseSchema`, etc.)
-
-**Severity**: This is a **major** breaking change to the public API. All exported response types are renamed or restructured.
-
-## Backward Compatibility Strategy
-
-### 1. Deprecated Type Aliases
-
-Create deprecated type aliases in `src/write-actions/types-deprecated.ts` that map old names → new types. Follow the existing `@deprecated` JSDoc pattern (seen in `whereClauseEngine.ts`).
-
-```ts
-// ─── types-deprecated.ts ───
-
-import type { WriteActionError, WriteActionOutcome, WriteActionOutcomeFailed, WriteActionOutcomeOk, WriteResult } from './types.ts';
-
-/** @deprecated Use `WriteActionError` instead. */
-export type WriteCommonError = WriteActionError;
-
-/** @deprecated Use `WriteActionOutcomeOk<T>` instead. */
-export type SuccessfulWriteAction<T extends Record<string, any>> = WriteActionOutcomeOk<T>;
-
-/** @deprecated Use `WriteActionOutcomeFailed<T>` instead. */
-export type FailedWriteAction<T extends Record<string, any>> = WriteActionOutcomeFailed<T>;
-
-/** @deprecated Eliminated. Use `WriteActionAffectedItem<T>` instead (now generic with optional `item`). */
-export type { WriteActionAffectedItem as FailedWriteActionAffectedItem } from './types.ts';
-
-/** @deprecated Use `WriteResult<T>` instead. */
-export type WriteActionsResponse<T extends Record<string, any>> = WriteResult<T>;
-
-/** @deprecated Eliminated. Check `result.ok === true` on `WriteResult<T>`. */
-export type WriteActionsResponseOk = { status: 'ok' };
-
-/** @deprecated Eliminated. Check `result.ok === false` on `WriteResult<T>`. */
-export type WriteActionsResponseError<T extends Record<string, any>> = WriteResult<T> & { ok: false };
-```
-
-These aliases will be exported from `src/write-actions/index.ts` alongside the new types, so existing `import { FailedWriteAction } from '@andyrmitchell/objects'` continues to compile (with IDE deprecation warnings).
-
-### 2. Converter Function
-
-A `convertWriteResultToLegacy` function converts the new `WriteResult<T>` shape back to the old `WriteActionsResponse<T>` shape. This lets external consumers migrate incrementally.
-
-```ts
-import type { WriteResult, WriteActionOutcomeFailed, WriteActionOutcomeOk } from './types.ts';
-import { getFailedActions, getSuccessfulActions } from './helpers.ts';
-
-type LegacyWriteActionsResponse<T extends Record<string, any>> =
-  | { status: 'ok' }
-  | {
-      status: 'error';
-      message: string;
-      successful_actions: { action: WriteAction<T>; affected_items?: { item_pk: PrimaryKeyValue }[] }[];
-      failed_actions: {
-        action: WriteAction<T>;
-        error_details: WriteActionError[];
-        unrecoverable?: boolean;
-        back_off_until_ts?: number;
-        blocked_by_action_uuid?: string;
-        affected_items?: { item_pk: PrimaryKeyValue; item: T; error_details: WriteActionError[] }[];
-      }[];
-    };
-
-/** Convert new WriteResult<T> to old WriteActionsResponse<T> shape for backward compat. */
-function convertWriteResultToLegacy<T extends Record<string, any>>(
-  result: WriteResult<T>
-): LegacyWriteActionsResponse<T> {
-  if (result.ok) {
-    return { status: 'ok' };
-  }
-  return {
-    status: 'error',
-    message: result.error?.message ?? 'Some write actions failed.',
-    successful_actions: getSuccessfulActions(result).map(a => ({
-      action: a.action,
-      affected_items: a.affected_items,
-    })),
-    failed_actions: getFailedActions(result).map(a => ({
-      action: a.action,
-      error_details: a.errors.map(e => {
-        const { item_pk, item, ...error } = e;
-        return error;
-      }),
-      unrecoverable: a.unrecoverable,
-      back_off_until_ts: a.back_off_until_ts,
-      blocked_by_action_uuid: a.blocked_by_action_uuid,
-      // Reconstruct per-item error grouping from flat errors array
-      affected_items: a.affected_items
-        ?.filter(ai => a.errors.some(e => e.item_pk === ai.item_pk))
-        .map(ai => ({
-          item_pk: ai.item_pk,
-          item: ai.item as T,
-          error_details: a.errors
-            .filter(e => e.item_pk === ai.item_pk)
-            .map(e => { const { item_pk, item, ...error } = e; return error; }),
-        })),
-    })),
-  };
-}
-```
-
-### 3. Schema Backward Compat
-
-Old schema names re-exported with `@deprecated`:
-
-```ts
-/** @deprecated Use `WriteActionErrorSchema` instead. */
-export const WriteCommonErrorSchema = WriteActionErrorSchema;
-
-/** @deprecated Use `WriteActionOutcomeSchema` instead. */
-export const FailedWriteActionSchema = /* extract failed branch from WriteActionOutcomeSchema */;
-export const SuccessfulWriteActionSchema = /* extract ok branch */;
-
-/** @deprecated Use `WriteResultSchema` instead. */
-export const WriteActionsResponseSchema = WriteResultSchema;
-```
-
-### 4. Existing `index-old-types.ts` Precedent
-
-The codebase already has `src/write-actions/index-old-types.ts` with an even older generation of types (`WriteActionFailures`, `AppliedWritesOutput`, etc.) and its own `tsup` entry point. This confirms the pattern of maintaining legacy aliases. The new deprecated aliases can live in `types-deprecated.ts` and be re-exported from `index.ts`.
-
-### 5. Migration Path for `@andyrmitchell/store`
-
-| Store usage | Migration |
-|---|---|
-| `WriteResponse<T>` (alias for `WriteActionsResponse<T>`) | Change to `WriteResult<T>`. Access `result.ok` instead of `result.status`. |
-| `FailedWriteAction<T>` construction in `logWriteActions.ts` | Construct `WriteActionOutcomeFailed<T>` with `ok: false, errors: [...]` instead of `error_details: [...]`. |
-| `SuccessfulWriteAction<T>` in `ReadModifyWrite.ts` | Use `WriteActionOutcomeOk<T>`. |
-| `ActionOutcomesForUnexpectedError` iterating `successful_actions`/`failed_actions` | Use `result.actions` directly or `getSuccessfulActions()`/`getFailedActions()`. |
-| Schema validation at serialization boundaries | Swap schema names. |
-
-### 6. Recommended Rollout
-
-1. Publish `@andyrmitchell/objects` with both new types AND deprecated aliases.
-2. Update `@andyrmitchell/store` to use new types (or use `convertWriteResultToLegacy` as a temporary bridge).
-3. After store is migrated, remove deprecated aliases in a subsequent major version.
 
 # Project Plan
 
@@ -743,3 +486,148 @@ Implement the plan in `Implementation Plan`
 ## Files Deleted
 - `src/write-actions/combineWriteActionsWhereFilters.ts` — Dead code
 - `src/write-actions/combineWriteActionsWhereFilters.test.ts` — Dead code test
+
+# [x] Phase 7
+
+This is a plan exercise. 
+
+A key goal is deep modules that have simple interfaces. 
+
+Currently the barrel for write-actions @./write-actions/index.ts is a mess. 
+
+To clean up: 
+- Remove the old sub path from package and tsup for 'write-actions-old-types'
+- Move all deprecated types, and the new converter helper, to a new sub path 'write-actions-deprecated-2026'
+- Add a small section to README for how a consumer of the deprecated Write Actions can call applyWritesToItems and use the converter to get the old style back - and how they could modify their codebase to do this (probably search replace applyWritesToItems and wrap in first pass; then import the new sub path on the second pass). Check this idea is correct first - I'm not convinced. Output the correct one. 
+- In the file system, move the deprecated files into a 'deprecated' directory to tidy up 
+- Move helper functions (all functions really) out of @./types.ts into their own place. As a rule, I want type files to be pure. 
+
+Basically, make write-actions' surface a clean simple thing to consume. Other ideas welcome - but discuss. 
+
+
+# [x] Phase 8
+
+## Drop backwards compatibility, teach a future LLM how to update consumer code bases
+
+Generated `MIGRATING-BREAKING-WRITE-ACTIONS.md` in the project root. It contains:
+- Full type mapping table (old to new) for all types and schemas
+- 12-step migration instructions for an LLM to follow mechanically
+- 7 concrete before/after code patterns (happy path, error path, partial success, outcome maps, logging, error type filtering, type alias wrapping)
+- Quick reference table for all property path changes
+- Instructions for manual construction of response/failure objects
+
+Old types verified against commit `3b33ed3` (pre-redesign). Phase 9 covers deleting deprecated code.
+
+# [x] Phase 9: Implement this
+
+### Delete `write-actions-old-types` sub-path
+
+| What | Where |
+|---|---|
+| Remove entry `'index-write-actions-old-types'` | `tsup.config.ts` |
+| Remove `"./write-actions-old-types"` export | `package.json` |
+| Delete file | `src/write-actions/index-old-types.ts` |
+
+This is a generation-old legacy. If any external consumer uses it, they must migrate (no backward compat shim — it's too old).
+
+### Make `types.ts` pure (move runtime to `helpers.ts`)
+
+Create `src/write-actions/helpers.ts` containing all runtime code currently in `types.ts`:
+
+| Symbol | Kind | Notes |
+|---|---|---|
+| `VALUE_TO_DELETE_KEY` | const | Also used by `lww.ts` — update import |
+| `assertArrayScope` | fn | |
+| `isWriteActionArrayScopePayload` | fn | |
+| `isUpdateOrDeleteWriteActionPayload` | fn | |
+| `getFailedActions` | fn | |
+| `getSuccessfulActions` | fn | |
+| `getAllErrors` | fn | |
+
+After: `types.ts` exports only `type`/`interface` declarations.
+
+Internal consumers to update:
+- `src/write-actions/applyWritesToItems/writeStrategies/lww.ts` — import `VALUE_TO_DELETE_KEY` from `../../helpers.ts` (was `../../types.js`)
+- `src/write-actions/convertWriteResultToLegacy.ts` — import helpers from `./helpers.ts` (was `./types.ts`)
+- `src/write-actions/index.ts` — import helpers from `./helpers.ts`
+
+### Remove deprecated files 
+
+`src/write-actions/types-deprecated.ts`
+`src/write-actions/schemas-deprecated.ts`
+`src/write-actions/convertWriteResultToLegacy.ts`
+
+
+
+### Clean up main barrel (`index.ts`)
+
+Remove from `index.ts`:
+- All deprecated type re-exports
+- All deprecated schema re-exports
+- `convertWriteResultToLegacy` export
+- `WriteActions` namespace object
+
+**Clean barrel after cleanup** (~30 exports, all current/non-deprecated):
+
+```
+Functions:  applyWritesToItems, applyWritesToItemsTyped, checkPermission, isIUser
+Helpers:    getFailedActions, getSuccessfulActions, getAllErrors, assertArrayScope
+Schemas:    WriteResultSchema, WriteActionErrorSchema, WriteActionOutcomeSchema,
+            WriteActionOutcomeOkSchema, WriteActionOutcomeFailedSchema,
+            WriteActionAffectedItemSchema, WriteActionSchema,
+            makeWriteActionSchema, makeWriteActionOutcomeSchema,
+            makeWriteActionOutcomeOkSchema, makeWriteActionOutcomeFailedSchema,
+            makeWriteResultSchema
+Types:      WriteAction, WriteActionPayload, WriteActionError, WriteActionErrorContext,
+            WriteActionAffectedItem, WriteActionOutcomeOk, WriteActionOutcomeFailed,
+            WriteActionOutcome, WriteResult,
+            WriteChangesBase, ApplyWritesToItemsChanges, ApplyWritesToItemsResult,
+            DDL, ListOrdering, ApplyWritesToItemsOptions, IUser
+```
+
+### Remove `WriteActions` namespace object
+
+Currently the barrel exports a `WriteActions` const that bundles everything together. This:
+- Breaks tree-shaking (importing `WriteActions.applyWritesToItems` pulls in all schemas, helpers, deprecated items)
+- Bloats the barrel with duplicate exports (everything is exported both individually AND on the namespace)
+- Includes deprecated items in the namespace `.schemas` sub-object
+
+###  Schema naming convention
+
+Currently every schema has both a `make*Schema<T>()` factory (generic) and a pre-instantiated `*Schema` constant (with `<any>`). For the barrel, this doubles the export count. Consider:
+- Only export factories + a single `WriteActionSchemas` object for the constants
+
+
+###  `checkPermission` needs JSDoc
+
+Key insight: Consumers use it to predict whether a WriteAction will be executable by the user before sending it to execute. 
+
+It will need to update MIGRATING-BREAKING-WRITE-ACTIONS.md too, e.g. for schema factory naming changes.
+
+## Files Created
+- `src/write-actions/helpers.ts` — Runtime functions extracted from types.ts: `VALUE_TO_DELETE_KEY`, `assertArrayScope`, `isWriteActionArrayScopePayload`, `isUpdateOrDeleteWriteActionPayload`, `getFailedActions`, `getSuccessfulActions`, `getAllErrors`
+
+## Files Modified
+- `src/write-actions/types.ts` — Now pure types only; runtime moved to helpers.ts; exported `WriteActionPayloadDelete`
+- `src/write-actions/index.ts` — Removed `WriteActions` namespace, deprecated imports/exports, `convertWriteResultToLegacy`; imports helpers from `./helpers.ts`
+- `src/write-actions/applyWritesToItems/writeStrategies/lww.ts` — Import `VALUE_TO_DELETE_KEY` from `../../helpers.ts`
+- `src/write-actions/applyWritesToItems/applyWritesToItems.ts` — Import runtime from `../helpers.ts`
+- `src/write-actions/applyWritesToItems/helpers/getArrayScopeItemAction.ts` — Split type/runtime imports
+- `src/write-actions/applyWritesToItems/applyWritesToItems.test.ts` — Import helpers from `../helpers.ts`
+- `src/write-actions/applyWritesToItems/helpers/checkPermission.ts` — Added JSDoc
+- `tsup.config.ts` — Removed `index-write-actions-old-types` entry
+- `package.json` — Removed `./write-actions-old-types` export
+- `MIGRATING-BREAKING-WRITE-ACTIONS.md` — Added notes about removed deprecated exports, namespace, converter, old-types sub-path; fixed package name
+
+## Files Deleted
+- `src/write-actions/index-old-types.ts`
+- `src/write-actions/types-deprecated.ts`
+- `src/write-actions/schemas-deprecated.ts`
+- `src/write-actions/convertWriteResultToLegacy.ts`
+
+# [ ] Phase 10
+
+If you look at the exported barrel for write-actions you'll see the function and type naming schema isn't the most coherent, guessable thing. A LLM would have a hard time inferring their purpose from the name alone, and a developer would have a hard time remembering them (no consistent prefix to start auto complete; no consistent order of verbs). 
+
+Make a plan for a better approach and add to Phase 10a. 
+It will need to update MIGRATING-BREAKING-WRITE-ACTIONS.md too. 

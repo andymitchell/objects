@@ -15,6 +15,11 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 5. **`referential_comparison_ok` removed** from `ApplyWritesToItemsChanges`.
 6. **`CombineWriteActionsWhereFiltersResponse` dropped** (was unused dead code).
 7. **`SerializableCommonError` removed** from the response surface — replaced by a lightweight `error?: { message: string }`.
+8. **Deprecated type aliases removed** — `WriteCommonError`, `SuccessfulWriteAction`, `FailedWriteAction`, `FailedWriteActionAffectedItem`, `WriteActionsResponse`, `WriteActionsResponseOk`, `WriteActionsResponseError`, `ApplyWritesToItemsResponse` are no longer exported. Use the new names directly.
+9. **Deprecated schema aliases removed** — `WriteCommonErrorSchema`, `SuccessfulWriteActionSchema`, `FailedWriteActionSchema`, `WriteActionsResponseSchema`, `WriteActionsResponseOkSchema`, `WriteActionsResponseErrorSchema` are no longer exported. Use the new names directly.
+10. **`WriteActions` namespace object removed** — import functions and schemas individually (tree-shakeable).
+11. **`convertWriteResultToLegacy` removed** — no backward compatibility shim; migrate directly to the new types.
+12. **`./write-actions-old-types` sub-path removed** — the legacy generation-old type system is gone entirely.
 
 ---
 
@@ -52,7 +57,7 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 These are the primary ergonomic API. Import them alongside `applyWritesToItems`:
 
 ```ts
-import { getFailedActions, getSuccessfulActions, getAllErrors } from '@anthropic/objects/write-actions';
+import { getFailedActions, getSuccessfulActions, getAllErrors } from '@andyrmitchell/objects/write-actions';
 
 // Returns WriteActionOutcomeFailed<T>[] — already narrowed
 getFailedActions(result)

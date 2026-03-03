@@ -1,6 +1,6 @@
 
 import type  {  WriteAction,  WriteActionOutcomeOk, WriteActionOutcome } from "../types.js";
-import {isUpdateOrDeleteWriteActionPayload, getFailedActions} from '../types.js';
+import {isUpdateOrDeleteWriteActionPayload, getFailedActions} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter/index-old.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.js";

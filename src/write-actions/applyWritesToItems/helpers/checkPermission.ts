@@ -6,6 +6,16 @@ import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertyS
 import type { WriteActionError } from "../../types.ts";
 
 
+/**
+ * Check whether a user has permission to modify an item, based on the DDL's ownership rules.
+ *
+ * Returns `undefined` if permitted, or a `WriteActionError` describing the denial reason.
+ * Use before executing a write action to predict whether it will be allowed.
+ *
+ * @example
+ * const denied = checkPermission(item, ddl, user);
+ * if (denied) console.log(denied.reason); // e.g. 'not-owner'
+ */
 export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteActionError | undefined {
     if( !ddl.permissions || ddl.permissions.type==='none' ) return undefined;
     if( !verifiedPermissionsSchema ) {

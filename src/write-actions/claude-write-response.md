@@ -719,6 +719,27 @@ Briefly consider the extent of the breaking change. Would it be possible to crea
 
 Output to `Breaking Changes Plan`
 
-# [ ] Phase 5
+# [x] Phase 5
 
 Implement the plan in `Implementation Plan`
+
+## Files Created
+- `src/write-actions/types-deprecated.ts` — Deprecated type aliases mapping old names → new (e.g. `WriteCommonError` → `WriteActionError`)
+- `src/write-actions/schemas-deprecated.ts` — Deprecated schema aliases mapping old names → new (e.g. `WriteCommonErrorSchema` → `WriteActionErrorSchema`)
+- `src/write-actions/convertWriteResultToLegacy.ts` — Converter function for backward compat with external consumers
+
+## Files Modified
+- `src/write-actions/types.ts` — Replaced old types with new: `WriteActionError`, `WriteActionErrorContext`, `WriteActionAffectedItem`, `WriteActionOutcomeOk`, `WriteActionOutcomeFailed`, `WriteActionOutcome`, `WriteResult`. Added helpers: `getFailedActions`, `getSuccessfulActions`, `getAllErrors`.
+- `src/write-actions/write-action-schemas.ts` — Replaced old schemas with new: `WriteActionErrorSchema`, `WriteActionOutcomeSchema`, `WriteResultSchema`, etc.
+- `src/write-actions/applyWritesToItems/types.ts` — Added `WriteChangesBase`, updated `ApplyWritesToItemsChanges` (removed `referential_comparison_ok`), replaced `ApplyWritesToItemsResponse` with `ApplyWritesToItemsResult`.
+- `src/write-actions/applyWritesToItems/helpers/WriteActionFailuresTracker.ts` — Now produces `WriteActionOutcomeFailed` with flat `errors: WriteActionErrorContext[]`.
+- `src/write-actions/applyWritesToItems/applyWritesToItems.ts` — Returns `ApplyWritesToItemsResult` with `{ok, actions, changes}` shape.
+- `src/write-actions/applyWritesToItems/helpers/checkPermission.ts` — Updated import `WriteCommonError` → `WriteActionError`.
+- `src/write-actions/applyWritesToItems/helpers/equivalentCreateOccurs.ts` — Updated `result.status` → `result.ok`.
+- `src/write-actions/index.ts` — Updated all exports: new types, new schemas, helpers, deprecated aliases, converter.
+- `src/write-actions/types.test.ts` — Updated schema test from `WriteActionsResponseSchema` to `WriteResultSchema`.
+- `src/write-actions/applyWritesToItems/applyWritesToItems.test.ts` — Updated all assertions to new API: `result.ok`, `getFailedActions()`, `getSuccessfulActions()`, `.errors[]`, removed `referential_comparison_ok` assertions.
+
+## Files Deleted
+- `src/write-actions/combineWriteActionsWhereFilters.ts` — Dead code
+- `src/write-actions/combineWriteActionsWhereFilters.test.ts` — Dead code test

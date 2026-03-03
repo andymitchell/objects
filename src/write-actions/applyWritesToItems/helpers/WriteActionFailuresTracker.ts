@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WriteAction, FailedWriteAction, FailedWriteActionAffectedItem, WriteCommonError } from "../../types.ts";
+import type { WriteAction, WriteActionError, WriteActionErrorContext, WriteActionAffectedItem, WriteActionOutcomeFailed } from "../../types.ts";
 import type { ListRules } from "../types.js";
 import deepEql from "deep-eql";
 import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.js";
@@ -9,82 +9,68 @@ import cloneDeepSafe from "../../../utils/cloneDeepSafe.ts";
 
 export default class FailedWriteActionuresTracker<T extends Record<string, any>> {
     private schema: z.ZodType<T, any, any>;
-    private failures: FailedWriteAction<T>[];
+    private failures: WriteActionOutcomeFailed<T>[];
     private pk:PrimaryKeyGetter<T>;
 
     constructor(schema: z.ZodType<T, any, any>, rules: ListRules<T>) {
         this.schema = schema;
         this.failures = [];
         this.pk = makePrimaryKeyGetter(rules.primary_key);
-
-        
     }
 
     shouldHalt():boolean {
         return this.length()>0;
     }
 
-    private findAction<IMA extends boolean = false>(action:WriteAction<T>, ifMissingAdd?: IMA): IMA extends true? FailedWriteAction<T> : FailedWriteAction<T>  | undefined {
+    private findAction<IMA extends boolean = false>(action:WriteAction<T>, ifMissingAdd?: IMA): IMA extends true? WriteActionOutcomeFailed<T> : WriteActionOutcomeFailed<T> | undefined {
         let failedAction = this.failures.find(x => deepEql(x.action, action));
         if( ifMissingAdd && !failedAction ) {
-            failedAction = {action, error_details: [], affected_items: []};
+            failedAction = {ok: false, action, errors: [], affected_items: []};
             this.failures.push(failedAction);
         }
-        return failedAction as IMA extends true? FailedWriteAction<T> : FailedWriteAction<T>  | undefined;
+        return failedAction as IMA extends true? WriteActionOutcomeFailed<T> : WriteActionOutcomeFailed<T> | undefined;
     }
 
-    private findActionAndItem<IMA extends boolean = false>(action:WriteAction<T>, item:T, ifMissingAdd?: IMA):IMA extends true? {failedAction:FailedWriteAction<T>, failedItem: FailedWriteActionAffectedItem<T>} : {failedAction?:FailedWriteAction<T>, failedItem?: FailedWriteActionAffectedItem<T>} {
+    private findActionAndItem<IMA extends boolean = false>(action:WriteAction<T>, item:T, ifMissingAdd?: IMA):IMA extends true? {failedAction:WriteActionOutcomeFailed<T>, failedItem: WriteActionAffectedItem<T>} : {failedAction?:WriteActionOutcomeFailed<T>, failedItem?: WriteActionAffectedItem<T>} {
         const failedAction = this.findAction(action, ifMissingAdd);
-        let failedItem:FailedWriteActionAffectedItem<T> | undefined;
+        let failedItem:WriteActionAffectedItem<T> | undefined;
         if( failedAction ) {
-
             const itemPk = this.pk(item, true);
-            failedItem = itemPk ? failedAction.affected_items?.find(x => itemPk===this.pk(x.item, true)): undefined;
+            failedItem = itemPk ? failedAction.affected_items?.find(x => itemPk===x.item_pk): undefined;
             if( ifMissingAdd && !failedItem ) {
-                failedItem = {item_pk: itemPk, item, error_details: []};
+                failedItem = {item_pk: itemPk, item};
                 if( !failedAction.affected_items ) failedAction.affected_items = [];
                 failedAction.affected_items.push(failedItem);
             }
         }
 
-        return {failedAction, failedItem} as IMA extends true? {failedAction:FailedWriteAction<T>, failedItem: FailedWriteActionAffectedItem<T>} : {failedAction?:FailedWriteAction<T>, failedItem?: FailedWriteActionAffectedItem<T>}
+        return {failedAction, failedItem} as IMA extends true? {failedAction:WriteActionOutcomeFailed<T>, failedItem: WriteActionAffectedItem<T>} : {failedAction?:WriteActionOutcomeFailed<T>, failedItem?: WriteActionAffectedItem<T>}
     }
 
-    private addErrorDetails(action:FailedWriteAction<T>, item:FailedWriteActionAffectedItem<T>, errorDetails:WriteCommonError) {
-        if( item.error_details.some(x => deepEql(x, errorDetails)) ) {
+    private addErrorDetails(action:WriteActionOutcomeFailed<T>, item:WriteActionAffectedItem<T>, errorDetails:WriteActionError) {
+        const errorContext: WriteActionErrorContext<T> = {
+            ...errorDetails,
+            item_pk: item.item_pk,
+            item: item.item,
+        };
+
+        // Deduplicate: skip if an equivalent error already exists for this item
+        if( action.errors.some(x => deepEql(x, errorContext)) ) {
             return;
         }
-        action.error_details.push(errorDetails);
+
+        action.errors.push(errorContext);
+
         switch(errorDetails.type) {
-            case 'schema': {
-                // TODO Should it merge issues instead? Otherwise the list of issues might involve lots of duplication. 
+            case 'schema':
+            case 'missing_key':
+            case 'create_duplicated_key':
+            case 'update_altered_key':
+            case 'permission_denied':
                 action.unrecoverable = true;
-                item.error_details.push(errorDetails);
                 break;
-            }
-            case 'missing_key': {
-                action.unrecoverable = true;
-                item.error_details.push(errorDetails);
+            case 'custom':
                 break;
-            }
-            case 'create_duplicated_key': {
-                action.unrecoverable = true;
-                item.error_details.push(errorDetails);
-                break;
-            }
-            case 'update_altered_key': {
-                action.unrecoverable = true;
-                item.error_details.push(errorDetails);
-                break;
-            }
-            case 'permission_denied': {
-                action.unrecoverable = true;
-                item.error_details.push(errorDetails);
-                break;
-            }
-            case 'custom': {
-                item.error_details.push(errorDetails);
-            }
         }
     }
 
@@ -108,10 +94,10 @@ export default class FailedWriteActionuresTracker<T extends Record<string, any>>
             });
         }
         return result.success;
-        
+
     }
 
-    report(action:WriteAction<T>, item: T, errorDetails: WriteCommonError):void {
+    report(action:WriteAction<T>, item: T, errorDetails: WriteActionError):void {
         const {failedAction, failedItem} = this.findActionAndItem(action, item, true);
         this.addErrorDetails(failedAction, failedItem, errorDetails);
     }
@@ -121,14 +107,26 @@ export default class FailedWriteActionuresTracker<T extends Record<string, any>>
         failedAction.blocked_by_action_uuid = blocked_by_action_uuid;
     }
 
-    mergeUnderAction(action:WriteAction<T>, failedActions:FailedWriteAction<any>[]):void {
-
+    mergeUnderAction(action:WriteAction<T>, failedActions:WriteActionOutcomeFailed<any>[]):void {
         for( const subAction of failedActions ) {
             if( subAction.affected_items ) {
                 for( const subItem of subAction.affected_items ) {
-                    const {failedAction, failedItem} = this.findActionAndItem(action, subItem.item, true);
-                    for( const errorDetails of subItem.error_details ) {
-                        this.addErrorDetails(failedAction, failedItem, errorDetails);
+                    if( subItem.item ) {
+                        const {failedAction, failedItem} = this.findActionAndItem(action, subItem.item, true);
+                        // Merge errors from sub-action that relate to this item
+                        for( const error of subAction.errors ) {
+                            if( error.item_pk === subItem.item_pk ) {
+                                const { item_pk: _ipk, item: _item, ...errorBase } = error;
+                                this.addErrorDetails(failedAction, failedItem, errorBase);
+                            }
+                        }
+                        // Also merge errors without item context
+                        for( const error of subAction.errors ) {
+                            if( error.item_pk === undefined ) {
+                                const { item_pk: _ipk, item: _item, ...errorBase } = error;
+                                this.addErrorDetails(failedAction, failedItem, errorBase);
+                            }
+                        }
                     }
                 }
             }
@@ -139,7 +137,7 @@ export default class FailedWriteActionuresTracker<T extends Record<string, any>>
         return this.failures.length;
     }
 
-    get():FailedWriteAction<T>[] {
+    get():WriteActionOutcomeFailed<T>[] {
         return JSON.parse(JSON.stringify(this.failures));
     }
 }

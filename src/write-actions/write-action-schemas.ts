@@ -1,18 +1,9 @@
 import z from "zod";
 import { UpdatingMethodSchema, WhereFilterSchema } from "../where-filter/schemas.ts";
 import { isTypeEqual } from "@andyrmitchell/utils";
-import type { WriteAction, FailedWriteAction, FailedWriteActionAffectedItem, WriteActionPayloadArrayScope, WriteActionPayloadUpdate, WriteActionsResponseError, WriteActionsResponseOk, SuccessfulWriteAction, WriteCommonError } from "./types.ts";
+import type { WriteAction, WriteActionError, WriteActionErrorContext, WriteActionAffectedItem, WriteActionOutcomeOk, WriteActionOutcomeFailed, WriteActionOutcome, WriteResult, WriteActionPayloadArrayScope, WriteActionPayloadUpdate } from "./types.ts";
 import { getZodSchemaAtSchemaDotPropPath, TreeNodeSchema } from "../dot-prop-paths/zod.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
-//import { SerializableCommonErrorSchema } from "@andyrmitchell/utils/serialize-error";
-
-
-export const SerializableCommonErrorSchema = z.object({
-    message: z.string(),
-    cause: z.unknown().optional(),
-    stack: z.string().optional(),
-    name: z.string().optional(),
-});
 
 
 export function makeWriteActionSchema<T extends Record<string, any> = Record<string, any>>(objectSchema?: z.AnyZodObject):z.ZodType<WriteAction<T>> {
@@ -41,7 +32,7 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.AnyZodObject) {
     const WriteActionPayloadArrayCreateSchema = z.object({
         type: z.literal('array_scope'),
         scope: z.string(),
-        action: z.record(z.any()), // This gets tighter control in the .refine below 
+        action: z.record(z.any()), // This gets tighter control in the .refine below
         where: WhereFilterSchema,
     }).refine((data) => {
         const result = checkArrayScopeAction(schema, data as WriteActionPayloadArrayScope<any>);
@@ -51,7 +42,7 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.AnyZodObject) {
         path: ["value"]
     });
 
-    
+
 
     const WriteActionPayloadDeleteSchema = z.object({
         type: z.literal('delete'),
@@ -87,10 +78,12 @@ function checkArrayScopeAction(schema:z.ZodTypeAny, data: WriteActionPayloadArra
     const subActionSchema = makeWriteActionAndPayloadSchema(subSchema);
     const result = subActionSchema.payload.safeParse(data.action).success;
     return result;
-    
+
 }
 
-export const WriteCommonErrorSchema = z.discriminatedUnion('type', [
+// ─── WriteActionError (renamed from WriteCommonError) ───
+
+export const WriteActionErrorSchema = z.discriminatedUnion('type', [
     z.object({
         type: z.literal('custom'),
         message: z.string().optional()
@@ -118,57 +111,68 @@ export const WriteCommonErrorSchema = z.discriminatedUnion('type', [
         reason: z.union([z.literal('no-owner-id'), z.literal('not-owner'), z.literal('unknown-permission'), z.literal('invalid-permissions'), z.literal('expected-owner-email'), z.literal('not-authenticated')])
     })
 ])
-isTypeEqual<z.infer<typeof WriteCommonErrorSchema>, WriteCommonError>(true);
+isTypeEqual<z.infer<typeof WriteActionErrorSchema>, WriteActionError>(true);
 
-const WriteActionAffectedItemSchema = z.object({
-    item_pk:PrimaryKeyValueSchema
-})
-const FailedWriteActionAffectedItemSchema = WriteActionAffectedItemSchema.merge(z.object({
-    item: z.any(),
-    error_details: z.array(WriteCommonErrorSchema)
-}))
-isTypeEqual<z.infer<typeof FailedWriteActionAffectedItemSchema>, FailedWriteActionAffectedItem<any>>(true);
+// ─── WriteActionErrorContext ───
 
-export function makeFailedWriteActionSchema<T extends Record<string, any> = Record<string, any>>() {
-    const error_details = z.array(WriteCommonErrorSchema);
+export function makeWriteActionErrorContextSchema<T extends Record<string, any> = Record<string, any>>() {
+    return WriteActionErrorSchema.and(z.object({
+        item_pk: PrimaryKeyValueSchema.optional(),
+        item: (z.any() as z.ZodType<T | undefined>).optional(),
+    })) as z.ZodType<WriteActionErrorContext<T>>;
+}
+
+// ─── WriteActionAffectedItem ───
+
+export const WriteActionAffectedItemSchema = z.object({
+    item_pk: PrimaryKeyValueSchema,
+    item: z.any().optional(),
+});
+isTypeEqual<z.infer<typeof WriteActionAffectedItemSchema>, WriteActionAffectedItem<any>>(true);
+
+// ─── WriteActionOutcome (discriminated union on `ok`) ───
+
+export function makeWriteActionOutcomeOkSchema<T extends Record<string, any> = Record<string, any>>() {
     return z.object({
+        ok: z.literal(true),
         action: makeWriteActionSchema<T>(),
-        error_details,
+        affected_items: z.array(WriteActionAffectedItemSchema as z.ZodType<WriteActionAffectedItem<T>>).optional(),
+    });
+}
+export const WriteActionOutcomeOkSchema = makeWriteActionOutcomeOkSchema<any>();
+isTypeEqual<z.infer<typeof WriteActionOutcomeOkSchema>, WriteActionOutcomeOk<any>>(true);
+
+export function makeWriteActionOutcomeFailedSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.object({
+        ok: z.literal(false),
+        action: makeWriteActionSchema<T>(),
+        affected_items: z.array(WriteActionAffectedItemSchema as z.ZodType<WriteActionAffectedItem<T>>).optional(),
+        errors: z.array(makeWriteActionErrorContextSchema<T>()),
         unrecoverable: z.boolean().optional(),
         back_off_until_ts: z.number().optional(),
         blocked_by_action_uuid: z.string().optional(),
-        affected_items: z.array(FailedWriteActionAffectedItemSchema as z.ZodType<FailedWriteActionAffectedItem<T>>).optional()
     });
 }
-export const FailedWriteActionSchema = makeFailedWriteActionSchema();
-isTypeEqual<z.infer<typeof FailedWriteActionSchema>, FailedWriteAction<any>>(true);
+export const WriteActionOutcomeFailedSchema = makeWriteActionOutcomeFailedSchema<any>();
+isTypeEqual<z.infer<typeof WriteActionOutcomeFailedSchema>, WriteActionOutcomeFailed<any>>(true);
 
-
-
-export function makeSuccessfulWriteActionSchema<T extends Record<string, any> = Record<string, any>>() {
-    return z.object({
-        action: makeWriteActionSchema<T>(),
-        affected_items: z.array(WriteActionAffectedItemSchema).optional()
-    })
+export function makeWriteActionOutcomeSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.discriminatedUnion('ok', [
+        makeWriteActionOutcomeOkSchema<T>(),
+        makeWriteActionOutcomeFailedSchema<T>(),
+    ]);
 }
-export const SuccessfulWriteActionSchema = makeSuccessfulWriteActionSchema<any>();
-isTypeEqual<z.infer<typeof SuccessfulWriteActionSchema>, SuccessfulWriteAction<any>>(true);
+export const WriteActionOutcomeSchema = makeWriteActionOutcomeSchema<any>();
+isTypeEqual<z.infer<typeof WriteActionOutcomeSchema>, WriteActionOutcome<any>>(true);
 
+// ─── WriteResult ───
 
-export const WriteActionsResponseOkSchema = z.object({
-    status: z.literal('ok')
-})
-isTypeEqual<z.infer<typeof WriteActionsResponseOkSchema>, WriteActionsResponseOk>(true);
-
-export const WriteActionsResponseErrorSchema = z.object({
-    status: z.literal('error'),
-    successful_actions: z.array(SuccessfulWriteActionSchema),
-    failed_actions: z.array(FailedWriteActionSchema)
-}).merge(SerializableCommonErrorSchema);
-isTypeEqual<z.infer<typeof WriteActionsResponseErrorSchema>, WriteActionsResponseError<any>>(true);
-
-export const WriteActionsResponseSchema = z.discriminatedUnion('status', [
-    WriteActionsResponseOkSchema,
-    WriteActionsResponseErrorSchema
-]);
-
+export function makeWriteResultSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.object({
+        ok: z.boolean(),
+        actions: z.array(makeWriteActionOutcomeSchema<T>()),
+        error: z.object({ message: z.string() }).optional(),
+    });
+}
+export const WriteResultSchema = makeWriteResultSchema<any>();
+isTypeEqual<z.infer<typeof WriteResultSchema>, WriteResult<any>>(true);

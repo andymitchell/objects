@@ -2,7 +2,7 @@ import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValu
 import type { PrimaryKeyValue } from "../../utils/getKeyValue.js";
 import type { IfAny } from "../../types.js";
 import type { EnsureRecord } from "../../types.js";
-import type {  SuccessfulWriteAction, WriteActionPayloadCreate, WriteActionPayloadUpdate, WriteActionsResponseError, WriteActionsResponseOk } from "../types.js";
+import type {  WriteActionPayloadCreate, WriteActionPayloadUpdate, WriteResult } from "../types.js";
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
 import type { ObjectsDelta } from "../../objects-delta/types.ts";
@@ -202,44 +202,29 @@ const c:PrimaryKeyValue = a.lists['.'].primary_key
 
 
 /**
- * The changes to the original items passed to `applyWritesToItems`, after the actions are run. 
+ * Minimal changes base for any apply function. Future apply functions can extend this
+ * without being forced to provide `final_items`.
  */
-export type ApplyWritesToItemsChanges<
-    T extends Record<string, any>
-    > = 
-    ObjectsDelta<T> & { 
-    changed: boolean, 
+export type WriteChangesBase<T extends Record<string, any>> = ObjectsDelta<T> & {
+    changed: boolean;
+};
 
-    /**
-     * The final version of the input items, with all the changes
-     */
-    final_items: T[],
-
-    /**
-     * If true then `final_items` can be used for referential comparison (e.g. in React): 
-     * - The array only changes if any items changed 
-     * - If an item is modified, it'll replaced with a new object
-     * 
-     * It requires either `in_place_mutation` to be disabled, or Immer drafts to be used.
-     */
-    referential_comparison_ok: boolean,
-}
 /**
- * The response to `applyWritesToItems`
+ * The changes to the original items passed to `applyWritesToItems`, after the actions are run.
  */
-export type ApplyWritesToItemsResponse<
-    T extends Record<string, any>
-    > = WriteActionsResponseOk & {
-    changes: ApplyWritesToItemsChanges<T>,
+export type ApplyWritesToItemsChanges<T extends Record<string, any>> = WriteChangesBase<T> & {
+    /** The final version of the input items, with all the changes applied. */
+    final_items: T[];
+};
 
-    /**
-     * This is a bit of a legacy thing. `WriteActionsResponseOk` does not include it. 
-     * It's now considered redundant because it can only be a success if all actions are complete. 
-     */
-    successful_actions: SuccessfulWriteAction<T>[],
-
-} | WriteActionsResponseError<T> & {
-    changes: ApplyWritesToItemsChanges<T>
-    
-
-}
+/**
+ * The response to `applyWritesToItems`. Extends `WriteResult` with `changes` always present.
+ * No narrowing needed to access `changes` or `actions`.
+ *
+ * @example
+ * result.changes.final_items // always accessible
+ * if (!result.ok) getFailedActions(result)[0].errors[0].type;
+ */
+export type ApplyWritesToItemsResult<T extends Record<string, any>> = WriteResult<T> & {
+    changes: ApplyWritesToItemsChanges<T>;
+};

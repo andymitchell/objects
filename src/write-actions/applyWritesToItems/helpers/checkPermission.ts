@@ -3,10 +3,10 @@ import type { IUser } from "../../auth/types.js";
 import { type DDL, DDLPermissionsSchema } from "../types.js";
 
 import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.js";
-import type { WriteCommonError } from "../../types.ts";
+import type { WriteActionError } from "../../types.ts";
 
 
-export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteCommonError | undefined {
+export function checkPermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteActionError | undefined {
     if( !ddl.permissions || ddl.permissions.type==='none' ) return undefined;
     if( !verifiedPermissionsSchema ) {
         if( !DDLPermissionsSchema.safeParse(ddl.permissions).success ) {

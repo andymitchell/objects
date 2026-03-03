@@ -21,7 +21,7 @@ export default function equivalentCreateOccurs<T extends Record<string, any>>(sc
             return true;
         } else {
             const result = applyWritesToItems([action], [current], schema, ddl);
-            if( result.status==='error' ) return false;
+            if( !result.ok ) return false;
             current = result.changes.final_items[0] as T
         }
     }

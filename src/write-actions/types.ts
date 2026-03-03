@@ -3,18 +3,6 @@ import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValu
 import type { UpdatingMethod, WhereFilterDefinition } from "../where-filter/types.js"
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
 import type { TreeNode } from "../dot-prop-paths/zod.ts";
-//import type { SerializableCommonError } from "@andyrmitchell/utils/serialize-error";
-
-interface SerializableCommonError {
-    /** The human-readable error message. */
-    message: string;
-    /** The underlying cause of the error, if available. Can be any type, but restricted to being serializable. */
-    cause?: unknown;
-    /** The stack trace at the time the error was thrown, if available. */
-    stack?: string;
-    /** The type or name of the error (e.g., "TypeError", "ValidationError"). */
-    name?: string;
-}
 
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WriteActionPayloadUpdate to.... data: Nullable<Partial<T>>
 
@@ -84,128 +72,158 @@ export function isUpdateOrDeleteWriteActionPayload<T extends Record<string, any>
     return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete');
 }
 
-export type WriteActionAffectedItem = {
-    item_pk:PrimaryKeyValue
-}
-export type FailedWriteActionAffectedItem<T extends Record<string, any>> = WriteActionAffectedItem & {
-    item: T,
-    error_details: WriteCommonError[]
-}
+// ─── Error Types ───
 
 /**
- * The most typical errors for writing actions. 
+ * Categorised error from a write action. Discriminated union on `type`.
+ *
+ * @example
+ * if (error.type === 'schema') console.log(error.issues);
  */
-export type WriteCommonError = 
-    {type: 'custom', message?: string} | 
+export type WriteActionError =
+    {type: 'custom', message?: string} |
     {
         type: 'schema',
         issues: ZodIssue[],
         /** The item that was tested in the schema. It should be the same as the reported failed_item, but this removes doubt. */
         tested_item?: any,
         serialised_schema?: TreeNode
-    } | 
+    } |
     {
         type: 'missing_key',
         primary_key: string | number | symbol
-    } | 
+    } |
     {
         type: 'update_altered_key',
         primary_key: string | number | symbol
-    } | 
+    } |
     {
         type: 'create_duplicated_key',
         primary_key: string | number | symbol
-    } | 
+    } |
     {
         type: 'permission_denied',
         reason: 'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email' | 'not-authenticated'
     };
 
 /**
- * A single `WriteAction` that failed. 
- * 
- * 
- * If supported, it includes the items/objects it modified.
+ * A `WriteActionError` enriched with the item context where the error occurred.
+ *
+ * @example
+ * const ctx: WriteActionErrorContext<MyItem> = { type: 'missing_key', primary_key: 'id', item_pk: '123', item: myItem };
  */
-export type FailedWriteAction<T extends Record<string, any> = Record<string, any>> = {
-    action: WriteAction<T>,
-    /**
-     * The cause of the failure. There are potentially several (although this is unlikely).
-     * The first entry should be the root cause of the failure. 
-     */
-    error_details: WriteCommonError[],
+export type WriteActionErrorContext<T extends Record<string, any> = Record<string, any>> = WriteActionError & {
+    item_pk?: PrimaryKeyValue;
+    item?: T;
+};
 
-    /**
-     * It's recoverable if it's a temporary problem like a network issue; and unrecoverable if it can never succeed (e.g. the update would break the owner permissions)
-     */
-    unrecoverable?: boolean,
+// ─── Affected Items ───
 
-    /**
-     * Don't retry until this time. 
-     */
-    back_off_until_ts?: number,
+/**
+ * An item affected by a write action. Unified type for both success and failure outcomes.
+ *
+ * @example
+ * const affected: WriteActionAffectedItem<MyItem> = { item_pk: '123', item: myItem };
+ */
+export type WriteActionAffectedItem<T extends Record<string, any> = Record<string, any>> = {
+    item_pk: PrimaryKeyValue;
+    item?: T;
+};
 
-    /**
-     * Actions are applied sequentially, so a common cause of failure is that an earlier action failed (and that needs to be remedied, then this action might work). 
-     * This tells you that initial failing action. 
-     */
-    blocked_by_action_uuid?: string,
+// ─── Per-Action Outcomes (discriminated union on `ok`) ───
 
-    /**
-     * Optional. The items affected by this failed action. 
-     */
-    affected_items?: FailedWriteActionAffectedItem<T>[]
-
+/**
+ * A write action that completed successfully.
+ *
+ * @example
+ * if (outcome.ok) outcome.affected_items?.[0]?.item_pk;
+ */
+export type WriteActionOutcomeOk<T extends Record<string, any> = Record<string, any>> = {
+    ok: true;
+    action: WriteAction<T>;
+    affected_items?: WriteActionAffectedItem<T>[];
 };
 
 /**
- * A single `WriteAction` that was successful. 
- * 
- * If supported, it includes the items/objects it modified.
+ * A write action that failed. `errors` is always present with at least one entry.
+ *
+ * @example
+ * if (!outcome.ok) outcome.errors[0].type; // fully narrowed
  */
-export type SuccessfulWriteAction<T extends Record<string, any>> = {
-    action: WriteAction<T>,
-    affected_items?: WriteActionAffectedItem[]
+export type WriteActionOutcomeFailed<T extends Record<string, any> = Record<string, any>> = {
+    ok: false;
+    action: WriteAction<T>;
+    affected_items?: WriteActionAffectedItem<T>[];
+    /** At least one error that caused the failure. */
+    errors: WriteActionErrorContext<T>[];
+    /** True if the action can never succeed (e.g. schema violation, permission denied). */
+    unrecoverable?: boolean;
+    /** Don't retry until this timestamp. */
+    back_off_until_ts?: number;
+    /** An earlier action failed, blocking this one. */
+    blocked_by_action_uuid?: string;
+};
+
+/**
+ * Outcome of a single write action. Discriminated union on `ok`.
+ *
+ * @example
+ * if (!outcome.ok) outcome.errors[0].type; // narrowed to WriteActionOutcomeFailed
+ */
+export type WriteActionOutcome<T extends Record<string, any> = Record<string, any>> =
+    WriteActionOutcomeOk<T> | WriteActionOutcomeFailed<T>;
+
+// ─── Top-Level Result ───
+
+/**
+ * Result of applying write actions. NOT a discriminated union — `actions` and other data
+ * are always accessible. `ok` is informational.
+ *
+ * Use `getFailedActions()` / `getSuccessfulActions()` for filtered, narrowed access.
+ *
+ * @example
+ * if (!result.ok) console.log(result.error?.message);
+ * result.actions.forEach(a => { if (!a.ok) a.errors[0].type; });
+ */
+export type WriteResult<T extends Record<string, any> = Record<string, any>> = {
+    ok: boolean;
+    /** All action outcomes in execution order. */
+    actions: WriteActionOutcome<T>[];
+    /** Lightweight summary; only present when `ok` is false. */
+    error?: { message: string };
+};
+
+// ─── Helper Functions ───
+
+/**
+ * Filter for failed action outcomes from a `WriteResult`.
+ *
+ * @example
+ * const failures = getFailedActions(result);
+ * if (failures.length) failures[0].errors[0].type;
+ */
+export function getFailedActions<T extends Record<string, any>>(result: WriteResult<T>): WriteActionOutcomeFailed<T>[] {
+    return result.actions.filter((a): a is WriteActionOutcomeFailed<T> => !a.ok);
 }
 
-
 /**
- * Having been given multiple `WhereFilterDefinitions`, this represents the union of them.
+ * Filter for successful action outcomes from a `WriteResult`.
+ *
+ * @example
+ * const successes = getSuccessfulActions(result);
+ * successes.forEach(s => console.log(s.action.uuid));
  */
-export type CombineWriteActionsWhereFiltersResponse<T extends Record<string, any>> = {status: 'ok', filter: WhereFilterDefinition<T> | undefined} | SerializableCommonError & {status: 'error', failed_actions: FailedWriteAction<T>[]};
-
-/**
- * General success for actions. 
- * 
- * It's implied all actions succeeded.
- */
-export type WriteActionsResponseOk = {
-    status: 'ok'
-}
-/**
- * Not all actions could complete. 
- * 
- * It's expected that the combination of `successful_actions` and `failed_actions` includes _all_ actions requested.
- */
-export type WriteActionsResponseError<T extends Record<string, any>> = SerializableCommonError & {
-    status: 'error',
-    /**
-     * The actions that succeeded, if any. 
-     * 
-     * Note in the case of an error: 
-     * - `applyWritesToItems` will always fail all subsequent actions after the first failure, to prevent them being applied out of order.
-     * - It may fail all of them if any error (see `allow_partial_success` on the options)
-     * 
-     */
-    successful_actions: SuccessfulWriteAction<T>[],
-
-    /**
-     * The actions that failed, and the reason why. 
-     */
-    failed_actions: FailedWriteAction<T>[]
+export function getSuccessfulActions<T extends Record<string, any>>(result: WriteResult<T>): WriteActionOutcomeOk<T>[] {
+    return result.actions.filter((a): a is WriteActionOutcomeOk<T> => a.ok);
 }
 
 /**
- * Either all actions succeeded, or there was an error (in which case it tells you if any succeeded, and which failed).
+ * Flatten all errors across all failed actions.
+ *
+ * @example
+ * const allErrors = getAllErrors(result);
+ * allErrors.forEach(e => console.log(e.type, e.item_pk));
  */
-export type WriteActionsResponse<T extends Record<string, any>> = WriteActionsResponseOk | WriteActionsResponseError<T>;
+export function getAllErrors<T extends Record<string, any>>(result: WriteResult<T>): WriteActionErrorContext<T>[] {
+    return getFailedActions(result).flatMap(a => a.errors);
+}

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { WriteAction, WriteActionPayloadArrayScope } from "./types.js";
-import { makeWriteActionSchema, WriteActionsResponseSchema } from "./write-action-schemas.ts";
+import { makeWriteActionSchema, WriteResultSchema } from "./write-action-schemas.ts";
 
 
 describe('write-actions type check', () => {
@@ -131,8 +131,8 @@ describe('write-actions type check', () => {
     })
 
 
-    test('WriteActionsResponseSchema', () => {
-        const result = WriteActionsResponseSchema.safeParse({status: 'ok'});
+    test('WriteResultSchema', () => {
+        const result = WriteResultSchema.safeParse({ok: true, actions: []});
         expect(result.success).toBe(true);
     })
 })

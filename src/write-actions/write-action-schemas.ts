@@ -49,11 +49,44 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.AnyZodObject) {
         where: WhereFilterSchema,
     });
 
+    const WritePayloadAddToSetSchema = z.object({
+        type: z.literal('add_to_set'),
+        path: z.string(),
+        items: z.array(z.any()),
+        unique_by: z.enum(['deep_equals', 'pk']),
+        where: WhereFilterSchema,
+    });
+
+    const WritePayloadPushSchema = z.object({
+        type: z.literal('push'),
+        path: z.string(),
+        items: z.array(z.any()),
+        where: WhereFilterSchema,
+    });
+
+    const WritePayloadPullSchema = z.object({
+        type: z.literal('pull'),
+        path: z.string(),
+        items_where: z.union([WhereFilterSchema, z.array(z.any())]),
+        where: WhereFilterSchema,
+    });
+
+    const WritePayloadIncSchema = z.object({
+        type: z.literal('inc'),
+        path: z.string(),
+        amount: z.number(),
+        where: WhereFilterSchema,
+    });
+
     const WritePayloadSchema = z.union([
         WritePayloadCreateSchema,
         WritePayloadUpdateSchema,
         WritePayloadDeleteSchema,
         WritePayloadArrayCreateSchema,
+        WritePayloadAddToSetSchema,
+        WritePayloadPushSchema,
+        WritePayloadPullSchema,
+        WritePayloadIncSchema,
     ]);
 
     const WriteActionSchema = z.object({

@@ -1,4 +1,4 @@
-import type { WritePayloadArrayScope, WritePayloadUpdate, WritePayloadDelete, WriteOutcomeFailed, WriteOutcomeOk, WriteResult, WriteErrorContext } from './types.ts';
+import type { WritePayloadArrayScope, WritePayloadUpdate, WritePayloadDelete, WritePayloadAddToSet, WritePayloadPush, WritePayloadPull, WritePayloadInc, WriteOutcomeFailed, WriteOutcomeOk, WriteResult, WriteErrorContext } from './types.ts';
 import type { DotPropPathToObjectArraySpreadingArrays } from '../dot-prop-paths/types.ts';
 
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WritePayloadUpdate to.... data: Nullable<Partial<T>>
@@ -11,8 +11,8 @@ export function isWriteActionArrayScopePayload<T extends Record<string, any> = R
     return typeof x==='object' && !!x && "type" in x && x.type==='array_scope';
 }
 
-export function isUpdateOrDeleteWritePayload<T extends Record<string, any>>(x: unknown): x is WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T>{
-    return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete');
+export function isUpdateOrDeleteWritePayload<T extends Record<string, any>>(x: unknown): x is WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T> | WritePayloadAddToSet<T> | WritePayloadPush<T> | WritePayloadPull<T> | WritePayloadInc<T> {
+    return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete' || x.type==='add_to_set' || x.type==='push' || x.type==='pull' || x.type==='inc');
 }
 
 /**

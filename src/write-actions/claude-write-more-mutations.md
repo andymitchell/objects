@@ -987,14 +987,123 @@ Update the `Implementation Plan` with any agreed changes.
 
 **Changes made:** See "Our Response" in the Gemini critique section. Key changes: bidirectional number guard, tuple guard, mapped-type-to-union for all array mutations, conditional `items_where` for scalar/object pull, DDL path resolution helper, WriteStrategy JSDoc comments. Rejected: WriteStrategy extension, GrowSet integration, file consolidation.
 
-# [ ] Phase 6
+# [x] Phase 6
 
-Implement the plan in `Implementation Plan`. 
+Implement the plan in `Implementation Plan`.
 
-Where it makes sense aim for a red/green TDD process. Expand standardTests, using its current structural philosphy (but add to it), to handle these new tests. 
+Where it makes sense aim for a red/green TDD process. Expand standardTests, using its current structural philosphy (but add to it), to handle these new tests.
 
-# [ ] Phase 7
+**Implemented files:**
+- `src/dot-prop-paths/types.ts` — Added `ArrayProperty<T>`, `ArrayElement<T,P>`, `NumberProperty<T>` type helpers
+- `src/dot-prop-paths/index.ts` — Exported the 3 new type helpers
+- `src/write-actions/types.ts` — Added `WritePayloadAddToSet`, `WritePayloadPush`, `WritePayloadPull`, `WritePayloadInc` types; widened `WritePayload` union
+- `src/write-actions/helpers.ts` — Extended `isUpdateOrDeleteWritePayload` guard for new types
+- `src/write-actions/write-action-schemas.ts` — Added 4 Zod schemas for runtime validation
+- `src/write-actions/index.ts` — Exported 4 new payload types
+- `src/write-actions/applyWritesToItems/helpers/mutations/deepEquals.ts` — Structural equality utility
+- `src/write-actions/applyWritesToItems/helpers/mutations/resolveDdlListRules.ts` — DDL path resolution for scoped paths
+- `src/write-actions/applyWritesToItems/helpers/mutations/applyAddToSet.ts` — addToSet handler (deep_equals + pk modes)
+- `src/write-actions/applyWritesToItems/helpers/mutations/applyPush.ts` — push handler
+- `src/write-actions/applyWritesToItems/helpers/mutations/applyPull.ts` — pull handler (WhereFilter + value list modes)
+- `src/write-actions/applyWritesToItems/helpers/mutations/applyInc.ts` — inc handler
+- `src/write-actions/applyWritesToItems/helpers/mutations/index.ts` — barrel export
+- `src/write-actions/applyWritesToItems/applyWritesToItems.ts` — 4 new switch cases with lazy cloning for referential stability
+- `src/write-actions/standardTests.ts` — `FlatWithSubItems` schema/DDL + 40 new standard tests in sections 1.5–1.9
+- `src/write-actions/applyWritesToItems/applyWritesToItems.test.ts` — 4 implementation-specific tests (immutability, referential stability, Immer compat)
 
-How would we add UPSERT to the system? It would need a where-filter for collision detection? What are the consequences (changes, maintenance) of this add? 
+**Test results:** 1002 tests pass (131 in write-actions, up from 87), all 20 test files green.
 
-Suppose the underlying implementation simply didn't support UPSERT (e.g. it's a data library without upsert mechanics)... is it *always* possible to expand an UPSERT into other conditional WriteActions to compensate (e.g. run a CREATE but don't throw if exists, then run UPDATE). I.e. it's slower but can workaround as fallback? 
+# [x] Phase 7
+
+How would we add UPSERT to the system? It would need a where-filter for collision detection? What are the consequences (changes, maintenance) of this add?
+
+Suppose the underlying implementation simply didn't support UPSERT (e.g. it's a data library without upsert mechanics)... is it *always* possible to expand an UPSERT into other conditional WriteActions to compensate (e.g. run a CREATE but don't throw if exists, then run UPDATE). I.e. it's slower but can workaround as fallback?
+
+## Analysis
+
+### Near-Miss: `duplicate_create_recovery: 'always-update'`
+
+The system almost has UPSERT already. When `always-update` is enabled, a CREATE hitting a duplicate PK silently converts to UPDATE. But it differs from true UPSERT:
+
+| | `always-update` | True UPSERT |
+|---|---|---|
+| Collision detection | PK only | PK or where-filter |
+| Granularity | Batch-level (all CREATEs) | Per-action |
+| Create vs Update data | Same for both paths | Could differ |
+| Intent | Accident recovery (defensive) | Deliberate semantics |
+
+### Proposed Type
+
+```ts
+type WritePayloadUpsert<T extends Record<string, any>> = {
+    type: 'upsert',
+    data: T,                          // Full object for CREATE path
+    update_data?: Partial<Pick<T, NonObjectArrayProperty<T>>>,  // If omitted, uses data (minus PK)
+    where: WhereFilterDefinition<T>,  // Collision detection
+    method?: UpdatingMethod,          // 'merge' | 'assign' for update path
+}
+```
+
+`where` is the collision detector:
+- **0 matches** → CREATE using `data`
+- **1 match** → UPDATE using `update_data ?? data` (minus PK)
+- **2+ matches** → Error (UPSERT implies singular intent; use UPDATE for multi-item)
+
+### Consequences
+
+**Changes required:**
+
+| File | Change | Effort |
+|---|---|---|
+| `types.ts` | +1 payload type, widen union | Small |
+| `write-action-schemas.ts` | +1 Zod schema | Small |
+| `helpers.ts` | Extend guard | Trivial |
+| `index.ts` | Export | Trivial |
+| `applyWritesToItems.ts` | New switch case — check items, branch on match count | Medium |
+| `standardTests.ts` | ~15-20 new tests | Medium |
+| SQL adapters (future) | `INSERT...ON CONFLICT` (native in PG + SQLite) | Small |
+
+**Maintenance cost**: Low-medium. Logic is conditional dispatch to existing CREATE + UPDATE handlers — no new execution mode. Main complexity:
+1. 2+ match policy (recommend: error)
+2. PK tracking interaction — UPSERT creating should add to `existingIds` like CREATE does
+3. `WriteStrategy` reuse — calls `create_handler` or `update_handler` depending on path; no new handler
+4. Atomic mode — straightforward, same rollback
+
+### Can UPSERT Always Be Decomposed?
+
+**Yes — always.** Within `applyWritesToItems`, the function has exclusive access to the item array. No race window exists, so "check → create or update" is always safe.
+
+**Decomposition approaches:**
+
+| Approach | Works? | Atomic? | Where-filter? | Race-safe? |
+|---|---|---|---|---|
+| `always-update` recovery | Yes | Yes (within batch) | PK only | Yes |
+| CREATE + UPDATE sequence in batch | Yes | Yes (within batch) | PK only | Yes |
+| Read-then-branch (2 calls) | Yes | No | Yes | No (TOCTOU) |
+| Native UPSERT payload | Yes | Yes | Yes | Yes |
+
+**Batch decomposition detail**: Send `[CREATE(data, recovery:'always-update'), UPDATE(where, data)]`. If item doesn't exist, CREATE succeeds and UPDATE no-ops (where matches nothing before create is committed — but actually within `applyWritesToItems` the CREATE adds to the items array first, so the UPDATE would also fire). This can be managed by making the UPDATE's where-filter narrow enough, or by relying on idempotent update data.
+
+**SQL backends**: Both PostgreSQL (`INSERT...ON CONFLICT DO UPDATE`) and SQLite (`INSERT OR REPLACE` / `ON CONFLICT`) support native UPSERT. Decomposition into `SELECT + INSERT/UPDATE` within a transaction is always possible as fallback.
+
+### Why UPSERT Is Not Just a Convenience
+
+The closest existing mechanism (`duplicate_create_recovery: 'always-update'`) has three gaps that make true UPSERT inexpressible, not merely inconvenient:
+
+1. **Batch-level, not per-action.** `duplicate_create_recovery` is a setting on the entire `applyWritesToItems` call. If a batch has 10 CREATEs and only 1 should be UPSERT, there's no way to distinguish them. All CREATEs get the same recovery mode.
+
+2. **PK-only collision detection.** Collision is detected by primary key match only. "Upsert where `email = 'x@y.com'`" (when `email` isn't the PK) is a genuine semantic gap — not expressible at all.
+
+3. **No separate create vs update data.** With `always-update`, the converted UPDATE uses the CREATE's `data` (minus PK). You can't say "if creating, set defaults A/B/C; if updating, only change field X."
+
+The two-action decomposition (`CREATE` + `UPDATE` in sequence) doesn't work cleanly either:
+- If item exists: CREATE fails/blocks unless recovery mode is set — which is batch-level (back to problem 1).
+- If item doesn't exist: UPDATE silently no-ops, CREATE succeeds — but the exists case still requires the batch-level flag.
+
+### Verdict
+
+UPSERT fills real gaps in expressiveness. Worth adding because:
+1. Per-action upsert intent (vs batch-level recovery mode that applies to all CREATEs)
+2. Where-filter collision detection (vs PK-only)
+3. Separate create/update data paths
+4. SQL backends map it to native `ON CONFLICT` for atomicity + performance

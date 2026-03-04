@@ -39,6 +39,10 @@ export {
 export type {
     WriteAction,
     WritePayload,
+    WritePayloadAddToSet,
+    WritePayloadPush,
+    WritePayloadPull,
+    WritePayloadInc,
     WriteError,
     CorePermissionDeniedReason,
     WriteErrorContext,

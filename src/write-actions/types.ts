@@ -1,5 +1,5 @@
 import { type ZodIssue } from "zod";
-import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, NonObjectArrayProperty } from "../dot-prop-paths/types.js";
+import type { ArrayElement, ArrayProperty, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, NonObjectArrayProperty, NumberProperty } from "../dot-prop-paths/types.js";
 import type { UpdatingMethod, WhereFilterDefinition } from "../where-filter/types.js"
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
 import type { TreeNode } from "../dot-prop-paths/zod.ts";
@@ -29,7 +29,48 @@ export type WritePayloadDelete<T extends Record<string, any>> = {
     type: 'delete',
     where: WhereFilterDefinition<T>
 }
-export type WritePayload<T extends Record<string, any>> = WritePayloadCreate<T> | WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T>;
+
+/** Mapped-type-to-union: one variant per array property. Discriminated on `path`. */
+export type WritePayloadAddToSet<T extends Record<string, any>> = {
+    [P in ArrayProperty<T>]: {
+        type: 'add_to_set',
+        path: P,
+        items: ArrayElement<T, P>[],
+        unique_by: 'deep_equals' | 'pk',
+        where: WhereFilterDefinition<T>
+    }
+}[ArrayProperty<T>]
+
+export type WritePayloadPush<T extends Record<string, any>> = {
+    [P in ArrayProperty<T>]: {
+        type: 'push',
+        path: P,
+        items: ArrayElement<T, P>[],
+        where: WhereFilterDefinition<T>
+    }
+}[ArrayProperty<T>]
+
+/** Pull: conditional items_where based on array element type.
+ *  Object arrays → WhereFilterDefinition. Scalar arrays → value list (like $pullAll). */
+export type WritePayloadPull<T extends Record<string, any>> = {
+    [P in ArrayProperty<T>]: {
+        type: 'pull',
+        path: P,
+        items_where: ArrayElement<T, P> extends Record<string, any>
+            ? WhereFilterDefinition<ArrayElement<T, P>>
+            : ArrayElement<T, P>[],
+        where: WhereFilterDefinition<T>
+    }
+}[ArrayProperty<T>]
+
+export type WritePayloadInc<T extends Record<string, any>> = {
+    type: 'inc',
+    path: NumberProperty<T>,
+    amount: number,
+    where: WhereFilterDefinition<T>
+}
+
+export type WritePayload<T extends Record<string, any>> = WritePayloadCreate<T> | WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T> | WritePayloadAddToSet<T> | WritePayloadPush<T> | WritePayloadPull<T> | WritePayloadInc<T>;
 /**
  * An instruction to modify an object, using CRUD-inspired verbs. 
  * 

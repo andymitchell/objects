@@ -14,6 +14,7 @@ import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.js";
 import { type Draft, current, isDraft } from "immer";
 import { type IUser } from "../auth/types.js";
 import { checkWritePermission } from "./helpers/checkPermission.js";
+import { applyAddToSet, applyPush, applyPull, applyInc } from "./helpers/mutations/index.ts";
 
 
 
@@ -361,6 +362,57 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                                     deleted = true;
                                     existingIds.delete(pkValue);
                                     break;
+                                // New mutation types bypass WriteStrategy (same as delete/array_scope).
+                                // Future work may extend WriteStrategy if custom strategies need to intercept these.
+                                case 'add_to_set': {
+                                    // Read from current state (mutableUpdatedItem if already cloned, else original)
+                                    const addSource = mutableUpdatedItem ?? item;
+                                    const addResult = applyAddToSet(addSource, action.payload.path as string, action.payload.items as unknown[], action.payload.unique_by, ddl);
+                                    if ('error' in addResult) {
+                                        failureTracker.report(action, item, addResult.error);
+                                    } else if (addResult.changed) {
+                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = addResult.value;
+                                        failureTracker.testSchema(action, mutableUpdatedItem);
+                                    }
+                                    break;
+                                }
+                                case 'push': {
+                                    const pushSource = mutableUpdatedItem ?? item;
+                                    const pushResult = applyPush(pushSource, action.payload.path as string, action.payload.items as unknown[]);
+                                    if ('error' in pushResult) {
+                                        failureTracker.report(action, item, pushResult.error);
+                                    } else if (pushResult.changed) {
+                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = pushResult.value;
+                                        failureTracker.testSchema(action, mutableUpdatedItem);
+                                    }
+                                    break;
+                                }
+                                case 'pull': {
+                                    const pullSource = mutableUpdatedItem ?? item;
+                                    const pullResult = applyPull(pullSource, action.payload.path as string, action.payload.items_where as any);
+                                    if ('error' in pullResult) {
+                                        failureTracker.report(action, item, pullResult.error);
+                                    } else if (pullResult.changed) {
+                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = pullResult.value;
+                                        failureTracker.testSchema(action, mutableUpdatedItem);
+                                    }
+                                    break;
+                                }
+                                case 'inc': {
+                                    const incSource = mutableUpdatedItem ?? item;
+                                    const incResult = applyInc(incSource, action.payload.path as string, action.payload.amount);
+                                    if ('error' in incResult) {
+                                        failureTracker.report(action, item, incResult.error);
+                                    } else if (incResult.changed) {
+                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = incResult.value;
+                                        failureTracker.testSchema(action, mutableUpdatedItem);
+                                    }
+                                    break;
+                                }
                             }
                         }
 

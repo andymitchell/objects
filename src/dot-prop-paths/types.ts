@@ -174,3 +174,22 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
 
 export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? EnsureRecord<ElementType> : never;
 
+
+/** Keys of T whose value is any variable-length array (scalar or object). Excludes tuples. */
+export type ArrayProperty<T> = {
+    [P in keyof T]: NonNullable<T[P]> extends Array<any>
+        ? number extends NonNullable<T[P]>['length'] ? P : never  // exclude tuples
+        : never
+}[keyof T];
+
+/** Element type of the array at key P. */
+export type ArrayElement<T extends Record<string, any>, P extends keyof T> =
+    NonNullable<T[P]> extends Array<infer U> ? U : never;
+
+/** Keys of T whose value is generic number (excludes literal types like 1 | 2). */
+export type NumberProperty<T> = {
+    [P in keyof T]: NonNullable<T[P]> extends number
+        ? number extends NonNullable<T[P]> ? P : never  // bidirectional: excludes literals
+        : never
+}[keyof T];
+

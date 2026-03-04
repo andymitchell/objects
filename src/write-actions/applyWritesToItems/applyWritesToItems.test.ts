@@ -335,6 +335,76 @@ describe('writeToItemsArray', () => {
         // 5. Regression: Immer-specific edge cases
         // ───────────────────────────────────────────────────────────
 
+        // ───────────────────────────────────────────────────────────
+        // 5b. Mutation-specific referential & immutability checks
+        // ───────────────────────────────────────────────────────────
+
+        describe('5b. Mutation referential stability & immutability', () => {
+
+            test('push: original array not mutated (immutable mode)', () => {
+                const item: Obj = { id: '1', arr_items: ['a', 'b'] };
+                const originalArrRef = item.arr_items;
+                const items = [item];
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'push', path: 'arr_items', items: ['c'], where: { id: '1' } } }],
+                    items, ObjSchema, ddl,
+                );
+                expect(result.ok).toBe(true);
+                // Original item's array should be untouched
+                expect(item.arr_items).toBe(originalArrRef);
+                expect(item.arr_items).toEqual(['a', 'b']);
+                // Result should have the new array
+                expect(result.changes.final_items[0]!.arr_items).toEqual(['a', 'b', 'c']);
+            });
+
+            test('push with empty items: referential stability (no change)', () => {
+                const item: Obj = { id: '1', arr_items: ['a'] };
+                const items = [item];
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'push', path: 'arr_items', items: [], where: { id: '1' } } }],
+                    items, ObjSchema, ddl,
+                );
+                expect(result.ok).toBe(true);
+                // Since nothing changed, the item reference should be preserved
+                expect(result.changes.final_items[0]).toBe(item);
+            });
+
+            test('inc: original item not mutated (immutable mode)', () => {
+                const ObjWithCountSchema = z.object({
+                    id: z.string(),
+                    count: z.number().optional(),
+                }).strict();
+                type ObjWithCount = z.infer<typeof ObjWithCountSchema>;
+                const ddlCount: DDL<ObjWithCount> = {
+                    version: 1,
+                    lists: { '.': { primary_key: 'id', order_by: { key: 'id' } } },
+                    permissions: { type: 'none' },
+                };
+
+                const item: ObjWithCount = { id: '1', count: 10 };
+                const items = [item];
+                const result = writeToItemsArray(
+                    [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'inc', path: 'count', amount: 5, where: { id: '1' } } }],
+                    items, ObjWithCountSchema, ddlCount,
+                );
+                expect(result.ok).toBe(true);
+                expect(item.count).toBe(10); // untouched
+                expect(result.changes.final_items[0]!.count).toBe(15);
+            });
+
+            test('Immer compatibility: push inside produce', () => {
+                const items: Obj[] = [{ id: '1', arr_items: ['a'] }];
+                const finalItems = produce(items, draft => {
+                    writeToItemsArray(
+                        [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'push', path: 'arr_items', items: ['b'], where: { id: '1' } } }],
+                        draft as Obj[], ObjSchema, ddl, undefined, { mutate: true },
+                    );
+                });
+                expect(finalItems[0]!.arr_items).toEqual(['a', 'b']);
+                expect(finalItems).not.toBe(items);
+            });
+        });
+
         describe('5. Immer-specific edge cases', () => {
 
             test('Immer flags objects even if no material change', () => {

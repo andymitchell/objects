@@ -47,21 +47,25 @@ export type ValueComparisonFlexi<T = any> =
     | ValueComparisonExists
     | ValueComparisonType
     | T;
-export type ArrayValueComparisonElemMatch<T = any>  = {$elemMatch: T extends Record<string, any>? WhereFilterDefinition<T> : ValueComparisonFlexi<T>};
+/** Internal: carries index-sig depth through recursive WhereFilterDefinition references. */
+type WhereFilterCore<T extends Record<string, any>, ISD extends number> =
+    PartialObjectFilter<T, ISD> | LogicFilter<T, ISD>;
+
+export type ArrayValueComparisonElemMatch<T = any, ISD extends number = 2>  = {$elemMatch: T extends Record<string, any>? WhereFilterCore<T, ISD> : ValueComparisonFlexi<T>};
 export type ArrayValueComparisonAll<T = any> = { $all: T[] };
 export type ArrayValueComparisonSize = { $size: number };
-export type ArrayValueComparison<T = any> = ArrayValueComparisonElemMatch<T> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
+export type ArrayValueComparison<T = any, ISD extends number = 2> = ArrayValueComparisonElemMatch<T, ISD> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
 
-type ArrayElementFilter<T = any> = (T extends Record<string, any>? WhereFilterDefinition<T> :
-    T extends string | number ? T : 
-    never) | ArrayValueComparison<T>
-export type ArrayFilter<T extends []> = ArrayElementFilter<T[number]> | T;
+type ArrayElementFilter<T = any, ISD extends number = 2> = (T extends Record<string, any>? WhereFilterCore<T, ISD> :
+    T extends string | number ? T :
+    never) | ArrayValueComparison<T, ISD>
+export type ArrayFilter<T extends [], ISD extends number = 2> = ArrayElementFilter<T[number], ISD> | T;
 
-export type PartialObjectFilter<T extends Record<string, any>> = Partial<{
-    [P in DotPropPathsIncArrayUnion<T>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
-        ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>>
+export type PartialObjectFilter<T extends Record<string, any>, ISD extends number = 2> = Partial<{
+    [P in DotPropPathsIncArrayUnion<T, ISD>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
+        ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>, ISD>
         : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>>
 }>;
 
@@ -73,8 +77,8 @@ export type MatchJavascriptObjectWithFilter = <T extends Record<string, any> = R
 
 
 
-export type LogicFilter<T extends Record<string, any>> = {
-    [K in WhereFilterLogicOperatorsTyped]?: WhereFilterDefinition<T>[];
+export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> = {
+    [K in WhereFilterLogicOperatorsTyped]?: WhereFilterCore<T, ISD>[];
 }
 
 /**
@@ -246,13 +250,55 @@ export type LogicFilter<T extends Record<string, any>> = {
  * inferring whether it's a logic filter or a partial object filter. To resolve this,
  * you can use type guards like `isLogicFilter` or `isPartialObjectFilter` to narrow
  * the type before accessing its properties.
+ *
+ * ---
+ * ## Index-signature depth limit
+ *
+ * When your schema contains index-signature types (e.g. `Record<string, X>`,
+ * `{[key: string]: JsonValue}`), dot-prop paths through those types are limited to
+ * **2 levels** of depth. This prevents IDE hangs caused by infinite template literal
+ * expansion (e.g. `${string}.${string}.${string}...`).
+ *
+ * If you get a type error on a deeply nested path through an index-signature type,
+ * you have two options:
+ *
+ * 1. Use `WhereFilterDefinitionDeep<T>` which defaults to 6 levels of index-sig depth,
+ *    or `WhereFilterDefinitionDeep<T, 4>` for a custom depth. Be aware that higher
+ *    depths may slow IDE responsiveness for schemas with recursive index-sig types
+ *    (e.g. `JsonValue`).
+ *
+ * 2. Use `// @ts-expect-error` to suppress the error on that line (weaker, as it
+ *    won't catch future regressions if the path becomes valid).
+ *
+ * Normal (non-index-sig) properties are always traversed to the full depth of 6
+ * regardless of this limit.
  */
 export type WhereFilterDefinition<T extends Record<string, any> = any> =
     PartialObjectFilter<T>
     |
     LogicFilter<T>;
 
-    
+/**
+ * Like {@link WhereFilterDefinition}, but allows deeper dot-prop paths through
+ * index-signature types (e.g. `Record<string, X>`, `{[key: string]: JsonValue}`).
+ *
+ * The second generic `IndexSigDepth` controls how many levels deep paths can go
+ * through index signatures (default: 6). Higher values give more precise typing
+ * but may slow IDE responsiveness for schemas with recursive index-sig types.
+ *
+ * @example
+ * // Default deep (6 levels through index sigs)
+ * const filter: WhereFilterDefinitionDeep<MySchema> = { 'data.nested.deep.path': 'value' };
+ *
+ * @example
+ * // Custom depth (4 levels)
+ * const filter: WhereFilterDefinitionDeep<MySchema, 4> = { 'data.nested.path': 'value' };
+ */
+export type WhereFilterDefinitionDeep<
+    T extends Record<string, any> = any,
+    IndexSigDepth extends number = 6
+> = WhereFilterCore<T, IndexSigDepth>;
+
 export type UpdatingMethod = 'merge' | 'assign';
 
 

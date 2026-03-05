@@ -7,7 +7,7 @@ import sqliteWhereClauseBuilder, { SqlitePropertyMapSchema } from './sqliteWhere
 import type { IPropertyMap, PreparedWhereClauseStatement, PreparedWhereClauseResult, WhereClauseError } from './whereClauseEngine.ts';
 import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
 import { isLogicFilter, isPartialObjectFilter } from './typeguards.ts';
-import type {  MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition} from './types.ts';
+import type {  MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep} from './types.ts';
 
 export {
     matchJavascriptObject,
@@ -28,6 +28,7 @@ export {
 export type {
     MatchJavascriptObject,
     WhereFilterDefinition,
+    WhereFilterDefinitionDeep,
     LogicFilter,
     PartialObjectFilter,
     PreparedWhereClauseStatement,

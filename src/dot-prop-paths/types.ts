@@ -32,19 +32,25 @@ This was working fine in a lot of code. But I got a  "Type instantiation is exce
 in the test 'handles complex discriminated unions with possibly infinite recursion [regression]'. 
 I added depth guards to Path below. 
 */
-type Path<T, Depth extends number = 6> = Depth extends 0 ? '' : T extends Array<any>
+type Path<T, Depth extends number = 6, ISD extends number = 2> = Depth extends 0 ? '' : T extends Array<any>
     ? never
     : T extends object
     ? {
         [K in keyof T]-?: K extends string | number
-        ? `${string & K}` | `${string & K}.${Path<NonNullable<T[K]>, Prev[Depth]>}` // Pass decremented depth
+        ? string extends K
+            ? ISD extends 0
+                ? `${string & K}` // Index-sig budget exhausted: just the key, no recursion
+                : `${string & K}` | `${string & K}.${Path<NonNullable<T[K]>, ISD, Prev[ISD]>}`
+            : number extends K
+                ? never // Numeric index sig: not useful for dot-prop paths
+                : `${string & K}` | `${string & K}.${Path<NonNullable<T[K]>, Prev[Depth], ISD>}`
         : never;
     }[keyof T]
     : '';
 
 export type RemoveTrailingDot<T> = T extends `${infer S}.` ? never : T;
-export type DotPropPathsUnion<T> = { [K in Path<T>]: RemoveTrailingDot<K> }[Path<T>];
-export type DotPropPathsIncArrayUnion<T extends Record<string,any>> = DotPropPathToObjectArraySpreadingArrays<T> | DotPropPathsUnion<T>;
+export type DotPropPathsUnion<T, ISD extends number = 2> = { [K in Path<T, 6, ISD>]: RemoveTrailingDot<K> }[Path<T, 6, ISD>];
+export type DotPropPathsIncArrayUnion<T extends Record<string,any>, ISD extends number = 2> = DotPropPathToObjectArraySpreadingArrays<T> | DotPropPathsUnion<T, ISD>;
 
 
 
@@ -148,25 +154,29 @@ type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];
 
 export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
     [K in keyof T]?: K extends string
-        ? NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
-            ? U extends object
-                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
-                : `${Prefix}${K}`
-            : T[K] extends object
-                ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`
-                : never
+        ? string extends K
+            ? never // Skip index-sig keys: can't enumerate array paths through an index signature
+            : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
+                ? U extends object
+                    ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
+                    : `${Prefix}${K}`
+                : T[K] extends object
+                    ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`
+                    : never
         : never;
 }[keyof T] : '';
 
 export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
     [K in keyof T]-?: K extends string
-        ? NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
-            ? U extends object // Check if the elements of array are objects
-                ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
-                : never // Exclude if the elements are not objects
-            : T[K] extends object
-                ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`
-                : never
+        ? string extends K
+            ? never // Skip index-sig keys: can't enumerate object-array paths through an index signature
+            : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
+                ? U extends object // Check if the elements of array are objects
+                    ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
+                    : never // Exclude if the elements are not objects
+                : T[K] extends object
+                    ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`
+                    : never
         : never;
 }[keyof T] : '';
 

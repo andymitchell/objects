@@ -2,7 +2,8 @@
 
 
 import type { EnsureRecord } from "../types.js";
-import type { PrimaryKeyValue } from "../utils/getKeyValue.js";
+
+type PrimaryKeyValue = string | number;
 
 
 export type DotPropPathsRecord<T extends Record<string, any>> = {
@@ -146,7 +147,7 @@ T extends unknown
 type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];
 
 export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
-    [K in keyof T]?: K extends string 
+    [K in keyof T]?: K extends string
         ? NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
             ? U extends object
                 ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
@@ -158,7 +159,7 @@ export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Dep
 }[keyof T] : '';
 
 export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
-    [K in keyof T]-?: K extends string 
+    [K in keyof T]-?: K extends string
         ? NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
             ? U extends object // Check if the elements of array are objects
                 ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`

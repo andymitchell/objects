@@ -1,10 +1,11 @@
 
 
+import type { Draft } from "immer";
 import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValueIncDiscrimatedUnions } from '../dot-prop-paths/types.js';
 import type { ValueComparisonRangeOperators, WhereFilterLogicOperators } from './consts.ts';
 
 
-import type { ObjOrDraft } from "./matchJavascriptObject.js";
+export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
 
 
 

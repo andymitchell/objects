@@ -1,7 +1,6 @@
-import type { Draft } from "immer";
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
-import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
+import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ObjOrDraft, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonRangeFlexi, isValueComparisonScalar } from "./typeguards.ts";
@@ -31,7 +30,7 @@ A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse 
 
 */
 
-export type ObjOrDraft<T extends Record<string, any>> = T | Draft<T>;
+export type { ObjOrDraft };
 
 /**
  * Checks if a single JavaScript object matches a given filter condition.

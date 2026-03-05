@@ -1163,6 +1163,24 @@ export function standardTests(testConfig: StandardTestConfig) {
                 );
                 expectOrAcknowledgeUnsupported(result, false);
             });
+
+            test('$not with $nin: passes when value is in excluded list', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $not: { $nin: ['Andy', 'Bob'] } } } as any,
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$not with $nin: fails when value is not in excluded list', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $not: { $nin: ['Bob', 'Carol'] } } } as any,
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
         });
 
         describe('$exists', () => {

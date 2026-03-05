@@ -25,8 +25,12 @@ export type ValueComparisonExists = { $exists: boolean };
 export type ValueComparisonType = { $type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' };
 export type ValueComparisonRegex = { $regex: string; $options?: string };
 export type ValueComparisonNot<T = any> = {
-    $not: ValueComparisonRange<T> | ValueComparisonContains | ValueComparisonNe<T>
-          | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonRegex
+    $not: ValueComparisonRange<T>
+          | (T extends string ? ValueComparisonContains : never)
+          | ValueComparisonNe<T>
+          | ValueComparisonIn<T>
+          | ValueComparisonNin<T>
+          | (T extends string ? ValueComparisonRegex : never)
 };
 
 export type ValueComparisonFlexi<T = any> =

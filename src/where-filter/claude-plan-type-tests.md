@@ -149,21 +149,7 @@ Use whichever mechanism best captures the intent for each case. Don't over-index
 
 * Do not fix/change/alter any actual types. I must provide my express approval for it.
 
-# Plan
-
-_Check the Phases off as you go. Stop after each phase to ask me whether to continue to the next phase. If you create files as part of completing a Phase, update the Phase with links to them and explain what they contain (so a future LLM can resume)._
-
-# [x] Phase 1
-
-Analyse the current types.test.ts and build a mental model of what it's testing. Categorise the existing tests by purpose:
-- **Spec coverage**: tests that verify a spec behavior at the type level
-- **Regression**: tests that guard against specific TypeScript edge cases (e.g. infinite recursion with complex generics)
-- **Consumer ergonomics**: tests about how devs consume the type (e.g. union narrowing with type guards)
-- **Known limitations**: tests that document things that *don't* work (using `@ts-ignore` or empty bodies in "TODO - desirable features")
-
-For each category, identify which tests are important to keep and document them under 'The Current types.test.ts important cases'. For "known limitations", recommend whether to keep as documentation, delete, or convert to tracked issues — then let me verify.
-
-For existing TypeScript depth/recursion regression tests: keep them as-is; don't expand this area.
+# How the Current types.test.ts works
 
 **Result**: Categorised all 17 tests across 4 categories:
 - **Spec coverage** (8 tests): basic key/value acceptance, `$gte`/`$contains` type checking, dot-prop paths, unknown key rejection, discriminated union properties. All KEEP.
@@ -173,9 +159,6 @@ For existing TypeScript depth/recursion regression tests: keep them as-is; don't
 
 Findings documented above under "The Current types.test.ts important cases" and "The WhereFilterDefinition spec".
 
-# [x] Phase 2
-
-Generate an implementation plan for how types.test.ts will be written from the ground up to verify that the types fully capture the intent of the spec.
 
 ## Type probe results — `ValueComparisonFlexi<T>` per type
 
@@ -194,9 +177,11 @@ Empirically verified via tsc. These are what the types _actually do_, which test
 | $exists | ✅ | ✅ | ✅ | ✅ |
 | $type | ✅ | ✅ | ✅ | ✅ |
 
-**Known type gap**: `ValueComparisonNot<T>` unconditionally includes `ValueComparisonContains` and `ValueComparisonRegex` in its inner union. So `{ $not: { $contains: 'x' } }` compiles for any T (boolean, number, object) even though it's semantically wrong for non-strings. Tests should document this gap.
+**FIXED**: `ValueComparisonNot<T>` now gates `ValueComparisonContains` and `ValueComparisonRegex` behind `T extends string`, matching `ValueComparisonFlexi<T>`. `$not` with `$contains`/`$regex` is now correctly rejected for non-string types.
 
-## Implementation plan — `describe` block hierarchy
+# Implementation Plan
+
+## `describe` block hierarchy
 
 Shared test type used throughout:
 ```ts
@@ -208,6 +193,9 @@ type TestObj = {
   tags: string[];
   scores: number[];
   addresses: { street: string; primary: boolean }[];
+  status: 'pending' | 'resolved' | 'rejected';
+  nickname?: string;
+  deletedAt: string | null;
 };
 ```
 
@@ -220,7 +208,7 @@ type TestObj = {
 - ✅ accepts multiple keys (implicit $and) (`{ name: 'Andy', age: 30 }`)
 - ❌ rejects unknown key (`{ unknown: 'x' }` → `@ts-expect-error`)
 - ❌ rejects wrong value type (`{ name: 1 }` → `@ts-expect-error`)
-- ✅ accepts discriminated union optional property _(from Phase 1: keep)_
+- ✅ accepts discriminated union optional property _(from `How the Current types.test.ts works`: keep)_
 
 ##### `describe('1b. Logic Filter')`
 - ✅ accepts `$and` with array of sub-filters
@@ -251,6 +239,7 @@ type TestObj = {
 - ✅ $not wrapping $regex
 - ✅ $exists
 - ✅ $type
+- ❌ rejects invalid $type string (`{ $type: 'function' }`) → `@ts-expect-error`
 
 ##### `describe('number properties')`
 - ✅ exact number
@@ -263,9 +252,7 @@ type TestObj = {
 - ✅ $in with number array
 - ✅ $nin with number array
 - ✅ $not wrapping range
-- ✅ $exists
-- ✅ $type
-- ⚠️ documents: `$not` leaks `$contains`/`$regex` (compiles but semantically wrong)
+- ❌ `$not` correctly rejects `$contains`/`$regex` (gated on `T extends string`) → `@ts-expect-error`
 
 ##### `describe('boolean properties')`
 - ✅ exact boolean (`true` / `false`)
@@ -276,9 +263,6 @@ type TestObj = {
 - ❌ rejects $ne (resolves to `never`) → `@ts-expect-error`
 - ❌ rejects $in (resolves to `never[]`) → `@ts-expect-error`
 - ❌ rejects $nin → `@ts-expect-error`
-- ✅ $exists
-- ✅ $type
-- ⚠️ documents: `$not` leaks `$contains`/`$regex`
 
 ##### `describe('object properties')`
 - ✅ exact object (deep equality) with correct shape
@@ -288,9 +272,20 @@ type TestObj = {
 - ❌ rejects $regex → `@ts-expect-error`
 - ❌ rejects $ne (never) → `@ts-expect-error`
 - ❌ rejects $in (never[]) → `@ts-expect-error`
-- ✅ $exists
-- ✅ $type
-- ⚠️ documents: `$not` leaks `$contains`/`$regex`
+
+##### `describe('literal union properties')`
+- ✅ exact literal value (`status: 'pending'`)
+- ❌ rejects non-member literal (`status: 'unknown'`) → `@ts-expect-error`
+- ✅ $in with literal union members (`{ $in: ['pending', 'resolved'] }`)
+- ✅ $ne with literal union member
+- ✅ range operators with literal union (string-based, so should work)
+
+##### `describe('optional and nullable properties')`
+- ✅ optional property: exact string match (`nickname: 'Bob'`)
+- ✅ optional property: `$exists` check (`nickname: { $exists: true }`)
+- ✅ nullable property: exact string match (`deletedAt: '2024-01-01'`)
+- ✅ nullable property: `$exists` check
+- ❌ optional property: rejects wrong type (`nickname: 1`) → `@ts-expect-error`
 
 #### `describe('3. Array comparisons')`
 
@@ -320,6 +315,7 @@ type TestObj = {
 ##### `describe('$size')`
 - ✅ accepts number (`{ $size: 2 }`)
 - ❌ rejects non-number → `@ts-expect-error`
+- ❌ rejects nested query (`{ $size: { $gt: 0 } }`) → `@ts-expect-error`
 
 #### `describe('4. Dot-prop paths and array spreading')`
 - ✅ accepts nested dot-prop path (`'contact.city': 'London'`)
@@ -331,34 +327,124 @@ type TestObj = {
 #### `describe('5. Type guards')`
 - ✅ `isPartialObjectFilter` narrows → can access property keys, `@ts-expect-error` on `$and`
 - ✅ `isLogicFilter` narrows → can access `$or`/`$and`/`$nor`, `@ts-expect-error` on property key
-- ✅ union not narrowed without guard → property access fails _(from Phase 1)_
-- ✅ type guards work on untyped `WhereFilterDefinition` (no generic) _(from Phase 1)_
+- ✅ union not narrowed without guard → property access fails _(from `How the Current types.test.ts works`)_
+- ✅ type guards work on untyped `WhereFilterDefinition` (no generic) _(from `How the Current types.test.ts works`)_
 
 #### `describe('Regression')`
-- Keep the complex discriminated unions / infinite recursion test **as-is** _(from Phase 1)_
+- Keep the complex discriminated unions / infinite recursion test **as-is** _(from `How the Current types.test.ts works`)_
 
 #### `describe('Known limitations (documentation)')`
-- Keep all 5 tests **as-is** _(from Phase 1)_
+- Keep all 5 tests **as-is** _(from `How the Current types.test.ts works`)_
 
-## Notes for Phase 3
+## Additional Notes
 
 - Use assertion style per test philosophy: `@ts-expect-error` for rejections, simple assignment for acceptances, `expectTypeOf` only where structural verification adds clarity (e.g. confirming array path resolves to ArrayFilter).
-- For the `$not` leak, use a comment like `// TYPE GAP: $not unconditionally allows $contains/$regex for all T` with the test showing it compiles (no `@ts-expect-error`).
-- Total estimated tests: ~75-85 (including ~17 kept from Phase 1).
+- The `$not` leak has been fixed in `types.ts` — `$contains`/`$regex` inside `$not` are now gated on `T extends string`. Use normal `@ts-expect-error` rejection tests for `$not` with `$contains`/`$regex` on non-string types.
+- Total estimated tests: ~70-80 (reduced `$exists`/`$type`/`$not` redundancy, added union/optional/nullable tests).
 
-**Result**: Plan generated. Hierarchy mirrors spec sections 1–5 plus regression/limitations. Exhaustive per-type operator matrix for `ValueComparisonFlexi<T>` (string, number, boolean, object). Array filtering covers all `ArrayFilter`/`ArrayValueComparison` branches. Type guard narrowing tested in both directions. `$not` type gap documented.
+# Implementation Plan Critique from Gemini
 
-# [ ] Phase 3
 
-Implement the plan above to write a new types.test.ts. Structure:
+### 1. Gaps in Operator/Type Coverage
+*   **Missing Union & Literal Types:** Your `TestObj` relies purely on wide primitives (`string`, `number`, `boolean`). You should add a string union (e.g., `status: 'active' | 'inactive' | 'archived'`) to ensure operators like `$in`, `$ne`, and exact matching don't break when `T` is a union of literals (a very common source of TS distribution bugs).
+*   **Missing Nullables & Optionals:** Add an optional property (e.g., `nickname?: string`) and a nullable property (e.g., `deletedAt: string | null`) to `TestObj`. Filter definitions often stumble over `| undefined` and `| null` when resolving mapped conditional types.
+*   **`$type` String Rejection:** You have positive tests for `$type`, but you should add a negative test ensuring invalid type strings are rejected (e.g., `{ $type: 'function' }` → `@ts-expect-error`).
+*   **`$size` Complexity Rejection:** Ensure `$size` rejects complex nested queries. Developers often intuitively try `{ $size: { $gt: 0 } }`. You should explicitly test that this produces a `@ts-expect-error` (since your types mandate exactly `number`).
 
-1. Create shared `TestObj` type at top of file
-2. Build describe blocks matching the hierarchy above
-3. Migrate all Phase 1 "keep" tests into appropriate sections (regression + known limitations as-is; spec/ergonomics tests reorganised into new hierarchy)
-4. Add all new tests from the plan
-5. Run `npx vitest run src/where-filter/types.test.ts` — collect any `@ts-expect-error` that TS doesn't actually error on (these indicate type gaps to document in Phase 4)
+### 2. Redundancies
+*   **Type-Agnostic Operators (`$exists`, `$type`):** Since `$exists` and `$type` do not depend on `T` (they don't use `T` in their definitions), testing them four times across `string`, `number`, `boolean`, and `object` describe blocks is redundant. You can test these once in a dedicated block or just under strings, and rely on TS's universal application.
+*   **Repeated Negative Conditional Checks:** You plan to test that `$not` correctly rejects `$contains/$regex` in the `number`, `boolean`, and `object` blocks. Testing this once in the `number` block is sufficient to prove the conditional type `(T extends string ? ... : never)` is evaluating correctly. Doing it three times adds bulk without adding type safety.
 
-# [ ] Phase 4
+### 3. Describe Hierarchy
+The hierarchy is excellent. It moves logically from the outer shell (Partial/Logic filters) to scalar values, to arrays, to paths, and finally to runtime guards. 
+*   **Minor Tweak:** Consider grouping `$in`, `$nin`, and `$ne` under a sub-describe block like `"set/equality operators"` inside the scalar blocks, just as you grouped "range operators". It keeps the blocks easily scannable.
+
+### 4. Structural / Organizational Issues & Observations
+*   **Type Design Oddity (Wait, are you sure?):** Your types (and test plan) strictly reject `$ne`, `$in`, and `$nin` for booleans and objects (they resolve to `never`). While your tests perfectly validate your types, *MongoDB actually allows these*. For example, `{ active: { $ne: true } }` or `{ category: { $in:[ { id: 1 }, { id: 2 } ] } }` are completely valid in Mongo. If this is an intentional limitation of your engine, the tests are perfect. If it's an oversight in the types, you'll need to update `ValueComparisonNe<T>` and `ValueComparisonIn<T>` to allow boolean/object matching, and flip these tests to positive acceptances.
+*   **File split:** With ~80 tests containing deeply nested type errors, `types.test.ts` might get noisy. Just ensure you group all the `@ts-expect-error` lines cleanly with comments indicating *why* they are failing so future maintainers don't accidentally "fix" the library types to make a negative test compile.
+
+**Summary of Actionable Additions to `TestObj`:**
+```typescript
+type TestObj = {
+  // ... existing fields ...
+  status: 'pending' | 'resolved' | 'rejected'; // Test literal unions
+  nickname?: string;                           // Test optionality
+  deletedAt: string | null;                    // Test nullability
+};
+```
+
+### Decisions on Gemini Critique
+
+#### AGREED — Changes Applied to Plan
+
+1. **Union & Literal Types**: Added `status: 'pending' | 'resolved' | 'rejected'` to `TestObj`. Added tests for exact match, `$in`, and `$ne` with literal unions under a new `describe('literal union properties')` subsection in section 2.
+
+2. **Nullables & Optionals**: Added `nickname?: string` and `deletedAt: string | null` to `TestObj`. Added tests for `$exists`, exact match, and operator behavior on optional/nullable types under a new `describe('optional and nullable properties')` subsection in section 2.
+
+3. **`$type` invalid string rejection**: Added `{ $type: 'function' }` → `@ts-expect-error` test under the `$type` test (in section 2, string properties).
+
+4. **`$size` complexity rejection**: Added `{ $size: { $gt: 0 } }` → `@ts-expect-error` test under `describe('$size')` in section 3.
+
+5. **Redundancy: `$exists`/`$type`**: Removed from `number`, `boolean`, and `object` property blocks. Tested once in `string properties` block only.
+
+6. **Redundancy: `$not` rejects `$contains/$regex`**: Tested once in `number properties` block only. Removed from `boolean` and `object` blocks.
+
+#### DISAGREED — No Changes
+
+7. **Group `$in/$nin/$ne` under sub-describe**: Over-engineering. Flat list within each type block is scannable enough.
+
+8. **`$ne/$in/$nin` reject booleans/objects is intentional**: Confirmed. Types gate on `T extends string ? ... : T extends number ? ... : never`. Tests correctly assert rejection. This is a deliberate design scope, not a bug.
+
+9. **File split**: Not needed until actually problematic.
+
+# Plan
+
+_Check the Phases off as you go. Stop after each phase to ask me whether to continue to the next phase. If you create files as part of completing a Phase, update the Phase with links to them and explain what they contain (so a future LLM can resume)._
+
+# [x] Phase 1
+
+Analyse the current types.test.ts and build a mental model of what it's testing. Categorise the existing tests by purpose:
+- **Spec coverage**: tests that verify a spec behavior at the type level
+- **Regression**: tests that guard against specific TypeScript edge cases (e.g. infinite recursion with complex generics)
+- **Consumer ergonomics**: tests about how devs consume the type (e.g. union narrowing with type guards)
+- **Known limitations**: tests that document things that *don't* work (using `@ts-ignore` or empty bodies in "TODO - desirable features")
+
+For each category, identify which tests are important to keep and document them under 'The Current types.test.ts important cases'. For "known limitations", recommend whether to keep as documentation, delete, or convert to tracked issues — then let me verify.
+
+For existing TypeScript depth/recursion regression tests: keep them as-is; don't expand this area.
+
+Output to `Implementation Plan`
+
+# [x] Phase 2
+
+Generate an implementation plan for how types.test.ts will be written from the ground up to verify that the types fully capture the intent of the spec.
+
+# [x] Phase 3
+
+Revisit the `Implementation Plan` and consider:
+- is it doing enough to check the basic Mongo-esque syntax for properties and their allowed value ranges against the schema? E.g. In a schema where {id:number}, {id: 1} is ok but {id: 'a'} fails. It has to check every possible value variation.
+- Look at recent git diffs... has anything changed that would affect WhereFilterDefinition types, and thus this plan?
+- Analyse the instruction for "For the `$not` leak, use a comment like `// TYPE GAP: $not unconditionally allows $contains/$regex for all T` with the test showing it compiles (no `@ts-expect-error`)." and check _why_ that's the thing being tested... then talk to me about it to verify
+
+**Result**:
+- **Coverage check**: Plan is comprehensive — covers all 10 operators × 4 type categories with positive/negative assertions, plus array operations, dot-prop paths, and logic operators.
+- **Git diffs**: No meaningful changes to `types.ts` in recent commits (just trailing whitespace). Plan remains valid.
+- **$not leak — FIXED**: `ValueComparisonNot<T>` was unconditionally including `ValueComparisonContains` and `ValueComparisonRegex`. Fixed by gating both on `T extends string`. The plan's `$not` tests now assert proper rejection (`@ts-expect-error`) instead of documenting a gap. Also added `$not + $nin` runtime tests to `standardTests.ts` for completeness. All 653 tests pass.
+
+# [x] Phase 4a 
+Pass plan to Gemini for feedback. Output me the current implementation plan, and additional context it needs (e.g. relevant types, spirit of library... anything the plan references that another LLM would need to know), and a request to conscisely critique that you can act on. 
+
+# [x] Phase 4b
+
+Gemini responded as seen in the `Implementation Plan Critique from Gemini` section. Analyse it and decide what you agree with (do the change) or disagree with (talk to me about it and we'll decide). 
+Output the final decisions as a new subsection under `Implementation Plan Critique from Gemini`, and update the `Implementation Plan`. 
+
+
+# [x] Phase 5
+
+Implement the `Implementation Plan`
+
+Then...
 
 Run the type tests and identify any type errors. DO NOT FIX THEM yet — this is info gathering. For each failure, document:
 - What the test expected

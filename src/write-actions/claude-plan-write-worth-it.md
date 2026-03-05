@@ -8,6 +8,13 @@ There's only a 1.5x speed advantage to using direct queries, and a _lot_ more co
 
 See @claude-plan-write-sql-perf-check.md for more.
 
+If we do revisit this: 
+* Remember to recheck how the where filter generator works, as it can now reject a where filter if not compatible (regex) 
+* Tell it revisit the response types (it may be able to drop parts of the plan)
+* Tell it to revisit the type specific parts 
+* Remember to recheck once we add some more mongo-ese like ‘addToSet’
+* Would need to handle duplicate_create_recovery, and growset, or deny it for the optimised path 
+
 # Relevant Files
 
 @./types.ts

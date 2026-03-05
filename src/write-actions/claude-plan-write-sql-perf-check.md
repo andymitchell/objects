@@ -1,27 +1,30 @@
 # Goal
 
-Assess if it's possible to turn Write Actions into a declarative UPDATE SQL statement for a JSON column.
+Assess exactly how much a performance gain it would be to transform a WriteAction into a pure SQL statement vs doing Read Modify Write (RMW).
 
 # Relevant Files
 
 @./types.ts
-@./write-action-schemas.ts
 @./applyWritesToItems/types.ts
-@./applyWritesToItems/schemas.ts
 @./applyWritesToItems/applyWritesToItems.ts
 @../where-filter/types.ts
+@../where-filter/postgresWhereClauseBuilder.ts
 
 
 # Context
 
 
-A `WhereFilterDefinition` is a serialisable JSON definition of a WHERE clause that can be used to filter Javascript objects (see @matchJavascriptObject.ts). It's inspired by MongoDb.
+A `WhereFilterDefinition` is a serialisable JSON definition of a WHERE clause that can be used to filter Javascript objects (see @matchJavascriptObject.ts). It's based on MongoDb.
 
 A `WriteAction` is a definition to create/update/delete/upsert a javascript object.
 
 In @../where-filter/postgresWhereClauseBuilder.ts you'll see it can convert a `WhereFilterDefinition` to a WHERE SQL query.
 
-In theory it's a short-step to converting a `WriteAction` to an `UPDATE` SQL statement, using the generated `WHERE` query - it just has to figure out `SET` (and conditional `INSERT` on UPSERT).
+In theory it's a short-step to converting a `WriteAction` to an `UPDATE`/`INSERT`/`DELETE` SQL statement, using the generated `WHERE` query - it just has to figure out `SET`. 
+
+But, there are relatively few places where it can be purely transformed - there's a lot of complexity buried in WriteActions / WriteStrategy and writeToItemsArray. So the app would often by falling back to RMW even if this optimisation was possible. 
+
+So the question becomes... is it worth the considerably extra complexity of dual paths? To judge this we'll use Pglite to do both paths at high velocity. 
 
 # How Write Actions Currently Work
 
@@ -33,6 +36,7 @@ A `WriteAction<T>` wraps a mutation intent:
 ```
 
 ## CRUD Payload Types
+_These are just the core ones_
 
 ### `create`
 - `{ type: 'create', data: T }`
@@ -50,12 +54,6 @@ A `WriteAction<T>` wraps a mutation intent:
 - `{ type: 'delete', where: WhereFilterDefinition<T> }`
 - Removes every item matching `where`.
 
-### `array_scope`
-- `{ type: 'array_scope', scope: string, action: WriteActionPayload<NestedT>, where: WhereFilterDefinition<T> }`
-- `scope` is a dot-prop path to a nested object-array (e.g. `'children'`, `'children.grandchildren'`).
-- `action` is itself a `WriteActionPayload` (create/update/delete/array_scope) that operates **within** the scoped array.
-- The engine resolves the path (spreading intermediate arrays), extracts each array, builds a scoped schema + DDL, and **recursively** calls `_applyWritesToItems` on it. The result is written back via `setProperty`.
-- This is the key mechanism for atomic sub-document mutations.
 
 ## DDL (Data Definition Layer)
 
@@ -79,14 +77,7 @@ A `WriteAction<T>` wraps a mutation intent:
 - `growset`: optional `{ delete_key }` — tombstone-based deletion (not yet implemented).
 - `pre_triggers`: hooks to run before committing (not yet implemented).
 
-### DDLPermissions
-- `'none'`: anyone can write.
-- `'basic_ownership_property'`: only the owner (identified by a dot-prop path to a user-id field) can mutate. Supports `property_type: 'id'` and `'id_in_scalar_array'`, plus optional `transferring_to_path`.
-- `'opa'`: placeholder for future Open Policy Agent integration.
 
-## Schema Validation
-
-A Zod schema is required. After every create or update, the resulting object is validated against it (`failureTracker.testSchema`). Schema failures halt the action and are reported as `WriteCommonError { type: 'schema' }`. For `array_scope`, the schema is sliced to the sub-path via `getZodSchemaAtSchemaDotPropPath`.
 
 ## applyWritesToItems — Execution Flow
 
@@ -129,12 +120,6 @@ _To be filled in_
 
 **update (merge)**: Feasible but moderately complex. Must flatten `data` to dot-prop leaf paths and chain `jsonb_set`/`json_set` per leaf. The existing TreeNodeMap machinery can validate paths. Key deletion (undefined values) adds a parallel chain of `json_remove`/`#-`. Behaviour parity with lodash `mergeWith` (arrays replaced wholesale, nested objects merged key-by-key) is achievable because `jsonb_set` targets a specific path without affecting siblings.
 
-**array_scope (1 level)**: Feasible but complex. Requires reconstructing the target array via `jsonb_agg`/`json_group_array` with element-level CASE logic:
-- **create**: append via `|| new_element::jsonb` (pg) or `json_insert` (sqlite)
-- **update within array**: `jsonb_array_elements` + CASE WHEN match THEN `jsonb_set(elem, ...)` ELSE elem + `jsonb_agg` (pg); `json_each` + CASE + `json_group_array` (sqlite)
-- **delete within array**: filter out matching elements via WHERE NOT in the aggregation subquery
-
-**array_scope (nested / recursive)**: Technically feasible but the SQL becomes deeply nested subqueries-within-subqueries. Each level of nesting multiplies the complexity. Debugging and testing become very difficult. Practical limit is ~2 levels before the SQL is unmanageable.
 
 **Features that CANNOT be replicated in SQL**:
 - Zod schema validation (post-mutation). Must be done pre-flight in JS or skipped.
@@ -184,365 +169,649 @@ SQL flow: `Single UPDATE/INSERT/DELETE statement`
 8. WHERE clause is already solved -- high reuse, low maintenance. The error-as-value pattern (`PreparedWhereClauseResult`) means dialect capability gaps are handled gracefully — the write-action system inherits this for free without needing its own operator-support detection logic.
 9. Path conversion utilities already exist -- reusable.
 
-# TDD Testing Plan
+
+# Research for Testing
+## PGlite Setup
+
+**Already in project**: `@andyrmitchell/pg-testable` (devDependency) wraps PGlite. Existing usage in `src/where-filter/postgresWhereClauseBuilder.test.ts`:
+```ts
+import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
+let runner: DbMultipleTestsRunner;
+beforeAll(async () => { runner = new DbMultipleTestsRunner({ type: 'pglite' }); });
+afterAll(async () => { await runner.dispose(); });
+```
+
+**Direct PGlite usage** (for perf test we want direct control):
+```ts
+import { PGlite } from '@electric-sql/pglite';
+const db = await PGlite.create('memory://'); // fully in-memory, no disk
+```
+
+**Key APIs**: `db.exec(sql)` for DDL/multi-statement, `db.query(sql, params)` for parameterised, `db.transaction(async tx => {...})`.
+
+**JSONB fully supported**: PGlite runs real Postgres (WASM). All JSONB operators (`->`, `->>`, `@>`, `?`, `#>`), `jsonb_set`, key removal via `#-` operator, etc. all work.
+
+**Gotcha**: Always cast JSONB params with `$1::jsonb` or pass `JSON.stringify(obj)` to avoid `jsonb @> json` operator mismatch.
+
+**Teardown**: `TRUNCATE table RESTART IDENTITY` between iterations (fast, doesn't scan rows). `db.close()` in `afterAll`.
+
+**WASM startup**: ~200-500ms first time. Use `beforeAll`, not `beforeEach`.
+
+## Fair Performance Testing
+
+### Database Caching
+
+PGlite is entirely in-memory — no disk I/O variance. But Postgres's **prepared statement cache** still applies: after ~5 executions of the same SQL text, planner switches from custom to generic plan.
+
+**Mitigation**: Run 50 warmup iterations before measurement so both paths use their steady-state plan type throughout measurement.
+
+### JS Runtime Warmup
+
+V8/Bun JIT compiles functions through multiple tiers. Hot functions get optimised after ~1000 calls.
+
+**Mitigation**: 50 warmup iterations (each internally doing multiple calls) is sufficient to hit optimising compiler tier for both paths.
+
+### Measurement Strategy
+
+**Use interleaved (alternating) execution**, alternating which path goes first each iteration, to neutralise time-dependent drift (GC pressure, thermal throttling):
+```
+for i in 0..N:
+  if i%2==0: measure(A), reseed, measure(B)
+  else:      measure(B), reseed, measure(A)
+```
+
+**Critical**: Re-seed to identical state before each path. Without this, Path B sees Path A's mutations.
+
+**Iteration count**: 200 minimum for development benchmarks.
+
+**GC handling**: Force `gc()` between iterations (run with `--expose-gc`). Use median (not mean) as primary metric — robust against GC spikes.
+
+### Timer & Statistics
+
+**Timer**: `performance.now()` is sufficient (microsecond resolution; operations take milliseconds through WASM boundary).
+
+**Statistics**: Report median, p75, p95, trimmed mean (remove top/bottom 5%), stddev. **Median is the primary comparison metric.**
+
+```ts
+function analyzeResults(times: number[]) {
+  const sorted = [...times].sort((a, b) => a - b);
+  const trimCount = Math.floor(sorted.length * 0.05);
+  const trimmed = sorted.slice(trimCount, sorted.length - trimCount);
+  const mean = trimmed.reduce((s, v) => s + v, 0) / trimmed.length;
+  const variance = trimmed.reduce((s, v) => s + (v - mean) ** 2, 0) / trimmed.length;
+  return {
+    median: sorted[Math.floor(sorted.length / 2)],
+    p75: sorted[Math.floor(sorted.length * 0.75)],
+    p95: sorted[Math.floor(sorted.length * 0.95)],
+    mean: +mean.toFixed(3),
+    stddev: +Math.sqrt(variance).toFixed(3),
+    count: trimmed.length,
+  };
+}
+```
+
+### Key Insight for Our Case
+
+The dominant cost in PGlite is likely the **WASM boundary crossing**, not SQL execution. Path B (RMW) has 1 SELECT + N writes = N+1 crossings. Path A (single SQL) has 1 crossing. Gap should widen with row count.
+
+**Vary row counts**: Benchmark at 1, 10, 100, 500 affected rows.
+
+**Path B variants**: Test both per-row writes (N round-trips) and batched writes (1 multi-row statement) to understand the full picture.
+
+**Use realistic data shapes**: Match real Zod schemas (15+ fields, nested JSON), not toy 3-column tables.
 
 # Implementation Plan
 
-**Implement a "lite" version** covering create/update/delete without array_scope. This captures ~80% of the performance benefit with ~30% of the complexity. array_scope can be added later if needed, or can continue to use the existing JS path (hybrid approach).
+## File: `src/write-actions/writeActionSqlPerf.bench.ts`
 
-## Architecture
+Single benchmark file. Not a Vitest test — a standalone script run via `npx tsx src/write-actions/writeActionSqlPerf.bench.ts`.
 
-### Entry point function (one per dialect)
+---
+
+## 1. Test Data Shape
+
+Use a realistic object with nested properties (matches real-world usage):
 
 ```ts
-// Signature (same shape for both dialects)
-function writeActionToSql<T extends Record<string, any>>(
-    writeActions: WriteAction<T>[],
-    schema: z.ZodSchema<T>,
-    ddl: DDL<T>,
-    tableName: string,
-    jsonColumnName: string,
-    user?: IUser
-): WriteActionToSqlResult
+const TestItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  status: z.enum(['active', 'inactive', 'pending']),
+  score: z.number(),
+  metadata: z.object({
+    created_at: z.string(),
+    updated_at: z.string(),
+    tags: z.array(z.string()),
+    settings: z.object({
+      theme: z.string(),
+      notifications: z.boolean(),
+      language: z.string(),
+    }),
+  }),
+});
+type TestItem = z.infer<typeof TestItemSchema>;
 ```
 
-Returns an error-as-value discriminated union (mirroring `PreparedWhereClauseResult` from where-filter):
+DDL:
 ```ts
-type WriteActionToSqlResult =
-    | { success: true; statements: PreparedWriteStatement[] }
-    | { success: false; errors: WriteActionSqlError[] }
-
-type PreparedWriteStatement = {
-    sql: string,
-    arguments: PreparedStatementArgument[],
-    writeActionUuid: string
-}
-
-/** Describes why a write action could not be compiled to SQL. */
-type WriteActionSqlError = {
-    writeActionUuid: string;
-    message: string;
-    /** When caused by an unsupported WHERE filter operator, includes the dialect errors. */
-    whereClauseErrors?: WhereClauseError[];
-}
+const ddl: DDL<TestItem> = {
+  version: 1,
+  permissions: {},
+  lists: {
+    '.': {
+      primary_key: 'id',
+      order_by: { key: 'name' },
+    },
+  },
+};
 ```
 
-The `success: false` path covers two failure categories:
-1. **Structural rejection** — detected by `canApplyWriteActionsToSql` (e.g. array_scope, custom strategy).
-2. **Dialect capability gap** — detected by `buildWhereClause` when compiling the update/delete WHERE filter (e.g. `$regex` on SQLite). The original `WhereClauseError[]` from the where-filter system is included in `whereClauseErrors` for full context.
+## 2. Database Setup
 
-### Dialect engine (shared logic)
-
-Similar to `whereClauseEngine.ts`, create a `writeClauseEngine.ts` that contains the dialect-agnostic recursive logic:
-- Iterates WriteActions
-- Dispatches to dialect-specific SQL generators per payload type
-- For update/delete: calls `buildWhereClause` with the dialect's `IPropertyMap` to compile the WHERE filter. If `buildWhereClause` returns `{ success: false }`, the engine collects the errors and returns `{ success: false }` at the top level — **no partial SQL is generated**.
-- Handles permission checks as additional WHERE conditions
-- Accumulates errors in a shared `WriteActionSqlError[]` array (same pattern as `WhereClauseError[]` accumulation in `whereClauseBuilder`)
-
-Dialect-specific implementations provide an `IWritePropertyMap` interface:
+Per benchmark scenario, create a fresh PGlite instance:
 ```ts
-interface IWritePropertyMap<T extends Record<string, any>> {
-    /** Generate a SET clause for an update payload */
-    generateUpdateSet(data: Partial<T>, method: 'merge' | 'assign', statementArguments: PreparedStatementArgument[]): string;
-    /** Generate an INSERT statement for a create payload */
-    generateInsert(data: T, statementArguments: PreparedStatementArgument[]): string;
-    /** Generate a DELETE statement */
-    generateDelete(whereClause: string): string;
-    /** The IPropertyMap for WHERE clause generation (passed to buildWhereClause) */
-    getWherePropertyMap(): IPropertyMap<T>;
+const db = await PGlite.create('memory://');
+```
+
+Table schema:
+```sql
+CREATE TABLE items (
+  pk TEXT PRIMARY KEY,
+  data JSONB NOT NULL
+);
+CREATE INDEX idx_items_status ON items ((data->>'status'));
+CREATE INDEX idx_items_score ON items ((data->>'score'));
+```
+
+`pk` mirrors the `id` field from the JSONB for fast PK lookups. The GIN index on the whole `data` column is intentionally omitted — in practice most queries use specific path indexes.
+
+Seed function (deterministic, unique per row):
+```ts
+function generateItem(i: number): TestItem {
+  return {
+    id: `item-${i}`,
+    name: `User ${i}`,
+    email: `user${i}@example.com`,
+    status: (['active', 'inactive', 'pending'] as const)[i % 3],
+    score: (i * 7) % 100,
+    metadata: {
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-06-15T12:00:00Z',
+      tags: [`tag-${i % 5}`, `tag-${(i * 3) % 8}`],
+      settings: { theme: i % 2 === 0 ? 'dark' : 'light', notifications: i % 3 !== 0, language: 'en' },
+    },
+  };
 }
 ```
 
-Note: `generateArrayScope` is removed — array_scope is rejected upfront by `canApplyWriteActionsToSql`.
-
-### File structure
-
-```
-src/write-actions/
-  writeActionToSql/
-    writeClauseEngine.ts          # Shared logic: iterate actions, dispatch, permissions, error accumulation
-    types.ts                      # PreparedWriteStatement, WriteActionToSqlResult, WriteActionSqlError, IWritePropertyMap
-    postgresWriteBuilder.ts       # Pg-specific: jsonb_set chains, INSERT, DELETE
-    sqliteWriteBuilder.ts         # Sqlite-specific: json_set chains, INSERT, DELETE
-    flattenDataToLeafPaths.ts     # Utility: flatten {a: {b: 1}} to [['a','b', 1]]
-    tests/
-      postgresWriteBuilder.test.ts
-      sqliteWriteBuilder.test.ts
-      writeClauseEngine.test.ts
+Bulk insert via single multi-row `INSERT`:
+```ts
+async function seedData(db: PGlite, count: number) {
+  const values = Array.from({ length: count }, (_, i) => {
+    const item = generateItem(i);
+    return `('${item.id}', '${JSON.stringify(item).replace(/'/g, "''")}'::jsonb)`;
+  });
+  await db.exec(`INSERT INTO items (pk, data) VALUES ${values.join(',')}`);
+}
 ```
 
-### SQL generation per payload type
+## 3. Benchmark Scenarios
 
-#### create
-- **Pg**: `INSERT INTO {table} ({jsonCol}) VALUES ($N::jsonb)`
-- **Sqlite**: `INSERT INTO {table} ({jsonCol}) VALUES (json(?))`
-- Pre-validate `data` against schema in JS before generating SQL
-- For `attempt_recover_duplicate_create: 'always-update'`: generate UPSERT via `ON CONFLICT`
+Three scenarios, each tested at row counts **[10, 100, 500, 1000]**:
 
-#### update (assign)
-- Flatten `data` to top-level keys only
-- Compile `where` via `buildWhereClause` with dialect's `IPropertyMap`. If result is `{ success: false }`, propagate `WhereClauseError[]` into a `WriteActionSqlError` and abort.
-- **Pg**: `UPDATE {table} SET {jsonCol} = jsonb_set(jsonb_set({jsonCol}, '{key1}', $1::jsonb), '{key2}', $2::jsonb) WHERE ...`
-- For key deletion: chain `{jsonCol} #- '{key}'`
-- **Sqlite**: `UPDATE {table} SET {jsonCol} = json_set({jsonCol}, '$.key1', ?, '$.key2', ?) WHERE ...`
-- For key deletion: chain `json_remove({jsonCol}, '$.key')`
+### Scenario A: CREATE (insert 1 new row)
 
-#### update (merge)
-- Flatten `data` recursively to dot-prop leaf paths via `flattenDataToLeafPaths`
-- Compile `where` via `buildWhereClause` (same error-as-value handling as assign)
-- Same as assign but paths are deep: `'{contact,name}'` (pg) / `'$.contact.name'` (sqlite)
-- Validate each path against TreeNodeMap (reuse existing infrastructure)
-- Arrays in data are set wholesale (a leaf path to an array sets the whole array, matching `mergeWith` behaviour)
+**WriteAction**:
+```ts
+{ type: 'write', ts: Date.now(), uuid: crypto.randomUUID(),
+  payload: { type: 'create', data: generateItem(rowCount + iterationIndex) } }
+```
+(Use `iterationIndex` to avoid PK collisions across iterations without truncating.)
 
-#### delete
-- Compile `where` via `buildWhereClause` with dialect's `IPropertyMap`. If result is `{ success: false }`, propagate errors and abort.
-- **Pg**: `DELETE FROM {table} WHERE ...`
-- **Sqlite**: `DELETE FROM {table} WHERE ...`
-- Reuse existing WHERE clause builders directly
+**Path 1 — Direct SQL**:
+```sql
+INSERT INTO items (pk, data) VALUES ($1, $2::jsonb)
+```
 
-#### array_scope
-- Rejected upfront by `canApplyWriteActionsToSql`. Never reaches SQL generation.
+**Path 2 — RMW**:
+1. `INSERT INTO items (pk, data) VALUES ($1, $2::jsonb)` — rely on DB UNIQUE constraint for PK uniqueness (no full table scan)
+2. Handle constraint violation error as the duplicate-create signal
 
-### Permission handling
-- For `basic_ownership_property` with `property_type: 'id'`: add `AND {jsonCol}->>'ownerPath' = $userIdParam` to the WHERE clause
-- For `'none'`: no additional WHERE condition
-- For unsupported permission types: return `{ unsupported: true }`
+_Note: No `writeToItemsArray` needed for CREATE — both paths are essentially the same INSERT. This scenario mainly measures baseline overhead._
 
-### Schema validation strategy
-- **Pre-validate** the `data` payload against the schema in JS before generating SQL (for create/update)
-- This catches schema errors before they reach the DB, at the cost of not validating the _result_ of the mutation
-- Accept this tradeoff: the risk of a valid partial update producing an invalid full object is low when the schema is correct
+### Scenario B: UPDATE (update N rows matching a WHERE)
 
-### Transaction handling
-- If multiple WriteActions are provided, wrap them in `BEGIN; ... COMMIT;`
-- If `atomic` option is set, this is automatic (SQL transactions are inherently atomic)
-- On error, `ROLLBACK` undoes everything
+**WriteAction**:
+```ts
+{ type: 'write', ts: Date.now(), uuid: crypto.randomUUID(),
+  payload: { type: 'update', method: 'merge',
+    data: { score: 99, metadata: { updated_at: '2025-01-01T00:00:00Z' } },
+    where: { status: 'active' } } }
+```
+This matches ~1/3 of rows (every `i % 3 === 0`).
 
-### Testing approach
-- For each payload type x dialect: generate SQL, run it against a real test DB, compare result to `applyWritesToItems` on the same input
-- Use the existing test fixtures from the write-actions test suite
-- Property-based tests: random WriteActions + random data, verify SQL result matches JS result
+**Path 1 — Direct SQL**:
+Build WHERE clause using `postgresWhereClauseBuilder`. Then:
+```sql
+UPDATE items
+SET data = jsonb_set(
+  jsonb_set(data, '{score}', '99'::jsonb),
+  '{metadata,updated_at}', '"2025-01-01T00:00:00Z"'::jsonb
+)
+WHERE <where_clause>
+```
+The `jsonb_set` chain is built by flattening `data` to dot-prop leaf paths. Each leaf becomes one `jsonb_set(prev, '{path,segments}', $N::jsonb)`.
 
+**Path 2 — RMW**:
+1. `SELECT pk, data FROM items WHERE <where_clause>` (SQL pre-filter, matches real system)
+2. Parse rows into `TestItem[]`
+3. Apply JS deep merge (simplified — no Zod validation, see §3a)
+4. Batch write-back via single `UPDATE items SET data = v.data::jsonb FROM (VALUES ($1, $2), ...) AS v(pk, data) WHERE items.pk = v.pk`
+
+### Scenario C: DELETE (delete N rows matching a WHERE)
+
+**WriteAction**:
+```ts
+{ type: 'write', ts: Date.now(), uuid: crypto.randomUUID(),
+  payload: { type: 'delete', where: { status: 'inactive' } } }
+```
+
+**Path 1 — Direct SQL**:
+```sql
+DELETE FROM items WHERE <where_clause>
+```
+
+**Path 2 — RMW**:
+1. `SELECT pk FROM items WHERE <where_clause>`
+2. Batch delete via single `DELETE FROM items WHERE pk = ANY($1)` (array of matched PKs)
+
+## 3a. Fairness: Simplified JS Merge (No Zod)
+
+Per Gemini critique: `writeToItemsArray` includes Zod validation which the SQL path doesn't do. To make an apples-to-apples comparison, the RMW path uses a **simplified JS merge function** instead of `writeToItemsArray`:
+
+```ts
+function applyMergeInJs(items: TestItem[], updateData: Partial<TestItem>): TestItem[] {
+  // Deep merge matching lodash mergeWith semantics: objects merged key-by-key, arrays replaced wholesale
+  return items.map(item => deepMerge(structuredClone(item), updateData));
+}
+```
+
+This isolates what we're actually testing: **data transfer + JS mutation overhead** vs **single SQL statement**.
+
+## 4. WHERE Clause Construction
+
+Shared between both paths. Uses existing infrastructure:
+
+```ts
+import { PropertyMapSchema } from '../where-filter/postgresWhereClauseBuilder.ts';
+
+const propertyMap = new PropertyMapSchema(TestItemSchema, 'data');
+const clause = postgresWhereClauseBuilder(writeAction.payload.where, propertyMap);
+if (!clause.success) throw new Error('WHERE clause build failed');
+// clause.where_clause_statement, clause.statement_arguments
+```
+
+## 5. SQL Generation for Path 1 (Direct SQL)
+
+### `buildInsertSql(item: TestItem)`
+Returns `{ sql: 'INSERT INTO items (pk, data) VALUES ($1, $2::jsonb)', params: [item.id, JSON.stringify(item)] }`.
+
+### `buildUpdateSql(payload: WritePayloadUpdate<TestItem>, whereClause: PreparedWhereClauseResult)`
+1. Flatten `payload.data` to leaf paths using a recursive function (e.g. `{ score: 99, metadata: { updated_at: 'x' } }` → `[{path: '{score}', value: 99}, {path: '{metadata,updated_at}', value: '"x"'}]`).
+2. Chain `jsonb_set` calls: start with `data`, wrap each leaf.
+3. Combine with WHERE clause arguments (offset param indices).
+
+Returns `{ sql: 'UPDATE items SET data = jsonb_set(jsonb_set(data, ...), ...) WHERE ...', params: [...] }`.
+
+### `buildDeleteSql(whereClause: PreparedWhereClauseResult)`
+Returns `{ sql: 'DELETE FROM items WHERE ...', params: [...] }`.
+
+## 6. Benchmark Runner
+
+```ts
+const WARMUP = 200;
+const ITERATIONS = 200;
+const ROW_COUNTS = [10, 100, 500, 1000];
+const SCENARIOS = ['create', 'update', 'delete'] as const;
+
+for (const scenario of SCENARIOS) {
+  for (const rowCount of ROW_COUNTS) {
+    const db = await PGlite.create('memory://');
+    await db.exec(TABLE_DDL);
+    await seedData(db, rowCount); // Seed once — use SAVEPOINT/ROLLBACK to reset
+
+    // Create a savepoint after seeding for instant reset
+    await db.exec('BEGIN');
+    await db.exec('SAVEPOINT bench_reset');
+
+    // Warmup (200 iterations for V8 JIT to fully optimize both paths)
+    for (let i = 0; i < WARMUP; i++) {
+      await runDirectSql(db, scenario, rowCount, i);
+      await db.exec('ROLLBACK TO SAVEPOINT bench_reset');
+      await runRmw(db, scenario, rowCount, i);
+      await db.exec('ROLLBACK TO SAVEPOINT bench_reset');
+    }
+
+    // Measure (interleaved)
+    const results = { directSql: [] as number[], rmw: [] as number[] };
+    for (let i = 0; i < ITERATIONS; i++) {
+      if (typeof globalThis.gc === 'function') globalThis.gc();
+
+      if (i % 2 === 0) {
+        results.directSql.push(await measure(() => runDirectSql(db, scenario, rowCount, WARMUP + i)));
+        await db.exec('ROLLBACK TO SAVEPOINT bench_reset');
+        results.rmw.push(await measure(() => runRmw(db, scenario, rowCount, WARMUP + i)));
+        await db.exec('ROLLBACK TO SAVEPOINT bench_reset');
+      } else {
+        results.rmw.push(await measure(() => runRmw(db, scenario, rowCount, WARMUP + i)));
+        await db.exec('ROLLBACK TO SAVEPOINT bench_reset');
+        results.directSql.push(await measure(() => runDirectSql(db, scenario, rowCount, WARMUP + i)));
+        await db.exec('ROLLBACK TO SAVEPOINT bench_reset');
+      }
+    }
+
+    await db.exec('ROLLBACK'); // Clean up the transaction
+
+    const statsA = analyzeResults(results.directSql);
+    const statsB = analyzeResults(results.rmw);
+    const ratio = statsB.median / statsA.median;
+
+    console.log(`\n=== ${scenario.toUpperCase()} | ${rowCount} rows ===`);
+    console.log(`Direct SQL: median=${statsA.median.toFixed(3)}ms  p95=${statsA.p95.toFixed(3)}ms`);
+    console.log(`RMW:        median=${statsB.median.toFixed(3)}ms  p95=${statsB.p95.toFixed(3)}ms`);
+    console.log(`Ratio:      Direct SQL is ${ratio.toFixed(2)}x faster`);
+
+    await db.close();
+  }
+}
+```
+
+## 7. Fairness Guarantees
+
+| Concern | Mitigation |
+|---------|-----------|
+| Query plan caching | 200 warmup iterations push well past generic-plan threshold |
+| JIT warmup | 200 warmup iterations ensure V8 fully optimizes both paths (including polymorphic lodash `mergeWith`) |
+| Ordering bias | Interleave, alternating which goes first |
+| Data state drift | `SAVEPOINT` + `ROLLBACK TO SAVEPOINT` for instant, zero-cost state reset (no GC pressure from re-seeding) |
+| GC interference | Force `gc()` between iterations; use median |
+| WASM startup | One `PGlite.create()` per scenario+rowCount; warmup absorbs it |
+| Caching via identical queries | CREATE uses unique PKs per iteration; UPDATE/DELETE always hit real data (rolled back) |
+| Zod validation asymmetry | RMW path uses simplified JS merge without Zod, matching the SQL path's lack of validation (§3a) |
+| Per-row write overhead | RMW batches writes into single multi-row statements (`UPDATE ... FROM VALUES`, `DELETE ... WHERE pk = ANY(...)`) to avoid proving "1 query > N queries" |
+
+## 8. Output Format
+
+Console table summarising all results:
+
+```
+╔══════════╦══════════╦═══════════════════╦═══════════════════╦═══════╗
+║ Scenario ║ Rows     ║ Direct SQL (med)  ║ RMW (med)         ║ Ratio ║
+╠══════════╬══════════╬═══════════════════╬═══════════════════╬═══════╣
+║ CREATE   ║ 10       ║ 0.123ms           ║ 0.456ms           ║ 3.71x ║
+║ CREATE   ║ 100      ║ ...               ║ ...               ║ ...   ║
+║ ...      ║ ...      ║ ...               ║ ...               ║ ...   ║
+╚══════════╩══════════╩═══════════════════╩═══════════════════╩═══════╝
+```
+
+## 9. Correctness Validation (pre-benchmark)
+
+Before timing, run one iteration of each scenario and assert that both paths produce the same final DB state:
+```ts
+// Run Path 1, SELECT * FROM items → set1, ROLLBACK TO SAVEPOINT
+// Run Path 2, SELECT * FROM items → set2, ROLLBACK TO SAVEPOINT
+// Assert set1 deep-equals set2 (ignoring order)
+```
+
+If they differ, the benchmark is invalid — the SQL generation doesn't match the JS merge semantics.
+
+## 10. Dependencies
+
+- `@electric-sql/pglite` — direct dependency (add as devDependency if not present)
+- Existing: `writeToItemsArray`, `postgresWhereClauseBuilder`, `PropertyMapSchema` from this package
+- No new production dependencies
+
+# Implementation Plan Critique from Gemini
+
+
+
+
+Here is a concise critique of your implementation plan, focusing on fairness, realism, and blind spots that could skew your decision. 
+
+### 1. Flaws in Benchmark Fairness & Methodology
+
+**A. Zod Validation Asymmetry**
+*   **Issue:** The RMW path runs `Zod` validation and deep-merging via `writeToItemsArray`. The Direct SQL path implies just executing `INSERT/UPDATE`, completely skipping validation of the mutation payload. Zod is notoriously CPU-heavy; skipping it for SQL will falsely inflate the SQL performance gains, making a 5x speedup look easy when it's just apples-to-oranges.
+*   **Fix:** Ensure the Direct SQL path includes the cost of Zod-validating the `WritePayload` parameters before executing the SQL.
+* **Alt Fix**: Change `writeToItemsArray` pathway to match the SQL one, by creating a copied-but-simplified `writeToItemsArray2` function that would be a fairer comparison with the pure JS. What I really want to test isn't the two pathways, it's direct sql vs RMW. 
+
+**B. Transaction / Network Overhead Skew**
+*   **Issue:** For an UPDATE affecting ~330 rows, Direct SQL uses *one* bulk statement. RMW issues *330 separate `UPDATE` statements*. Even in memory, the parsing and IPC overhead of 330 queries will dominate the time, proving only that "1 query is faster than 330 queries" rather than measuring JS vs Postgres mutation efficiency.
+*   **Fix:** Wrap the RMW per-row updates/deletes in a single `BEGIN; ... COMMIT;` transaction block. Better yet, if your real system supports it, batch the RMW writes using a single `UPDATE ... FROM (VALUES ...)` statement.
+
+**C. Reset Methodology (TRUNCATE + Re-seed)**
+*   **Issue:** TRUNCATE and re-seeding up to 1,000 rows 400 times (200 per path) will generate massive GC pressure, muddying the CPU profiles, and make the benchmark take forever. 
+*   **Fix:** Use transaction rollbacks for state reset. Run `BEGIN;`, execute the benchmark iteration, then `ROLLBACK;`. This is perfectly isolated, instant, and guarantees identical state without re-insertion overhead.
+
+### 2. Is the RMW Path Realistic?
+
+**A. CREATE Full Table Scans**
+*   **Issue:** The plan says RMW for CREATE does a `SELECT data FROM items (full table — need PK uniqueness check)`. Loading the entire table into JS memory on every single INSERT is an unscalable anti-pattern. If your current system *actually* does this, benchmarking at 1,000 rows is too small to show how catastrophic this is.
+*   **Fix:** If the real system currently does a full fetch, increase the max row count in your scenarios to `10,000` or `50,000` to expose the true cost. If the real system actually relies on Postgres `UNIQUE` constraint errors to catch PK violations instead of full JS arrays, fix the RMW benchmark to reflect that.
+
+**B. UPDATE Pre-filtering SQL vs JS Linear Scans**
+*   **Issue:** You state RMW will `SELECT pk, data WHERE <where>`. However, your context says `writeToItemsArray` does a "linear scan all items, matchJavascriptObject...". If you use SQL to pre-filter before passing to JS, `writeToItemsArray` is iterating over an already-filtered list.
+*   **Fix:** Ensure the benchmark accurately mirrors reality. If the current real-world app pre-filters via SQL before handing off to JS, the benchmark is fine. If the real-world app fetches a larger dataset and relies on `matchJavascriptObject` to do the filtering, the benchmark *must* omit the SQL `WHERE` clause in the RMW fetch step to capture the JS CPU cost.
+
+### 3. Anything that would invalidate the results
+
+*   **JIT Bias:** Running 50 warmup iterations might not be enough for V8 to optimize the heavily polymorphic `lodash.mergeWith` or `matchJavascriptObject` functions in the RMW path. **Fix:** Increase warmup to at least 200 iterations for both paths before starting the timer.
+*   **Postgres Query Cache:** Interleaving runs is good, but `pglite` will cache the query plans for the Direct SQL path. If your app dynamically generates wildly varying SQL shapes in production, the benchmark will artificially favor Direct SQL. **Fix:** Ensure the parameter bindings (`$1, $2`) are used correctly so you're measuring execution time, not parsing/planning time.
 
 # Plan
 
-_Check the Phases off as you go. Stop after each phase to ask me whether to continue to the next phase. If you create files as part of completing a Phase, update the Phase with links to them and explain what they contain (so a future LLM can resume)._
+_Important: Check the Phases off as you go. Stop after each phase to ask me whether to continue to the next phase. If you create files as part of completing a Phase, update the Phase with links to them and explain what they contain (so a future LLM can resume)._
 
 # [x] Phase 1
 
-Infer the spec for a `WriteAction` from the type - specifically the CRUD options it has. Also infer how a schema is defined for an object store (especially the `DDL` type in @./applyWritesToItems/types.ts) - as a lot of the Write Action work is in vetting that it can be safely applied to an object of a certain schema/shape.
+Do some preparatory research:
+- See how Pglite cna be used in testing, as it's what we'll be doing (with an in-memory set up). 
+- Look into how to create a fair performance test with a database, and separately with a JS Runtime. E.g. a database will cache repeated queries, so over time they increase performance. We want to avoid that as the nature of the test is to compare two different techniques. 
 
-You can ask me questions about how it works if there's uncertainty or ambiguity.
-
-Output the analyse to 'How Write Actions Currently Work' in this document.
+Output the research to `Research for Testing`
 
 
 # [x] Phase 2
 
-Remember, the intention here is to work on a table that has a JSON column representing the object to filter and mutate: `UPDATE colJson SET ... WHERE ...` (possibly with UPSERT mechanics; possibly multi step/line SQL statements)
+Plan how to run the test.
 
-Implement a plan to create a new converter - I imagine a function that will take a `WriteAction`, maybe a schema for the object, and the JSON column of the target table. There will be one for pg and one for sqlite.
+You'll need to create SQL equivelants for Write Actions to Create, Update, Delete. 
+You'll need to make sure they are constructed in a way that doesn't cache easily so they remain a fair test. 
 
-Output the plan in Phase 3 below ('Implementation Plan').
+In all cases you'll need to set up each test anew: e.g. create a fresh table with a JSONB column, populate it with (probably many) objects so it has real world pressure, then run the tests to see how fast they execute. 
+You are allowed to using realistic indexes on the JSONB column. 
 
-Then update `Decision: Is it possible, it is worth?` above:
-* `Feasibility: is it possible`:
-    Was the plan possible to implement? It may simply not be technically possible to transpile a `WriteAction` (especially array_scope) into SQL.
-* `Performance gain over 'query to read objects > update in JS context > write back to the DB'`:
-    My current solution is to use a WhereFilterDefinition to read from the db table to get all the objects; bring them into a JS context and run applyWritesToItems on it; then write the changed items back to the table. Obviously this pure SQL mode would be faster if possible, but can you assess how much?
-* `Likely maintenance burdens`:
-    If this is feasible, is it going to be a pain to maintain? Identify potential issues.
+The goal (see `Goal`) is test the performance (time) of two different paths: 
+1. Run Write Actions as direct SQL to INSERT, UPDATE, DELETE (converting those Write Actions)
+2. Run the *same* Write Actions as we do now, in a `Read > Modify > Write` mechanism (convert the WhereFilterDefinition in the Write Action to Postgres using the converter function, read in all matching objects from the DB JSON column, modify them in memory using `writeToItemsArray`, then write back the changed items to the DB). 
 
+Make sure you really do run a fair and high-stress test mimicking real world databases (although you don't need to have competing connections - that's too hard). 
 
-# [ ] Phase 3
-
-Do additional research to support the implementation.
-
-## Step 1
-Review how @../where-filter/standardTests.ts are used to test multiple implementations (e.g. matchJavascriptObject, pg, etc). This same mechanism will be used.
-
-## Step 2
-
-Update `How Write Actions Currently Work` in this document with new sections that detail:
-* `Return type of applyWritesToItems`: The return format of `applyWritesToItems` (with the intention that all the pg/sqlite functions will use this return format). Note: `referential_comparison_ok` has been removed from the response type — it is JS-specific and irrelevant to SQL. `final_items` is optional (see Phase 4 notes).
-* `List of general important tests from applyWritesToItems.test.ts`: Everything important that is tested in `applyWritesToItems.test.ts`, but only choose tests that would broadly make sense to the current TS implementation AND a pg/sql implementation (lowest common denominator). It should be a succinct concise list that gives just enough detail to be recreated in new tests.
-
-**Inclusion/exclusion criteria** — before curating the list, propose explicit criteria for which test categories to include vs. exclude. Base the proposal on what you think is correct (e.g. "include permissions because ownership WHERE sub-conditions are feasible in SQL; exclude Immer and referential comparison because they're JS runtime concepts; exclude purity/mutate because SQL has no in-place mutation concept"). Challenge me on borderline cases and I will confirm or decide tie-breakers.
+Output the test to `Implementation Plan`
 
 
-# [ ] Phase 4
+# [x] Phase 3a
 
-Rewrite the implementation plan.
+Pass plan to Gemini for feedback. Output me the current implementation plan, and additional context it needs (e.g. relevant types, spirit of library... anything the plan references that another LLM would need to know), and a request to conscisely critique that you can act on. 
 
-Keep most of it, but amend with the following decisions:
+# [x] Phase 3b
 
-### `canApplyWriteActionsToSql` — gate function (structural check only)
-* Standalone function that accepts a set of write actions and validates they fit the 'lite' version (create/update/delete only, LWW strategy only, supported permission types only).
-* If they include any unsupported feature (array_scope, custom write strategies, pre-triggers, `attempt_recover_duplicate_create: 'if-identical'`, unsupported permission types), the entire batch is rejected.
-* There is NO hybrid/partial execution — either all actions pass or none run as SQL.
-* Returns an overall success/fail, plus specifies which write actions failed with a reason (reusable `FailedWriteAction` type).
-* Enforced at BOTH the type level (a `WriteActionPayloadLite<T>` type that excludes `array_scope`) AND runtime (`canApplyWriteActionsToSql` checks at runtime). The type provides compile-time safety for callers who know they're on the SQL path; the runtime check is the definitive guard gate since `writeActionToSql` accepts the full `WriteAction<T>` union.
-* **Important**: This is a _structural_ check only — it validates write action shape/features but does NOT validate whether the WHERE filters within update/delete actions are compatible with the target SQL dialect. Dialect-specific filter support (e.g. `$regex` unsupported on SQLite) is discovered during SQL generation in `writeActionToSql`, following the same error-as-value pattern used by `buildWhereClause` in the where-filter system.
+Gemini responded as seen in the `Implementation Plan Critique from Gemini` section. Changes incorporated:
 
-### `writeActionToSql` — SQL generator (error-as-value)
-* Begins by running `canApplyWriteActionsToSql`; halts and returns a failure result if structural validation fails.
-* For update/delete actions, calls `buildWhereClause` (from the where-filter system) to compile the `where: WhereFilterDefinition` into SQL. If `buildWhereClause` returns `{ success: false }` (e.g. because the filter uses `$regex` on SQLite, or any other dialect-unsupported operator), the entire batch fails — consistent with the all-or-nothing approach.
-* Returns a **discriminated union result type**, mirroring the `PreparedWhereClauseResult` pattern from where-filter:
-  ```ts
-  type WriteActionToSqlResult =
-      | { success: true; statements: PreparedWriteStatement[] }
-      | { success: false; errors: WriteActionSqlError[] }
-
-  type WriteActionSqlError = {
-      writeActionUuid: string;
-      message: string;
-      /** When the failure is caused by an unsupported WHERE filter, includes the original WhereClauseError(s). */
-      whereClauseErrors?: WhereClauseError[];
-  }
-  ```
-* No `unsupported` field on individual statements (since all-or-nothing validation already passed when `success: true`).
-* This means a caller can distinguish three failure scenarios:
-  1. Structural rejection (from `canApplyWriteActionsToSql`): write action uses array_scope, custom strategy, etc.
-  2. Dialect capability gap (from `buildWhereClause`): WHERE filter uses an operator the target SQL dialect doesn't support.
-  3. Execution failure (from `applyWritesToSql`): SQL ran but the DB returned an error.
-
-### Error identification — use the transaction error directly
-* No separate "re-run to find failures" helper. SQL transactions already report which statement failed. Since statements are executed sequentially within a transaction, the first error halts execution — the failing statement index maps directly to the failing `WriteAction`. Subsequent actions are marked `blocked_by_action_uuid` (same pattern as `applyWritesToItems`).
-
-### `applyWritesToSql` — db-agnostic execution wrapper
-* Generates SQL via `writeActionToSql`, executes it via a callback (one call per statement within a transaction).
-* **Pre-execution failures** (error-as-value, no SQL is sent to DB):
-  - If `writeActionToSql` returns `{ success: false }`, the wrapper returns the error result immediately. This covers both structural rejection (unsupported write action features) and dialect capability gaps (unsupported WHERE filter operators).
-  - The caller receives a typed error result they can inspect without try/catch, and can fall back to the JS `applyWritesToItems` path if desired.
-* **Execution failures** (SQL ran but DB returned error):
-  - Identifies the failing WriteAction from the statement index, marks subsequent actions as `blocked_by_action_uuid`, returns error response.
-* Shares the same response type as `applyWritesToItems`, with these modifications:
-  - `referential_comparison_ok` is REMOVED from the response type entirely (from both `applyWritesToItems` and `applyWritesToSql`) — it's a JS runtime concept with no SQL equivalent.
-  - `final_items` is OPTIONAL in the response type. `applyWritesToSql` accepts a config param `includeFinalItems?: boolean` (default false). When true, it does a final SELECT to retrieve the affected rows. When false (the common case for performance), `final_items` is omitted. This avoids negating the performance gain of pure SQL.
-  - `affected_items` uses RETURNING clause (supported in both Postgres and SQLite 3.35+, which we assume as minimum).
-* The full return type is a three-way discriminated union:
-  ```ts
-  type ApplyWritesToSqlResult<T> =
-      | { status: 'ok'; changes: ...; successful_actions: ... }                     // all SQL executed successfully
-      | { status: 'error'; changes: ...; successful_actions: ...; failed_actions: ... } // SQL execution error
-      | { status: 'unsupported'; errors: WriteActionSqlError[] }                     // pre-execution rejection (structural or dialect gap)
-  ```
-
-### File structure
-* New SQL code lives in: `./applyWritesToItems/sql/`
-* No separate `tests/` directory — each function has a colocated `.test.ts` file
-* `standardTests` lives in `./applyWritesToItems/` directory (shared by JS and SQL test suites)
-
-### Permission handling
-* For `basic_ownership_property` with `property_type: 'id'`: add `AND {jsonCol}->>'ownerPath' = $userIdParam` to the WHERE clause.
-* For `'none'`: no additional WHERE condition.
-* Unsupported permission types (e.g. `'opa'`, `'id_in_scalar_array'` with `transferring_to_path`) cause `canApplyWriteActionsToSql` to reject the batch.
-
-Don't execute — just rewrite the `Implementation Plan` section of this document.
+1. **SAVEPOINT/ROLLBACK reset** (was TRUNCATE+re-seed) — instant, no GC pressure
+2. **Batched RMW writes** — `UPDATE FROM VALUES` and `DELETE WHERE pk = ANY(...)` instead of per-row statements
+3. **Warmup 50→200** — ensures V8 JIT fully optimizes polymorphic paths
+4. **Simplified JS merge (§3a)** — RMW skips Zod validation for fair comparison with SQL path
+5. **CREATE RMW uses DB UNIQUE constraint** — no full table scan, just INSERT and handle error
+6. **Confirmed SQL pre-filtering** for UPDATE/DELETE RMW path matches real system
 
 
-# [ ] Phase 5
+# [x] Phase 4
 
-We're going to do TDD for this. Create a plan in `TDD Testing Plan`.
+Implemented as `src/write-actions/writeActionSqlPerf.bench.ts`. Run via `npx tsx src/write-actions/writeActionSqlPerf.bench.ts`.
 
-## standardTests
+**Note**: Changed WHERE filters from `status` (ZodEnum) to `score` (ZodNumber) because `postgresWhereClauseBuilder`'s casting map doesn't support ZodEnum. Uses `score < 34` for UPDATE (~1/3 rows) and `score >= 67` for DELETE (~1/3 rows).
 
-Generate its own version of `standardTests.ts` seen in where-filter; that will be used by `applyWritesToItems` and both dialects of `applyWritesToSql`. It will work the same way, with each apply function setting up the tests (e.g. a sqlite table) and for each test (e.g. setting initial data in a fresh table), then executing the test on the function and assessing whether when run (directly in the case of applyWritesToItems; or have SQL executed in the case of writeActionToSql), the data source (table, raw JS) has been correctly modified.
+## Results
 
-Follow the same DB setup/teardown pattern used in `where-filter/standardTests.ts` — study how it manages test DB connections, per-test table creation, and cleanup. Replicate that pattern for write-action tests.
+| Scenario | Rows | Direct SQL (med) | RMW (med) | Ratio |
+|----------|------|-------------------|-----------|-------|
+| CREATE   | 10-1000 | ~0.06ms        | ~0.06ms   | 1.00x |
+| UPDATE   | 10   | 0.262ms           | 0.421ms   | 1.61x |
+| UPDATE   | 100  | 1.176ms           | 1.622ms   | 1.38x |
+| UPDATE   | 500  | 6.297ms           | 8.334ms   | 1.32x |
+| UPDATE   | 1000 | 12.205ms          | 16.288ms  | 1.33x |
+| DELETE   | 10   | 0.110ms           | 0.112ms   | 1.02x |
+| DELETE   | 100  | 0.152ms           | 0.264ms   | 1.74x |
+| DELETE   | 500  | 0.334ms           | 0.673ms   | 2.02x |
+| DELETE   | 1000 | 0.563ms           | 1.191ms   | 2.12x |
 
-### Test design philosophy
+### Key Findings
 
-The goal is to match the **spirit of the spec**, not to enumerate every permutation mechanically. The describe-block hierarchy should mirror the key intents of the WriteAction spec so that any developer reading it immediately sees "this maps to how I'd understand the spec." Under each intent, tests cover the happy path plus the edge cases and most likely failures — not an exhaustive combinatorial matrix.
+- **CREATE**: No difference (both are a single INSERT — as predicted).
+- **UPDATE**: Direct SQL is **1.3-1.6x faster**. The gain is consistent but modest — well below the estimated 3-10x. The RMW path uses batched writes (`UPDATE FROM VALUES`), so the difference is purely the data-transfer + JS merge overhead.
+- **DELETE**: Direct SQL is **1.7-2.1x faster** at scale. The gap widens with row count as expected (eliminating the read round-trip matters more with more rows).
+- **Overall**: The gains are real but moderate (1.3-2.1x), not the 2-5x estimated earlier. This is because the RMW path was fairly optimized (batched writes, SQL pre-filtering, no Zod overhead). The maintenance burden of triple implementation sync likely outweighs these gains for most use cases.
 
-### Steps
-1. Identify the high-level parts of the spec and their intent. Structure these as nested `describe` blocks.
-2. Under each describe, add tests for the happy path and the meaningful edge cases / failure modes.
-3. Include any additional tests from `List of general important tests from applyWritesToItems.test.ts` that weren't already covered.
-4. Split the file into two broad sections:
-   - **Lite Write Actions** (create/update/delete — all implementations must support these)
-   - **Full Write Actions** (array_scope, custom strategies, etc. — only `applyWritesToItems` supports these; SQL tests skip this section)
+## Results with Per-Row Write Comparison
 
-### Handling dialect capability gaps in standardTests
+Added a third path: RMW with per-row writes (individual UPDATE/DELETE per matched row) to show the impact of batching.
 
-Follow the same pattern as `where-filter/standardTests.ts`: the test adapter function for each SQL dialect should handle `{ status: 'unsupported' }` results by returning `undefined`, which the shared test helper (`expectOrAcknowledgeUnsupported`) treats as "acknowledged, skip this test". This means:
-- A standardTest that uses a WHERE filter with `$regex` will naturally pass for Postgres (which supports it) and be skipped for SQLite (which rejects it at SQL generation time).
-- The test suite never sees a thrown exception for capability gaps — only error-as-value results that the adapter translates to `undefined`.
-- Validation errors (malformed filters) should still be re-thrown as exceptions so error-handling tests work correctly.
+| Scenario | Rows | Direct SQL (med) | RMW Batched (med) | RMW Per-Row (med) | vs Batched | vs Per-Row |
+|----------|------|------------------|--------------------|--------------------|------------|------------|
+| CREATE   | all  | ~0.05ms          | ~0.05ms            | ~0.05ms            | 1.00x      | 1.00x      |
+| UPDATE   | 10   | 0.292ms          | 0.425ms            | 0.598ms            | 1.46x      | 2.05x      |
+| UPDATE   | 100  | 1.712ms          | 2.188ms            | 3.886ms            | 1.28x      | 2.27x      |
+| UPDATE   | 500  | 7.391ms          | 9.417ms            | 17.994ms           | 1.27x      | 2.43x      |
+| UPDATE   | 1000 | 15.977ms         | 19.624ms           | 37.999ms           | 1.23x      | 2.38x      |
+| DELETE   | 10   | 0.101ms          | 0.101ms            | 0.101ms            | 1.00x      | 1.00x      |
+| DELETE   | 100  | 0.180ms          | 0.289ms            | 1.663ms            | 1.60x      | 9.22x      |
+| DELETE   | 500  | 0.454ms          | 0.735ms            | 8.422ms            | 1.62x      | 18.56x     |
+| DELETE   | 1000 | 0.712ms          | 1.301ms            | 16.834ms           | 1.83x      | 23.63x     |
 
-This mirrors exactly how `sqliteWhereClauseBuilder.test.ts` distinguishes capability gaps from validation errors when consuming `PreparedWhereClauseResult`.
+## Results with Simulated Network Latency
 
-## DB specific tests
+The above tests use PGlite in-process (WASM boundary ~0ms). Real Postgres has network round-trip latency: ~0.5ms localhost, ~2ms same-region cloud. Each `db.query()` call pays this cost. Per-row writes pay it N times.
 
-`applyWritesToSql.pg.test.ts` (and sqlite version) can have its own `dbStandardTests` in addition to `standardTests` for any tests that specifically stress-test a database (vs. vanilla `applyWritesToItems`).
+### 0.5ms latency (localhost Postgres)
 
-These should include explicit tests for the `{ status: 'unsupported' }` path:
-- Update with `$regex` WHERE filter on SQLite → `{ status: 'unsupported', errors: [{ whereClauseErrors: [...] }] }`
-- Delete with `$regex` WHERE filter on SQLite → same
-- Verify Postgres handles the same filters successfully
+| Scenario | Rows | Direct SQL (med) | RMW Batched (med) | RMW Per-Row (med) | vs Batched | vs Per-Row |
+|----------|------|------------------|--------------------|--------------------|------------|------------|
+| UPDATE   | 10   | 1.605ms          | 3.027ms            | 7.921ms            | 1.89x      | 4.93x      |
+| UPDATE   | 100  | 2.405ms          | 4.014ms            | 45.133ms           | 1.67x      | 18.77x     |
+| UPDATE   | 500  | 5.968ms          | 9.191ms            | 218.963ms          | 1.54x      | 36.69x     |
+| UPDATE   | 1000 | 10.830ms         | 15.860ms           | 438.730ms          | 1.46x      | 40.51x     |
+| DELETE   | 100  | 1.648ms          | 3.171ms            | 49.334ms           | 1.92x      | 29.93x     |
+| DELETE   | 500  | 1.871ms          | 3.638ms            | 240.341ms          | 1.94x      | 128.45x    |
+| DELETE   | 1000 | 2.149ms          | 4.231ms            | 480.985ms          | 1.97x      | 223.81x    |
 
----
+### 2ms latency (same-region cloud DB)
 
-Output the plan to `TDD Testing Plan`.
+| Scenario | Rows | Direct SQL (med) | RMW Batched (med) | RMW Per-Row (med) | vs Batched | vs Per-Row |
+|----------|------|------------------|--------------------|--------------------|------------|------------|
+| UPDATE   | 10   | 3.058ms          | 5.896ms            | 16.657ms           | 1.93x      | 5.45x      |
+| UPDATE   | 100  | 3.993ms          | 7.075ms            | 96.757ms           | 1.77x      | 24.23x     |
+| UPDATE   | 500  | 8.020ms          | 12.464ms           | 478.059ms          | 1.55x      | 59.61x     |
+| UPDATE   | 1000 | 13.537ms         | 19.726ms           | 950.506ms          | 1.46x      | 70.22x     |
+| DELETE   | 100  | 2.972ms          | 5.741ms            | 94.609ms           | 1.93x      | 31.84x     |
+| DELETE   | 500  | 3.238ms          | 6.361ms            | 462.523ms          | 1.96x      | 142.83x    |
+| DELETE   | 1000 | 3.493ms          | 6.782ms            | 916.533ms          | 1.94x      | 262.40x    |
 
+# Conclusions
 
-# [ ] Phase 6
+## Summary of Lessons
 
-Do red/green TDD. Work in this order:
+1. **Batching dominates performance, not SQL-vs-JS.** The difference between direct SQL and a well-batched RMW path is modest (1.2-2x). The difference between batched and per-row RMW is enormous and grows with latency — up to **262x** for DELETE at 1000 rows with 2ms latency. Investing in batching the write-back gives most of the possible performance gain without the complexity of direct SQL transpilation.
 
-### Sub-phase 6.1: Types and validation
-1. Define `WriteActionPayloadLite<T>` type (compile-time narrowing)
-2. Define `PreparedWriteStatement` (without `unsupported` field)
-3. Define shared response types (updated `ApplyWritesToItemsChanges` without `referential_comparison_ok`, `final_items` optional)
-4. Implement `canApplyWriteActionsToSql` — runtime validation gate
-5. Tests for `canApplyWriteActionsToSql`: accepts valid lite actions, rejects array_scope / custom strategies / unsupported permissions / `if-identical`
+2. **Per-row writes are catastrophically slow at scale, and network latency makes it far worse.** Each individual `UPDATE`/`DELETE` is a separate round-trip. The penalty scales as `N × latency`:
+   - No latency (WASM): per-row DELETE 1000 rows = 23.6x slower than direct SQL
+   - 0.5ms latency (localhost): per-row DELETE 1000 rows = **223.8x** slower (481ms vs 2.1ms)
+   - 2ms latency (cloud): per-row DELETE 1000 rows = **262.4x** slower (917ms vs 3.5ms)
+   - Per-row UPDATE 1000 rows at 2ms = **70.2x** slower (951ms vs 13.5ms — nearly 1 second for a single write action)
 
-### Sub-phase 6.2: SQL generation (`writeActionToSql`)
-1. Implement `flattenDataToLeafPaths` utility + tests
-2. Implement `writeClauseEngine.ts` — shared logic: iterate actions, dispatch per payload type, call `buildWhereClause` for update/delete, inject permission WHERE conditions, accumulate errors
-3. Implement `sqliteWriteBuilder.ts` — json_set/json_remove chains for update, INSERT for create, DELETE for delete
-4. Implement `postgresWriteBuilder.ts` — jsonb_set chains for update, INSERT for create, DELETE for delete
-5. Tests for each builder: verify generated SQL + arguments for each payload type
-6. Tests for WHERE clause error propagation: verify that an update/delete with a dialect-unsupported filter operator (e.g. `$regex` on SQLite) returns `{ success: false }` with `whereClauseErrors` populated
+3. **Network latency amplifies the batching advantage but barely affects the direct-SQL-vs-batched gap.** With 2ms latency, batched RMW is still only ~1.5-2x slower than direct SQL (same as no-latency). Batching already reduces the crossing count to 2 (read + write), so adding per-crossing latency only adds ~4ms total. Per-row adds `N × 2ms`.
 
-### Sub-phase 6.3: Execution wrapper (`applyWritesToSql`)
-1. Implement `applyWritesToSql` — calls `writeActionToSql` (which internally runs `canApplyWriteActionsToSql` + `buildWhereClause`). If `writeActionToSql` returns `{ success: false }`, return `{ status: 'unsupported', errors }` immediately (no SQL sent to DB). Otherwise execute via callback, handle transaction errors (maps statement index to WriteAction), support `includeFinalItems` config.
-2. Wire up `RETURNING` for `affected_items`
-3. Integration tests against real SQLite (and Postgres if available)
-4. Tests for the `unsupported` path: verify that a write action with a dialect-incompatible WHERE filter returns `{ status: 'unsupported' }` without touching the database
+4. **CREATE is irrelevant to this decision.** Single-row INSERT is the same regardless of approach. No optimisation possible or needed.
 
-### Sub-phase 6.4: Shared standardTests
-1. Run `standardTests` against `applyWritesToItems` — verify existing behaviour matches
-2. Run `standardTests` against `applyWritesToSql` (SQLite) — verify SQL path matches
-3. Run `standardTests` against `applyWritesToSql` (Postgres) — verify SQL path matches
-4. Fix any discrepancies until all three implementations pass the shared suite
+5. **UPDATE shows the most consistent (but modest) gain for direct SQL.** At all row counts and latencies, direct SQL is ~1.2-1.9x faster than batched RMW. The gap comes from eliminating the read round-trip and JS merge overhead. But the gap doesn't widen much with scale — both paths are dominated by the same UPDATE execution cost.
 
-### Sub-phase 6.5: Remove `referential_comparison_ok`
-1. Remove `referential_comparison_ok` from `ApplyWritesToItemsChanges` type
-2. Update `applyWritesToItems` implementation to stop computing it
-3. Update any consumers / tests that reference it
+6. **DELETE scales better for direct SQL.** The ratio stabilises at ~1.9x vs batched RMW across latencies and row counts. This is because the RMW path must read PKs before deleting (2 crossings), while direct SQL is always 1 crossing.
 
+7. **Direct SQL transpilation is not worth the complexity.** A 1.5-2x improvement doesn't justify maintaining three parallel implementations (JS, Postgres SQL, SQLite SQL) that must produce identical results. The testing burden, merge-semantics fidelity risk, and ongoing maintenance cost far outweigh the marginal gain. The correct investment is ensuring the RMW path uses batched writes.
 
-# [ ] Phase 7
+8. **The original 2-5x estimate was based on unbatched RMW.** The plan's estimated speedups assumed per-row writes in the RMW path. Once RMW is batched, most of the gap disappears. This is a good lesson: benchmark before committing to architectural complexity.
 
-Audit and improve the DX of `WriteActionsResponse` and related return types.
+9. **The number of db.query() calls is the single most important performance variable.** Not SQL complexity, not JS merge speed, not data size. Every call pays a fixed latency cost. Direct SQL: 1 call. Batched RMW: 2 calls. Per-row RMW: N+1 calls. Everything else is noise by comparison.
 
-## Goal
+## Performance Requirements for an RMW Algorithm
 
-Review the full type surface that consumers interact with after calling `applyWritesToItems` / `applyWritesToSql` — specifically `ApplyWritesToItemsResponse`, `ApplyWritesToItemsChanges`, `WriteActionsResponseOk`, `WriteActionsResponseError`, `SuccessfulWriteAction`, `FailedWriteAction`, and any intermediate types. Identify unpleasantness, inconsistencies, or poor ergonomics.
+Any Read-Modify-Write implementation must follow these patterns to be performant:
 
-## Steps
+### 1. Batch write-back with `UPDATE ... FROM (VALUES ...)`
 
-1. Read all relevant type definitions and their usage sites across the codebase (consumers, tests, internal helpers).
-2. Catalogue concrete DX issues. For each, describe the problem and propose a fix. Examples of what to look for:
-   - Awkward discriminated union narrowing (does `if (result.status === 'ok')` give clean access to all fields, or do consumers need extra casts/checks?)
-   - Redundant or confusingly similar fields (e.g. `changes.changed` vs checking `changes.insert.length > 0`)
-   - Fields that exist on both success and error variants but mean subtly different things
-   - Naming inconsistencies (e.g. `remove_keys` vs `insert` — one is a verb, one is a noun)
-   - Types that are overly nested or force consumers to destructure deeply
-   - `final_items` becoming optional (from Phase 4) — does this make the success path annoying to use? Should there be a generic parameter or overloaded return type instead?
-   - Whether `SuccessfulWriteAction[]` and `FailedWriteAction[]` appearing on both variants is confusing
-   - Whether `ObjectsDelta<T>` being mixed into `ApplyWritesToItemsChanges` creates a leaky abstraction (delta is a reusable concept; changes adds write-action-specific fields)
-3. Challenge me with the improvement proposals. I will confirm, reject, or modify each one.
-4. Implement the agreed changes, updating types, implementations, and all consumers/tests.
+Never issue per-row UPDATEs. Use a single statement:
+
+```sql
+UPDATE items
+SET data = v.data
+FROM (VALUES
+  ($1, $2::jsonb),
+  ($3, $4::jsonb),
+  ...
+) AS v(pk, data)
+WHERE items.pk = v.pk
+```
+
+This collapses N round-trips into 1. At 1000 rows with 2ms latency, batched UPDATE is **48x faster** than per-row (19.7ms vs 950ms) and batched DELETE is **135x faster** (6.8ms vs 917ms).
+
+### 2. Batch delete with `DELETE ... WHERE pk = ANY($1)`
+
+Never issue per-row DELETEs. Collect matched PKs into an array and delete in one statement:
+
+```sql
+DELETE FROM items WHERE pk = ANY($1::text[])
+```
+
+### 3. Use SQL WHERE pre-filtering on the read step
+
+Don't fetch all rows and filter in JS. Convert the `WhereFilterDefinition` to a SQL WHERE clause (using `postgresWhereClauseBuilder`) and use it in the SELECT:
+
+```sql
+SELECT pk, data FROM items WHERE <where_clause>
+```
+
+This limits data transfer to only the rows that will be modified.
+
+### 4. Minimise WASM/network boundary crossings
+
+The dominant cost is not SQL execution — it's crossing the boundary between JS and the database (WASM in PGlite, network in real Postgres). Every `db.query()` call is a crossing. The target is:
+- **READ**: 1 crossing (SELECT)
+- **WRITE**: 1 crossing (batched UPDATE/DELETE)
+- **Total**: 2 crossings, regardless of how many rows are affected
+
+### 5. Avoid per-item serialisation overhead where possible
+
+When writing back, `JSON.stringify` each row into the VALUES list. Don't construct per-row SQL strings — build a single parameterised statement with all rows.
+
+### 6. Transaction wrapping
+
+Wrap the read + write in a single transaction to ensure consistency. The read and write-back should see the same snapshot:
+
+```sql
+BEGIN;
+  SELECT pk, data FROM items WHERE ...;
+  -- JS mutation happens here --
+  UPDATE items SET data = v.data FROM (VALUES ...) AS v(pk, data) WHERE items.pk = v.pk;
+COMMIT;
+```

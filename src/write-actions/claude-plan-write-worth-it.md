@@ -2,6 +2,12 @@
 
 Assess if it's possible to turn Write Actions into a declarative UPDATE SQL statement for a JSON column.
 
+# CONCLUSION - IMPORTANT
+
+There's only a 1.5x speed advantage to using direct queries, and a _lot_ more complexity to maintain. So for now we're ignoring it - there are better things to spend our time on. 
+
+See @claude-plan-write-sql-perf-check.md for more.
+
 # Relevant Files
 
 @./types.ts

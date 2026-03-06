@@ -8,26 +8,12 @@ import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.ts";
 import { isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
 import { ValueComparisonRangeOperators } from "../../consts.ts";
-import { compileWhereFilter, compileWhereFilterRecursive } from "../compileWhereFilter.ts";
+import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
-import type { IPropertyTranslator, PreparedWhereClauseResult, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
+import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
 import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
 
-/**
- * Converts a WhereFilterDefinition into a parameterised Postgres WHERE clause for a JSONB column.
- * The mental model: your Zod schema describes the shape stored in a JSONB column, and this function
- * turns a MongoDB-style query object into the equivalent SQL WHERE clause with positional `$N` parameters.
- * Internally validates the filter, walks the filter tree, and delegates leaf comparisons to a PropertyTranslator.
- *
- * @example
- * const pm = new PropertyTranslatorJsonbSchema(myZodSchema, 'data');
- * const result = postgresWhereClauseBuilder({ name: 'Andy' }, pm);
- * if (result.success) { use(result.where_clause_statement, result.statement_arguments); }
- */
-export default function postgresWhereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyTranslator<T>): PreparedWhereClauseResult {
-    return compileWhereFilter(filter, propertySqlMap);
-}
 
 
 /**

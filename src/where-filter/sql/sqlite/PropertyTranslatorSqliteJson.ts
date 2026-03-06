@@ -8,26 +8,11 @@ import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.ts";
 import { isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
 import { ValueComparisonRangeOperators } from "../../consts.ts";
-import { compileWhereFilter, compileWhereFilterRecursive } from "../compileWhereFilter.ts";
+import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
-import type { IPropertyTranslator, PreparedWhereClauseResult, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
+import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
 import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
-
-/**
- * Converts a WhereFilterDefinition into a parameterised SQLite WHERE clause for a JSON column.
- * The mental model: your Zod schema describes the shape stored in a JSON TEXT column, and this function
- * turns a MongoDB-style query object into the equivalent SQL WHERE clause with `?` positional parameters.
- * Internally validates the filter, walks the filter tree, and delegates leaf comparisons to a PropertyTranslator.
- *
- * @example
- * const pm = new PropertyTranslatorSqliteJsonSchema(myZodSchema, 'data');
- * const result = sqliteWhereClauseBuilder({ name: 'Andy' }, pm);
- * if (result.success) { use(result.where_clause_statement, result.statement_arguments); }
- */
-export default function sqliteWhereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyTranslator<T>): PreparedWhereClauseResult {
-    return compileWhereFilter(filter, propertySqlMap);
-}
 
 
 /**

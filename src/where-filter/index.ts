@@ -6,9 +6,11 @@ import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComp
 
 // SQL re-exports
 import {
+    prepareWhereClauseForPg,
     postgresWhereClauseBuilder,
     PropertyTranslatorJsonbSchema,
     PropertyTranslatorJsonb,
+    prepareWhereClauseForSqlite,
     sqliteWhereClauseBuilder,
     PropertyTranslatorSqliteJsonSchema,
     PropertyTranslatorSqliteJson,
@@ -21,6 +23,14 @@ export {
     matchJavascriptObject,
     filterJavascriptObjects,
     compileMatchJavascriptObject,
+    // New names
+    prepareWhereClauseForPg,
+    prepareWhereClauseForSqlite,
+    PropertyTranslatorJsonbSchema,
+    PropertyTranslatorJsonb,
+    PropertyTranslatorSqliteJsonSchema,
+    PropertyTranslatorSqliteJson,
+    // Deprecated aliases
     postgresWhereClauseBuilder,
     sqliteWhereClauseBuilder,
     WhereFilterSchema,
@@ -29,11 +39,6 @@ export {
     isLogicFilter,
     convertDotPropPathToPostgresJsonPath,
     convertDotPropPathToSqliteJsonPath,
-    // New names
-    PropertyTranslatorJsonbSchema,
-    PropertyTranslatorJsonb,
-    PropertyTranslatorSqliteJsonSchema,
-    PropertyTranslatorSqliteJson,
 };
 
 // Backwards-compat aliases

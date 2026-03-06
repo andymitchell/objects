@@ -8,7 +8,7 @@ export { isPreparedStatementArgument } from './types.ts';
 export { ValueComparisonRangeOperatorsSqlFunctions } from './sharedSqlOperators.ts';
 
 // Postgres
-export { postgresWhereClauseBuilder, PropertyTranslatorJsonbSchema, PropertyTranslatorJsonb, spreadJsonbArrays, convertDotPropPathToPostgresJsonPath, UNSAFE_WARNING } from './postgres/index.ts';
+export { prepareWhereClauseForPg, postgresWhereClauseBuilder, PropertyTranslatorJsonbSchema, PropertyTranslatorJsonb, spreadJsonbArrays, convertDotPropPathToPostgresJsonPath, UNSAFE_WARNING } from './postgres/index.ts';
 
 // SQLite
-export { sqliteWhereClauseBuilder, PropertyTranslatorSqliteJsonSchema, PropertyTranslatorSqliteJson, spreadJsonArraysSqlite, convertDotPropPathToSqliteJsonPath, SQLITE_UNSAFE_WARNING } from './sqlite/index.ts';
+export { prepareWhereClauseForSqlite, sqliteWhereClauseBuilder, PropertyTranslatorSqliteJsonSchema, PropertyTranslatorSqliteJson, spreadJsonArraysSqlite, convertDotPropPathToSqliteJsonPath, SQLITE_UNSAFE_WARNING } from './sqlite/index.ts';

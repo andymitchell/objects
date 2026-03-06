@@ -1,19 +1,19 @@
 
-import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome } from "../types.js";
+import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome } from "../types.ts";
 import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import { WhereFilter } from "../../where-filter/index-old.ts";
-import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.js";
-import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.js";
-import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe.js";
-import writeLww from "./writeStrategies/lww.js";
-import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.js";
+import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
+import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.ts";
+import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe.ts";
+import writeLww from "./writeStrategies/lww.ts";
+import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.ts";
 import { z } from "zod";
-import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker.js";
-import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.js";
+import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker.ts";
+import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.ts";
 import { type Draft, current, isDraft } from "immer";
-import { type IUser } from "../auth/types.js";
-import { checkWritePermission } from "./helpers/checkPermission.js";
+import { type IUser } from "../auth/types.ts";
+import { checkWritePermission } from "./helpers/checkPermission.ts";
 import { applyAddToSet, applyPush, applyPull, applyInc } from "./helpers/mutations/index.ts";
 
 
@@ -136,9 +136,18 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
- * @returns A new array (unless `mutate` is used) with the actions applied to its objects
+ * @returns A new array (unless `mutate` is used) with the actions applied to its object
+ * 
+ * @note 
  */
 export function writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>): WriteToItemsArrayResult<T>  {
+
+    // Wondering if using this in a Read-Modify-Write process (e.g. read items from sql, modify with this, write back to table)
+    // is too slow and you should implement a custom WriteAction-to-SQL converter (or any other target)? 
+    // In testing it only yielded about a 1.5x improvement, but with major dual-path complexity
+    // (because it could optimise in some cases but couldn't convert every WriteAction so needed to fall back).
+    // The key to making it performant was to batch all the writes in one using `UPDATE WITH VALUES`
+    
 
     return _writeToItemsArray(writeActions, items, schema, ddl, user, options);
 }

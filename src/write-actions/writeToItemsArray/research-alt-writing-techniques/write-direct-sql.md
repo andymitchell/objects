@@ -4,9 +4,15 @@ Assess if it's possible to turn Write Actions into a declarative UPDATE SQL stat
 
 # CONCLUSION - IMPORTANT
 
-There's only a 1.5x speed advantage to using direct queries, and a _lot_ more complexity to maintain. So for now we're ignoring it - there are better things to spend our time on. 
+There's only a 1.5x speed advantage to using direct queries, vs RMW (Read objects into memory, Modify with `writeToItemsArray`, Write back to table); and a _lot_ more complexity to maintain (new writing functions, dual paths as the writing functions can't handle every type of WriteAction). 
 
-See @claude-plan-write-sql-perf-check.md for more.
+So for now we're ignoring it - there are better things to spend our time on. 
+
+See @./write-direct-perf-check.md for more.
+
+The **most important thing** is to batch read/writes, using `UPDATE FROM VALUES`. 
+
+
 
 If we do revisit this: 
 * Remember to recheck how the where filter generator works, as it can now reject a where filter if not compatible (regex) 

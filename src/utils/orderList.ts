@@ -1,4 +1,4 @@
-import type { ListOrdering } from "../write-actions/applyWritesToItems/types.ts";
+import type { ListOrdering } from "../write-actions/writeToItemsArray/types.ts";
 
 
 type OrderListOptions = {

@@ -1,6 +1,6 @@
-import type { IUser } from "../../auth/types.js";
-import type { DDL } from "../types.js";
-import { checkWritePermission } from "./checkPermission.js";
+import type { IUser } from "../../auth/types.ts";
+import type { DDL } from "../types.ts";
+import { checkWritePermission } from "./checkPermission.ts";
 
 type TestItem = {
     id: string, 

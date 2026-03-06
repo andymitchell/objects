@@ -1,8 +1,8 @@
-import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, PrimaryKeyProperties } from "../../dot-prop-paths/types.js";
-import type { PrimaryKeyValue } from "../../utils/getKeyValue.js";
-import type { IfAny } from "../../types.js";
-import type { EnsureRecord } from "../../types.js";
-import type {  WritePayloadCreate, WritePayloadUpdate, WriteResult } from "../types.js";
+import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, PrimaryKeyProperties } from "../../dot-prop-paths/types.ts";
+import type { PrimaryKeyValue } from "../../utils/getKeyValue.ts";
+import type { IfAny } from "../../types.ts";
+import type { EnsureRecord } from "../../types.ts";
+import type {  WritePayloadCreate, WritePayloadUpdate, WriteResult } from "../types.ts";
 import { z } from "zod";
 import { isTypeEqual } from "@andyrmitchell/utils";
 import type { ObjectsDelta } from "../../objects-delta/types.ts";

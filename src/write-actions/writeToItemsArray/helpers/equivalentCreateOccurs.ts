@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { DDL } from "../types.js";
-import type { WriteAction } from "../../types.js";
+import type { DDL } from "../types.ts";
+import type { WriteAction } from "../../types.ts";
 import { isMatch } from "lodash-es";
-import {writeToItemsArray} from "../applyWritesToItems.js";
+import {writeToItemsArray} from "../writeToItemsArray.ts";
 
 
 /**

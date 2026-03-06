@@ -15,7 +15,7 @@ import type {
     WriteOutcome,
     WriteResult,
 } from "./types.ts";
-import type { DDL, WriteChanges, WriteToItemsArrayChanges, WriteToItemsArrayResult } from "./applyWritesToItems/types.ts";
+import type { DDL, WriteChanges, WriteToItemsArrayChanges, WriteToItemsArrayResult } from "./writeToItemsArray/types.ts";
 import type { DotPropPathToObjectArraySpreadingArrays, NonObjectArrayProperty } from "../dot-prop-paths/types.ts";
 import { getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
 import {

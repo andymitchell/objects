@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { WriteAction, WriteError, WriteErrorContext, WriteAffectedItem, WriteOutcomeFailed } from "../../types.ts";
-import type { ListRules } from "../types.js";
+import type { ListRules } from "../types.ts";
 import deepEql from "deep-eql";
-import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.js";
+import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.ts";
 import { convertSchemaToDotPropPathTree, type TreeNode } from "../../../dot-prop-paths/zod.ts";
 import cloneDeepSafe from "../../../utils/cloneDeepSafe.ts";
 

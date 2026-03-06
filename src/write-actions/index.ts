@@ -1,4 +1,4 @@
-import { writeToItemsArray, writeToItemsArrayPreserveInputType, checkWritePermission } from "./applyWritesToItems/index.js";
+import { writeToItemsArray, writeToItemsArrayPreserveInputType, checkWritePermission } from "./writeToItemsArray/index.ts";
 import { isIUser } from "./auth/index.js";
 import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
 import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
@@ -60,6 +60,6 @@ export type {
     DDL,
     ListOrdering,
     WriteToItemsArrayOptions,
-} from './applyWritesToItems/types.ts';
+} from './writeToItemsArray/types.ts';
 
 export type { IUser } from "./auth/index.js";

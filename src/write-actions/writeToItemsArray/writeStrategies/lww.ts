@@ -1,6 +1,6 @@
 import { mergeWith } from "lodash-es";
-import type { WriteStrategy } from "../types.js";
-import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination.js";
+import type { WriteStrategy } from "../types.ts";
+import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination.ts";
 import { VALUE_TO_DELETE_KEY } from "../../helpers.ts";
 
 

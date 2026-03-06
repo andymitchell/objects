@@ -5,7 +5,7 @@ import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses } from "../h
 import type { WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL } from "./types.ts";
 import { produce, type Draft } from "immer";
 import type { IUser } from "../auth/types.ts";
-import { writeToItemsArray } from "./applyWritesToItems.ts";
+import { writeToItemsArray } from "./writeToItemsArray.ts";
 import { standardTests, type AdapterFactory } from "../standardTests.ts";
 
 // ═══════════════════════════════════════════════════════════════════

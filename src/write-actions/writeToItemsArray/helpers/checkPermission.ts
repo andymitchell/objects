@@ -1,8 +1,8 @@
 import type { Draft } from "immer";
-import type { IUser } from "../../auth/types.js";
-import { type DDL, DDLPermissionsSchema } from "../types.js";
+import type { IUser } from "../../auth/types.ts";
+import { type DDL, DDLPermissionsSchema } from "../types.ts";
 
-import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.js";
+import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.ts";
 import type { WriteError } from "../../types.ts";
 
 

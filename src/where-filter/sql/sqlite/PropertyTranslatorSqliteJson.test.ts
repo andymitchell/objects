@@ -1,10 +1,10 @@
 import Database from 'better-sqlite3';
-import sqliteWhereClauseBuilder, { SqlitePropertyMapSchema, spreadJsonArraysSqlite } from "./sqliteWhereClauseBuilder.js";
-import { standardTests, type MatchJavascriptObjectInTesting } from "./standardTests.js";
-import type { PreparedWhereClauseResult } from "./whereClauseEngine.js";
-import { SQLITE_UNSAFE_WARNING } from "./convertDotPropPathToSqliteJsonPath.js";
+import { sqliteWhereClauseBuilder, PropertyTranslatorSqliteJsonSchema, spreadJsonArraysSqlite } from "./index.ts";
+import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
+import type { PreparedWhereClauseResult } from "../types.ts";
+import { SQLITE_UNSAFE_WARNING } from "./convertDotPropPathToSqliteJsonPath.ts";
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
+import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
 
 
 describe('sqlite where clause builder', () => {
@@ -15,7 +15,7 @@ describe('sqlite where clause builder', () => {
             db.exec('CREATE TABLE test_table (pk INTEGER PRIMARY KEY AUTOINCREMENT, recordColumn TEXT NOT NULL)');
             db.prepare('INSERT INTO test_table (recordColumn) VALUES (?)').run(JSON.stringify(object));
 
-            const pm = new SqlitePropertyMapSchema(schema, 'recordColumn');
+            const pm = new PropertyTranslatorSqliteJsonSchema(schema, 'recordColumn');
 
             let clause: PreparedWhereClauseResult | undefined;
             try {

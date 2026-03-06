@@ -7,8 +7,7 @@
 
 import { PGlite } from '@electric-sql/pglite';
 import { z } from 'zod';
-import postgresWhereClauseBuilder, { PropertyMapSchema } from '../where-filter/postgresWhereClauseBuilder.ts';
-import type { WhereFilterDefinition } from '../where-filter/types.ts';
+import { postgresWhereClauseBuilder, PropertyMapSchema, type WhereFilterDefinition } from '../where-filter/index.ts';
 
 // ─── DB Proxy (simulated network latency) ────────────────────────────────────
 

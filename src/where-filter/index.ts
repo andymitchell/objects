@@ -1,29 +1,46 @@
 
-import { convertDotPropPathToPostgresJsonPath } from './convertDotPropPathToPostgresJsonPath.ts';
-import { convertDotPropPathToSqliteJsonPath } from './convertDotPropPathToSqliteJsonPath.ts';
 import matchJavascriptObject, { compileMatchJavascriptObject, filterJavascriptObjects } from './matchJavascriptObject.ts';
-import postgresWhereClauseBuilder, { PropertyMapSchema } from './postgresWhereClauseBuilder.ts';
-import sqliteWhereClauseBuilder, { SqlitePropertyMapSchema } from './sqliteWhereClauseBuilder.ts';
-import type { IPropertyMap, PreparedWhereClauseStatement, PreparedWhereClauseResult, WhereClauseError } from './whereClauseEngine.ts';
 import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
 import { isLogicFilter, isPartialObjectFilter } from './typeguards.ts';
-import type {  MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep} from './types.ts';
+import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep } from './types.ts';
+
+// SQL re-exports
+import {
+    postgresWhereClauseBuilder,
+    PropertyTranslatorJsonbSchema,
+    PropertyTranslatorJsonb,
+    sqliteWhereClauseBuilder,
+    PropertyTranslatorSqliteJsonSchema,
+    PropertyTranslatorSqliteJson,
+    convertDotPropPathToPostgresJsonPath,
+    convertDotPropPathToSqliteJsonPath,
+} from './sql/index.ts';
+import type { IPropertyTranslator, PreparedWhereClauseStatement, PreparedWhereClauseResult, WhereClauseError } from './sql/index.ts';
 
 export {
     matchJavascriptObject,
     filterJavascriptObjects,
     compileMatchJavascriptObject,
     postgresWhereClauseBuilder,
-    PropertyMapSchema,
     sqliteWhereClauseBuilder,
-    SqlitePropertyMapSchema,
     WhereFilterSchema,
     isWhereFilterDefinition,
     isPartialObjectFilter,
     isLogicFilter,
     convertDotPropPathToPostgresJsonPath,
-    convertDotPropPathToSqliteJsonPath
+    convertDotPropPathToSqliteJsonPath,
+    // New names
+    PropertyTranslatorJsonbSchema,
+    PropertyTranslatorJsonb,
+    PropertyTranslatorSqliteJsonSchema,
+    PropertyTranslatorSqliteJson,
 };
+
+// Backwards-compat aliases
+/** @deprecated Use `PropertyTranslatorJsonbSchema` instead. */
+export const PropertyMapSchema = PropertyTranslatorJsonbSchema;
+/** @deprecated Use `PropertyTranslatorSqliteJsonSchema` instead. */
+export const SqlitePropertyMapSchema = PropertyTranslatorSqliteJsonSchema;
 
 export type {
     MatchJavascriptObject,
@@ -34,6 +51,10 @@ export type {
     PreparedWhereClauseStatement,
     PreparedWhereClauseResult,
     WhereClauseError,
-    IPropertyMap,
-    ValueComparisonFlexi
+    ValueComparisonFlexi,
+    // New name
+    IPropertyTranslator,
 };
+
+/** @deprecated Use `IPropertyTranslator` instead. */
+export type { IPropertyTranslator as IPropertyMap };

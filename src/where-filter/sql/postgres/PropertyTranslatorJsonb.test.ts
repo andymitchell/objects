@@ -1,12 +1,12 @@
-import postgresWhereClauseBuilder, {  type PreparedWhereClauseResult, PropertyMapSchema, spreadJsonbArrays } from "./postgresWhereClauseBuilder.js";
+import { postgresWhereClauseBuilder, PropertyTranslatorJsonbSchema, spreadJsonbArrays } from "./index.ts";
+import type { PreparedWhereClauseResult } from "../types.ts";
 
-
-import {  standardTests, type MatchJavascriptObjectInTesting } from "./standardTests.js";
+import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
 
 import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
-import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.js";
+import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
+import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.ts";
 
 
 
@@ -30,8 +30,8 @@ describe('postgres where clause builder', () => {
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
         return await runner.sequentialTest(async (runner, db, schemaName, schemaScope) => {
-            
-            const pm = new PropertyMapSchema(schema, 'recordColumn');
+
+            const pm = new PropertyTranslatorJsonbSchema(schema, 'recordColumn');
 
             await db.exec(`CREATE TABLE IF NOT EXISTS ${schemaScope('test_table_123')} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
 
@@ -81,81 +81,18 @@ describe('postgres where clause builder', () => {
                 throw e;
             }
         } )
-        
+
     }
 
-    /*
-    const schema = z.object({
-        'contact': z.object({
-            name: z.string(),
-            age: z.number().optional(),
-            children: z.array(z.object({
-                name: z.string(),
-                family: z.object({
-                    grandchildren: z.array(z.object({
-                        name: z.string()
-                    }))
-                })
-            })).optional()
-        })
-    });
-    type S1 = z.infer<typeof schema>;
-
-    const object:S1 = {
-        'contact': {
-            'name': 'P1',
-            'children': [
-                {
-                    name: 'C1',
-                    family: {
-                        'grandchildren': [
-                            {
-                                name: 'G1'
-                            }
-                        ]
-                    }
-                },
-                {
-                    name: 'C2',
-                    family: {
-                        'grandchildren': [
-                            {
-                                name: 'G2'
-                            },
-                            {
-                                name: 'G3'
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
-    }
-    const filter:WhereFilterDefinition<S1> = {
-        'contact.children.family.grandchildren': {
-            name: 'G3'
-        }
-    }
-
-    const result = matchJavascriptObjectInDb(object, filter, schema);
-    debugger;
-    */
-
-
-    
-
-    
-    
     standardTests({
         test,
         expect,
         matchJavascriptObject:matchJavascriptObjectInDb,
         implementationName: 'postgres'
     })
-    
-    
 
-    
+
+
     test('spreadJsonbArrays 0 array', () => {
 
         const schema = z.object({
@@ -182,7 +119,7 @@ describe('postgres where clause builder', () => {
         }
         const sa = spreadJsonbArrays('recordColumn', path);
         expect(sa).toBe(undefined)
-        
+
 
     });
 
@@ -211,7 +148,7 @@ describe('postgres where clause builder', () => {
             target = target!.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
-        
+
         expect(sa).toEqual(
             {
                 "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1",
@@ -219,10 +156,10 @@ describe('postgres where clause builder', () => {
                 "output_identifier": "recordColumn1 #>> '{}'"
             }
         )
-        
+
 
     });
-    
+
     test('spreadJsonbArrays 2x nested', () => {
 
         const schema = z.object({
@@ -248,7 +185,7 @@ describe('postgres where clause builder', () => {
             target = target!.parent;
         }
         const sa = spreadJsonbArrays('recordColumn', path);
-        
+
         expect(sa).toEqual(
             {
                 "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1 CROSS JOIN jsonb_array_elements(recordColumn1->'family'->'grandchildren') AS recordColumn2",
@@ -256,11 +193,11 @@ describe('postgres where clause builder', () => {
                 "output_identifier": "recordColumn2 #>> '{}'"
             }
         )
-        
+
 
     });
-    
 
-    
-    
+
+
+
 })

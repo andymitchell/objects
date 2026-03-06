@@ -1,37 +1,41 @@
 
 import { z } from "zod";
-import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "./types.js";
-import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from './schemas.ts';
-import { convertSchemaToDotPropPathTree } from "../dot-prop-paths/zod.js";
-import type { TreeNode, TreeNodeMap, ZodKind } from "../dot-prop-paths/zod.js";
-import isPlainObject from "../utils/isPlainObject.js";
-import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.js";
-import { isValueComparisonRange, isValueComparisonScalar } from "./typeguards.ts";
-import { ValueComparisonRangeOperators } from "./consts.ts";
-import { buildWhereClause, whereClauseBuilder, isPreparedStatementArgument } from "./whereClauseEngine.ts";
-import type { IPropertyMap, PreparedWhereClauseResult, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "./whereClauseEngine.ts";
+import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "../../types.ts";
+import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
+import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
+import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/zod.ts";
+import isPlainObject from "../../../utils/isPlainObject.ts";
+import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.ts";
+import { isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
+import { ValueComparisonRangeOperators } from "../../consts.ts";
+import { compileWhereFilter, compileWhereFilterRecursive } from "../compileWhereFilter.ts";
+import { isPreparedStatementArgument } from "../types.ts";
+import type { IPropertyTranslator, PreparedWhereClauseResult, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
+import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
+import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
 
 /**
  * Converts a WhereFilterDefinition into a parameterised SQLite WHERE clause for a JSON column.
- * SQLite equivalent of postgresWhereClauseBuilder: validates the filter, then delegates to the shared recursive engine.
- * Returns error-as-value: check `result.success` before accessing fields.
+ * The mental model: your Zod schema describes the shape stored in a JSON TEXT column, and this function
+ * turns a MongoDB-style query object into the equivalent SQL WHERE clause with `?` positional parameters.
+ * Internally validates the filter, walks the filter tree, and delegates leaf comparisons to a PropertyTranslator.
  *
  * @example
- * const pm = new SqlitePropertyMapSchema(myZodSchema, 'data');
+ * const pm = new PropertyTranslatorSqliteJsonSchema(myZodSchema, 'data');
  * const result = sqliteWhereClauseBuilder({ name: 'Andy' }, pm);
  * if (result.success) { use(result.where_clause_statement, result.statement_arguments); }
  */
-export default function sqliteWhereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyMap<T>): PreparedWhereClauseResult {
-    return buildWhereClause(filter, propertySqlMap);
+export default function sqliteWhereClauseBuilder<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyTranslator<T>): PreparedWhereClauseResult {
+    return compileWhereFilter(filter, propertySqlMap);
 }
 
 
 /**
- * SQLite JSON implementation of IPropertyMap.
+ * SQLite JSON implementation of IPropertyTranslator.
  * Generates SQL fragments for a single JSON TEXT column using TreeNodeMap for path validation,
  * json_each for array spreading, and ? positional placeholders.
  */
-class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>> implements IPropertyMap<T> {
+class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<string, any>> implements IPropertyTranslator<T> {
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;
@@ -86,7 +90,7 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                 path.unshift(target);
                 target = target?.parent;
             }
-            let sa: SpreadedJsonArrays | undefined;
+            let sa: ReturnType<typeof spreadJsonArraysSqlite>;
 
             let subClause: string = '';
             const treeNode = this.nodeMap[dotpropPath];
@@ -166,9 +170,9 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                             subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, sa.output_column);
                         }
                     } else if (isWhereFilterDefinition(elemVal)) {
-                        // Object array: recurse with sub-PropertyMap scoped to array element schema
-                        const subPropertyMap = new SqlitePropertyMapSchema(treeNode.schema!, sa.output_column, true);
-                        const result = whereClauseBuilder(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
+                        // Object array: recurse with sub-PropertyTranslator scoped to array element schema
+                        const subPropertyMap = new PropertyTranslatorSqliteJsonSchema(treeNode.schema!, sa.output_column, true);
+                        const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
                         subClause = result;
                     }
                 } else {
@@ -177,11 +181,11 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
                         const keys = Object.keys(filter) as Array<keyof typeof filter>;
                         let andClauses: string[] = [];
 
-                        const subPropertyMap = new SqlitePropertyMapSchema(treeNode.schema!, sa.output_column, true);
+                        const subPropertyMap = new PropertyTranslatorSqliteJsonSchema(treeNode.schema!, sa.output_column, true);
 
                         keys.forEach(key => {
                             const subFilter: WhereFilterDefinition = { [key]: filter[key] };
-                            const result = whereClauseBuilder(subFilter, statementArguments, subPropertyMap, errors, rootFilter);
+                            const result = compileWhereFilterRecursive(subFilter, statementArguments, subPropertyMap, errors, rootFilter);
                             andClauses = [...andClauses, result];
                         });
 
@@ -363,12 +367,12 @@ class SqliteBasePropertyMap<T extends Record<string, any> = Record<string, any>>
 
 
 /**
- * SQLite PropertyMap that derives its TreeNodeMap from a Zod schema automatically.
+ * SQLite PropertyTranslator that derives its TreeNodeMap from a Zod schema automatically.
  *
  * @example
- * const pm = new SqlitePropertyMapSchema(ContactSchema, 'recordColumn');
+ * const pm = new PropertyTranslatorSqliteJsonSchema(ContactSchema, 'recordColumn');
  */
-export class SqlitePropertyMapSchema<T extends Record<string, any> = Record<string, any>> extends SqliteBasePropertyMap<T> implements IPropertyMap<T> {
+export class PropertyTranslatorSqliteJsonSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyTranslatorSqliteJson<T> implements IPropertyTranslator<T> {
     constructor(schema: z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?: boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
@@ -376,75 +380,10 @@ export class SqlitePropertyMapSchema<T extends Record<string, any> = Record<stri
 }
 
 /**
- * SQLite PropertyMap that accepts a pre-built TreeNodeMap directly.
+ * SQLite PropertyTranslator that accepts a pre-built TreeNodeMap directly.
  */
-export class SqlitePropertyMap<T extends Record<string, any> = Record<string, any>> extends SqliteBasePropertyMap<T> implements IPropertyMap<T> {
+export class PropertyTranslatorSqliteJson<T extends Record<string, any> = Record<string, any>> extends BasePropertyTranslatorSqliteJson<T> implements IPropertyTranslator<T> {
     constructor(nodeMap: TreeNodeMap, sqlColumnName: string, doNotSpreadArray?: boolean) {
         super(nodeMap, sqlColumnName, doNotSpreadArray);
     }
-}
-
-
-type SpreadedJsonArrays = { sql: string, output_column: string, output_identifier: string };
-/**
- * Builds a FROM clause that spreads nested JSON arrays using `json_each()`, joined via CROSS JOIN.
- * SQLite equivalent of spreadJsonbArrays. Each array layer produces a new aliased table.
- *
- * @example
- * // For path children.grandchildren.name (two arrays):
- * // → "json_each(col, '$.children') AS je1 CROSS JOIN json_each(je1.value, '$.grandchildren') AS je2"
- * // output_column: "je2.value", output_identifier: "je2.value"
- */
-export function spreadJsonArraysSqlite(column: string, nodesDesc: TreeNode[]): SpreadedJsonArrays | undefined {
-    const parts: { sql: string, output_value: string }[] = [];
-
-    // Derive alias prefix from column to avoid conflicts in nested spreading.
-    // Top-level: column='recordColumn' → prefix='je', aliases: je1, je2
-    // Nested: column='je1.value' → prefix='je1_', aliases: je1_1, je1_2
-    const aliasMatch = column.match(/^(je\S*)\./);
-    const aliasBase = aliasMatch ? aliasMatch[1] + '_' : 'je';
-
-    let arrayDepth = 1;
-    let currentSource = column;
-    let pathSegments: string[] = [];
-
-    for (let i = 0; i < nodesDesc.length; i++) {
-        const node = nodesDesc[i];
-        if (!node) throw new Error("node was empty in spreadJsonArraysSqlite");
-        if (node.name) {
-            pathSegments = [...pathSegments, node.name];
-            if (node.kind === 'ZodArray') {
-                const alias = `${aliasBase}${arrayDepth}`;
-                const jsonPath = '$.' + pathSegments.join('.');
-                parts.push({
-                    sql: `json_each(${currentSource}, '${jsonPath}') AS ${alias}`,
-                    output_value: `${alias}.value`
-                });
-
-                arrayDepth++;
-                currentSource = `${alias}.value`;
-                pathSegments = [];
-            }
-        }
-    }
-
-    if (parts.length === 0) return undefined;
-
-    const lastPart = parts[parts.length - 1]!;
-    return {
-        sql: parts.map(p => p.sql).join(' CROSS JOIN '),
-        output_column: lastPart.output_value,
-        output_identifier: lastPart.output_value
-    };
-}
-
-
-type ValueComparisonRangeOperatorSqlTyped = {
-    [K in typeof ValueComparisonRangeOperators[number]]: (sqlKey: string, parameterizedQueryPlaceholder: string) => string;
-};
-const ValueComparisonRangeOperatorsSqlFunctions: ValueComparisonRangeOperatorSqlTyped = {
-    '$gt': (sqlKey, placeholder) => `${sqlKey} > ${placeholder}`,
-    '$lt': (sqlKey, placeholder) => `${sqlKey} < ${placeholder}`,
-    '$gte': (sqlKey, placeholder) => `${sqlKey} >= ${placeholder}`,
-    '$lte': (sqlKey, placeholder) => `${sqlKey} <= ${placeholder}`,
 }

@@ -33,11 +33,11 @@ export type WhereClauseError = {
  * Consumers must check `.success` before accessing statement fields.
  */
 export type PreparedWhereClauseResult =
-    | { success: true; where_clause_statement: string; statement_arguments: PreparedStatementArgument[] }
+    | { success: true; } & PreparedWhereClauseStatement
     | { success: false; errors: WhereClauseError[] };
 
-/** @deprecated Use `PreparedWhereClauseResult` instead. */
-export type PreparedWhereClauseStatement = { whereClauseStatement: string, statementArguments: PreparedStatementArgument[] };
+
+export type PreparedWhereClauseStatement = { where_clause_statement: string, statement_arguments: PreparedStatementArgument[] };
 export type PreparedStatementArgument = string | number | boolean | null;
 export type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
 

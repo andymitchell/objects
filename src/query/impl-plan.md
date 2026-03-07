@@ -591,7 +591,7 @@ Already done. `@andyrmitchell/utils/sql-parameters` exports:
 **IMPORTANT:** Always import from `@andyrmitchell/utils/sql-parameters`, NOT `@andyrmitchell/utils`. The root path re-exports pg-only deprecated wrappers with no `dialect` param.
 
 
-### [ ] Phase 2 — Extract `src/utils/sql/`
+### [x] Phase 2 — Extract `src/utils/sql/`
 
 1. Create `utils/sql/types.ts`:
    - Move `PreparedStatementArgument`, `PreparedStatementArgumentOrObject`, `isPreparedStatementArgument` from `where-filter/sql/types.ts`

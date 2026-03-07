@@ -2,6 +2,10 @@
 import type { WhereFilterDefinition } from "../types.ts";
 import type { ValueComparisonRangeOperators } from "../consts.ts";
 
+// Re-export base SQL types from canonical location
+export type { PreparedStatementArgument, PreparedStatementArgumentOrObject } from '../../utils/sql/types.ts';
+export { isPreparedStatementArgument } from '../../utils/sql/types.ts';
+
 /**
  * Dialect-specific abstraction for converting a single dot-prop path + filter value into SQL.
  * Implementations know how to map WhereFilterDefinition leaf values to dialect-specific SQL fragments.
@@ -38,13 +42,6 @@ export type PreparedWhereClauseResult =
 
 
 export type PreparedWhereClauseStatement = { where_clause_statement: string, statement_arguments: PreparedStatementArgument[] };
-export type PreparedStatementArgument = string | number | boolean | null;
-export type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
-
-/** Typeguard: value is a primitive that can be used as a parameterised query argument. */
-export function isPreparedStatementArgument(x: any): x is PreparedStatementArgument {
-    return ['string', 'number', 'boolean'].includes(typeof x);
-}
 
 /** Maps range operators to dialect-agnostic SQL comparison functions (>, <, >=, <=). */
 export type ValueComparisonRangeOperatorSqlFunctions = {

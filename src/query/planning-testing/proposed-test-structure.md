@@ -1247,6 +1247,8 @@ describe('Query Module Integration', () => {
 
 # Plan
 
+_Important: run sequentially and check off as you go_
+
 ## [ ] Task 1
 
 In all affected test files, wrap _all_ existing tests in a single `describe` block called 'DEPRECATED_OLD_TESTS' with a comment saying `// these should be safe to remove as replaced`
@@ -1259,3 +1261,10 @@ Confirm with me your understanding and let me approve it.
 
 Then build all the test files above in `Test Files To Implement`. Keep the wrapped DEPRECATED_OLD_TESTS at the bottom of the file, and implement these tests. 
 
+## [ ] Task 3
+
+Validate with the regular tests, linting checks, and run the type checker (`tsc noEmit`). 
+
+Fix trivial ones only. Do not fix anything that involves logic/intent of the function/feature/test. 
+
+For every other issue that is more complex, create a file called `dangerous_test_fails.md` that includes each failing test/issue. In it, provide the test name, the underlying cause, as much context as a human would need to understand it (be conscise), your hypothesis on how to fix it. 

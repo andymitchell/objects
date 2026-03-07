@@ -1,0 +1,188 @@
+import { describe, expect, it } from 'vitest';
+import { _buildAfterPkWhereClause } from './buildAfterPkWhere.ts';
+
+const identity = (k: string) => k;
+const jsonExpr = (k: string) => `data->>'${k}'`;
+
+describe('_buildAfterPkWhereClause', () => {
+    describe('defense-in-depth: empty sort', () => {
+        it('returns error when sort is empty', () => {
+            const result = _buildAfterPkWhereClause('abc', [], identity, 'id', 'emails', 'pg');
+            expect(result.success).toBe(false);
+            if (!result.success) {
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain('non-empty sort');
+            }
+        });
+    });
+
+    describe('Postgres dialect', () => {
+        it('generates correct SQL for a single sort key (DESC)', () => {
+            const result = _buildAfterPkWhereClause(
+                'abc',
+                [{ key: 'date', direction: -1 }, { key: 'id', direction: 1 }],
+                identity,
+                'id',
+                'emails',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.parameters).toEqual(['abc']);
+            // First branch: date < subquery (DESC → <)
+            expect(result.statement.sql).toContain('date < (SELECT date FROM "emails" WHERE id = $1)');
+            // Second branch: date equal + id > subquery (PK tiebreaker ASC → >)
+            expect(result.statement.sql).toContain('date IS NOT DISTINCT FROM');
+            expect(result.statement.sql).toContain('id > (SELECT id FROM "emails" WHERE id = $1)');
+        });
+
+        it('generates correct SQL for a single ascending sort key', () => {
+            const result = _buildAfterPkWhereClause(
+                42,
+                [{ key: 'name', direction: 1 }, { key: 'id', direction: 1 }],
+                identity,
+                'id',
+                'users',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.parameters).toEqual([42]);
+            // ASC → >
+            expect(result.statement.sql).toContain('name > (SELECT name FROM "users" WHERE id = $1)');
+        });
+
+        it('uses IS NOT DISTINCT FROM for NULL-safe equality', () => {
+            const result = _buildAfterPkWhereClause(
+                'abc',
+                [{ key: 'a', direction: -1 }, { key: 'b', direction: 1 }, { key: 'id', direction: 1 }],
+                identity,
+                'id',
+                't',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.sql).toContain('IS NOT DISTINCT FROM');
+            // Should have 3 OR branches
+            const orCount = (result.statement.sql.match(/\) OR \(/g) || []).length;
+            expect(orCount).toBe(2); // 3 branches → 2 OR separators
+        });
+
+        it('wraps NULL-aware comparison around the direction operator', () => {
+            const result = _buildAfterPkWhereClause(
+                'x',
+                [{ key: 'score', direction: -1 }],
+                identity,
+                'id',
+                't',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            // NULL-aware pattern: (sub IS NOT NULL AND (row < sub OR row IS NULL))
+            expect(result.statement.sql).toContain('IS NOT NULL');
+            expect(result.statement.sql).toContain('IS NULL');
+        });
+    });
+
+    describe('SQLite dialect', () => {
+        it('uses IS for NULL-safe equality instead of IS NOT DISTINCT FROM', () => {
+            const result = _buildAfterPkWhereClause(
+                'abc',
+                [{ key: 'date', direction: -1 }, { key: 'id', direction: 1 }],
+                identity,
+                'id',
+                'emails',
+                'sqlite'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.sql).toContain('IS (SELECT');
+            expect(result.statement.sql).not.toContain('IS NOT DISTINCT FROM');
+        });
+
+        it('uses ? placeholder for parameters', () => {
+            const result = _buildAfterPkWhereClause(
+                'abc',
+                [{ key: 'date', direction: -1 }, { key: 'id', direction: 1 }],
+                identity,
+                'id',
+                'emails',
+                'sqlite'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.sql).toContain('WHERE id = ?');
+            expect(result.statement.sql).not.toContain('$1');
+        });
+    });
+
+    describe('JSON column expressions', () => {
+        it('uses pathToSqlExpression for sort key SQL generation', () => {
+            const result = _buildAfterPkWhereClause(
+                'abc',
+                [{ key: 'date', direction: -1 }, { key: 'id', direction: 1 }],
+                jsonExpr,
+                "data->>'id'",
+                'emails',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.sql).toContain("data->>'date'");
+            expect(result.statement.sql).toContain("data->>'id'");
+        });
+    });
+
+    describe('table name quoting', () => {
+        it('quotes table names with special characters', () => {
+            const result = _buildAfterPkWhereClause(
+                'x',
+                [{ key: 'id', direction: 1 }],
+                identity,
+                'id',
+                'user-data',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            expect(result.statement.sql).toContain('"user-data"');
+        });
+    });
+
+    describe('multi-key sort with mixed directions', () => {
+        it('generates correct operators for mixed ASC/DESC sort', () => {
+            const result = _buildAfterPkWhereClause(
+                'cursor_pk',
+                [
+                    { key: 'priority', direction: -1 },  // DESC → <
+                    { key: 'name', direction: 1 },        // ASC → >
+                    { key: 'id', direction: 1 },           // PK tiebreaker ASC → >
+                ],
+                identity,
+                'id',
+                'tasks',
+                'pg'
+            );
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+
+            const sql = result.statement.sql;
+            // Branch 1: priority < sub
+            expect(sql).toContain('priority < (SELECT priority');
+            // Branch 2: priority eq + name > sub
+            expect(sql).toContain('name > (SELECT name');
+            // Branch 3: priority eq + name eq + id > sub
+            expect(sql).toContain('id > (SELECT id');
+        });
+    });
+});

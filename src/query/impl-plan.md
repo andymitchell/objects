@@ -603,7 +603,7 @@ Already done. `@andyrmitchell/utils/sql-parameters` exports:
    - `PropertyTranslatorJsonb.ts` / `PropertyTranslatorSqliteJson.ts` import path converters from `utils/sql/`
 6. Verify all existing where-filter tests still pass
 
-### [ ] Phase 3 — Types, Schemas + JS Runtime
+### [x] Phase 3 — Types, Schemas + JS Runtime
 
 1. Create `query/schemas.ts` with Zod schemas (`SortEntrySchema`, `SortDefinitionSchema`, `SortAndSliceSchema`). Import `PrimaryKeyValueSchema` from `src/utils/getKeyValue.ts`.
 2. Create `query/types.ts` — manually authored types with JSDoc + `expectTypeOf` alignment tests verifying they match `z.infer` of the schemas. Import `PrimaryKeyValue` from `src/utils/getKeyValue.ts`. Result types, `SortAndSliceObjectsResult`, and TableInfo variants (including `allowedColumns` on `ColumnTableInfo`).
@@ -611,7 +611,7 @@ Already done. `@andyrmitchell/utils/sql-parameters` exports:
 4. Tests for JS runtime: happy path sorting, multi-key sort, after_pk cursor, offset, limit, stale cursor → empty, edge cases (empty array, no sort, null values), invalid input → error result, after_pk without sort → error result
 5. Create `query/index.ts` barrel
 
-### [ ] Phase 4 — SQL Internals
+### [x] Phase 4 — SQL Internals
 
 1. Create `query/sql/types.ts` — SQL-specific internal types. Import `SqlDialect`, `SqlFragment` from `@andyrmitchell/utils/sql-parameters`. Use `SqlFragment` (`{ sql: string, parameters: any[] }`) as internal fragment shape.
 2. Implement `quoteIdentifier` in `query/sql/internals/quoteIdentifier.ts` — double-quote wrapping with `"` escape

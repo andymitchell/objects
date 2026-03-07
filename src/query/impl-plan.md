@@ -620,7 +620,7 @@ Already done. `@andyrmitchell/utils/sql-parameters` exports:
 5. Implement `_buildAfterPkWhereClause` (subquery strategy only) in `query/sql/internals/buildAfterPkWhere.ts` — NULL-safe equality (`IS NOT DISTINCT FROM` / `IS`), direction-aware `<`/`>` operators, empty-sort guard returning `QueryError`, uses `quoteIdentifier` for `tableName`
 6. Unit tests for each internal function — include NULL value edge cases for ORDER BY and cursor WHERE
 
-### [ ] Phase 5 — SQL Public API
+### [x] Phase 5 — SQL Public API
 
 1. Implement `prepareObjectTableQuery` in `query/sql/prepareObjectTableQuery.ts` — builds `resolvedSort` (with PK tiebreaker) early, passes to both ORDER BY and cursor WHERE builders, uses `concatSqlParameters` from `@andyrmitchell/utils/sql-parameters`, converts internal `{ sql, parameters }` to `PreparedWhereClauseStatement` at the boundary
 2. Implement `prepareColumnTableQuery` in `query/sql/prepareColumnTableQuery.ts` — same `resolvedSort` pattern, validates sort keys against `table.allowedColumns`, uses `quoteIdentifier` for `pkColumnName`

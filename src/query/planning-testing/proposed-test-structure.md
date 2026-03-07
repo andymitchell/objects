@@ -13,22 +13,34 @@ Shared behavioral tests run by all 5 adapter test files. Not a test file itself 
 ```ts
 type Execute<T extends Record<string, any>> = (
   items: T[],
-  sortAndSlice: SortAndSlice,
+  sortAndSlice: SortAndSlice<T>,
   primaryKey: keyof T & string
 ) => Promise<T[] | undefined>;
 
+// Vitest provides `it` and `expect` globally; no wrapper types needed.
+// If explicit typing is required, import { TestAPI, ExpectStatic } from 'vitest'.
 type StandardTestConfig = {
-  test: jest.It;
-  expect: jest.Expect;
+  it: TestAPI;        // from vitest
+  expect: ExpectStatic; // from vitest
   execute: Execute<any>;
   implementationName?: string;
 };
 
 export function standardTests(config: StandardTestConfig) {
-  const { test, expect, execute } = config;
+  const { it, expect, execute } = config;
 
   // --- Fixtures defined here: shared datasets with nulls, duplicates,
   //     nested props, mixed types. Zod schemas for each. ---
+  //
+  // --- Default sort: all non-sort-specific tests (limit, offset, cursor,
+  //     invariants, edge cases) use a default sort by PK ascending to
+  //     guarantee deterministic results across all adapters.
+  //     Sort-specific tests override with their own keys. ---
+  //
+  // --- Skip mechanism: `execute` may return `undefined` for a given test
+  //     to signal "not supported by this adapter" (e.g. column-table
+  //     adapters cannot sort by nested dot-prop paths). The test should
+  //     check for `undefined` and skip (e.g. `if (!result) return;`). ---
 
   describe('Sorting', () => {
 
@@ -93,25 +105,31 @@ export function standardTests(config: StandardTestConfig) {
         // Given: items with { sender: { name: string } }
         // When: sort by 'sender.name'
         // Then: sorted by the nested value
+        // SKIP: column-table adapters return undefined (dot-prop paths
+        //       are out of scope for relational column mapping).
       });
     });
   });
 
+  // NOTE: All limit/offset/cursor tests below use default sort (PK ASC)
+  // for deterministic results across all adapters (SQL has no guaranteed
+  // row order without ORDER BY).
+
   describe('Limit', () => {
     it('returns at most N items', () => {
-      // Given: 10 items, limit: 3
+      // Given: 10 items, sort by PK ASC (default), limit: 3
       // When: execute
-      // Then: 3 items
+      // Then: 3 items, first 3 in PK order
     });
 
     it('returns all when limit exceeds array length', () => {
-      // Given: 3 items, limit: 100
+      // Given: 3 items, sort by PK ASC (default), limit: 100
       // When: execute
       // Then: 3 items
     });
 
     it('returns empty when limit is zero', () => {
-      // Given: items, limit: 0
+      // Given: items, sort by PK ASC (default), limit: 0
       // When: execute
       // Then: []
     });
@@ -119,19 +137,19 @@ export function standardTests(config: StandardTestConfig) {
 
   describe('Offset Pagination', () => {
     it('skips the first N items', () => {
-      // Given: 5 sorted items, offset: 2
+      // Given: 5 items, sort by PK ASC (default), offset: 2
       // When: execute
-      // Then: last 3 items
+      // Then: last 3 items in PK order
     });
 
     it('returns empty when offset exceeds length', () => {
-      // Given: 3 items, offset: 10
+      // Given: 3 items, sort by PK ASC (default), offset: 10
       // When: execute
       // Then: []
     });
 
     it('combines offset and limit correctly', () => {
-      // Given: 10 sorted items, offset: 3, limit: 2
+      // Given: 10 items, sort by PK ASC (default), offset: 3, limit: 2
       // When: execute
       // Then: items at sorted positions 3 and 4
     });
@@ -216,16 +234,18 @@ export function standardTests(config: StandardTestConfig) {
 
   describe('Invariants', () => {
     it('calling twice with same input returns identical result', () => {
-      // Given: items, sortAndSlice, pk
+      // Given: items, sortAndSlice (with default PK ASC sort), pk
       // When: call twice
       // Then: results deep-equal
     });
 
     it('limit N result is a prefix of limit N+1 result', () => {
+      // Given: sort by PK ASC (default) — deterministic order required
       // Property: result(limit=N) is a prefix of result(limit=N+1)
     });
 
     it('offset pages are complementary with limit', () => {
+      // Given: sort by PK ASC (default) — deterministic order required
       // Property: result(offset=0, limit=N) ++ result(offset=N, limit=M)
       //           covers same items as result(limit=N+M)
     });
@@ -387,12 +407,22 @@ describe('SortAndSliceSchema', () => {
   });
 
   describe('Type Alignment', () => {
-    it('inferred schema type is assignable to manual SortAndSlice type', () => {
-      // Compile-time: expectTypeOf<z.infer<typeof SortAndSliceSchema>>().toMatchTypeOf<SortAndSlice<any>>()
+    // NOTE: z.infer<typeof SortAndSliceSchema> is WIDER than SortAndSlice<any>
+    // because the schema allows both offset AND after_pk simultaneously,
+    // while the manual type uses a discriminated union to prevent this.
+    // Direct assignability (z.infer → SortAndSlice) would fail.
+    // Instead, verify flat shape equivalence for the base fields.
+
+    it('inferred schema base fields match manual SortAndSlice base fields', () => {
+      // Compile-time: verify that the flat/shared fields (sort, limit)
+      // of z.infer<typeof SortAndSliceSchema> match those of SortAndSlice<any>.
+      // Do NOT assert full assignability — the discriminated union
+      // (offset vs after_pk) gap is acknowledged and tested separately.
     });
 
     it('manual SortAndSlice type is assignable to inferred schema type', () => {
       // Compile-time: expectTypeOf<SortAndSlice<any>>().toMatchTypeOf<z.infer<typeof SortAndSliceSchema>>()
+      // This direction works because the manual type is narrower.
     });
   });
 
@@ -416,7 +446,7 @@ Behavioral tests delegated to `standardTests`. Per-file tests cover input valida
 describe('sortAndSliceObjects', () => {
 
   // --- Standard tests (behavioral / data-result) ---
-  standardTests({ test, expect, execute, implementationName: 'runtime' });
+  standardTests({ it, expect, execute, implementationName: 'runtime' });
 
   // --- Per-file only ---
 
@@ -478,7 +508,7 @@ Behavioral tests delegated to `standardTests` (adapter creates in-memory DB, ins
 describe('prepareObjectTableQuery (sqlite|pg)', () => {
 
   // --- Standard tests (behavioral / data-result) ---
-  standardTests({ test, expect, execute: matchInDb, implementationName: 'sqlite|pg-object' });
+  standardTests({ it, expect, execute: matchInDb, implementationName: 'sqlite|pg-object' });
 
   // --- Per-file only (SQL output inspection) ---
 
@@ -493,6 +523,11 @@ describe('prepareObjectTableQuery (sqlite|pg)', () => {
       // Given: sort key 'nonexistent.path', schema without that path
       // When: prepareObjectTableQuery
       // Then: { success: false, errors }
+      // IMPL NOTE: prepareObjectTableQuery must validate sort key paths
+      // upfront against the Zod schema (via convertSchemaToDotPropPathTree)
+      // BEFORE passing to pathToSqlExpression. Returns QueryError, never throws.
+      // Defense-in-depth: pathToSqlExpression calls are also wrapped in
+      // try/catch to convert any unexpected throw to QueryError.
     });
 
     it('succeeds when no filter and no sortAndSlice provided', () => {
@@ -645,7 +680,10 @@ describe('prepareObjectTableQuery (sqlite|pg)', () => {
     it('rejects sort key paths not present in the Zod schema', () => {
       // Given: sort key 'injection.attempt'
       // When: prepareObjectTableQuery
-      // Then: error (path validation fails)
+      // Then: { success: false } — upfront path validation rejects before
+      //       any SQL is generated. Defense-in-depth try/catch around
+      //       pathToSqlExpression ensures errors-as-values even if
+      //       validation is bypassed.
     });
   });
 
@@ -685,7 +723,10 @@ Behavioral tests delegated to `standardTests` (adapter creates in-memory DB with
 describe('prepareColumnTableQuery (sqlite|pg)', () => {
 
   // --- Standard tests (behavioral / data-result) ---
-  standardTests({ test, expect, execute: matchInDb, implementationName: 'sqlite|pg-column' });
+  // NOTE: prepareColumnTableQuery requires sortAndSlice (not optional,
+  // unlike prepareObjectTableQuery). The Execute adapter always passes
+  // the value — `{}` is valid (all fields optional in SortAndSlice schema).
+  standardTests({ it, expect, execute: matchInDb, implementationName: 'sqlite|pg-column' });
 
   // --- Per-file only ---
 

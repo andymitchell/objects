@@ -2,251 +2,6 @@
 
 Hierarchy of `describe` blocks with skeleton `it` blocks (empty, with Given/When/Then comments).
 
-**Standard Tests pattern**: behavioral/data-result tests shared across all environments live in `standardTests.ts`. Each environment test file implements an `execute` adapter and calls `standardTests()`. Per-file tests cover implementation-specific concerns (SQL string output, input validation, dialect differences). See `../claude-separate-standard-tests.md` for full rationale.
-
----
-
-## File: `standardTests.ts`
-
-Shared behavioral tests run by all 5 adapter test files. Not a test file itself — a function that declares tests when called.
-
-```ts
-type Execute<T extends Record<string, any>> = (
-  items: T[],
-  sortAndSlice: SortAndSlice,
-  primaryKey: keyof T & string
-) => Promise<T[] | undefined>;
-
-type StandardTestConfig = {
-  test: jest.It;
-  expect: jest.Expect;
-  execute: Execute<any>;
-  implementationName?: string;
-};
-
-export function standardTests(config: StandardTestConfig) {
-  const { test, expect, execute } = config;
-
-  // --- Fixtures defined here: shared datasets with nulls, duplicates,
-  //     nested props, mixed types. Zod schemas for each. ---
-
-  describe('Sorting', () => {
-
-    describe('Single Key', () => {
-      it('sorts ascending by a numeric field', () => {
-        // Given: items with numeric 'age' in random order
-        // When: execute(items, { sort: [{ key: 'age', direction: 1 }] }, 'id')
-        // Then: result ordered by age ascending
-      });
-
-      it('sorts descending by a string field', () => {
-        // Given: items with string 'name'
-        // When: sort direction: -1
-        // Then: result ordered by name descending
-      });
-    });
-
-    describe('Multi-Key', () => {
-      it('uses secondary key to break ties on primary', () => {
-        // Given: items where several share the same primary sort value
-        // When: sort [category ASC, name ASC]
-        // Then: within each category, sorted by name
-      });
-
-      it('respects independent direction per key', () => {
-        // Given: items with category and date
-        // When: sort [category ASC, date DESC]
-        // Then: categories ascending, dates descending within each
-      });
-    });
-
-    describe('Null / Undefined Values', () => {
-      it('places null sort values after all non-null (ascending)', () => {
-        // Given: items where some have null for the sort key
-        // When: sort ascending
-        // Then: non-null first (sorted), nulls last
-      });
-
-      it('places undefined sort values after all non-null (ascending)', () => {
-        // Given: items where some lack the sort key entirely
-        // When: sort ascending
-        // Then: non-null first, undefined last
-      });
-
-      it('null-last applies regardless of sort direction', () => {
-        // Given: items with nulls
-        // When: sort descending
-        // Then: non-null first (sorted desc), nulls last
-      });
-    });
-
-    describe('PK Tiebreaker', () => {
-      it('deterministic order when all sort values are identical', () => {
-        // Given: items all with same sort value, different PKs
-        // When: sort by that key
-        // Then: ordered by PK ascending as tiebreaker
-      });
-    });
-
-    describe('Nested Properties', () => {
-      it('sorts by a dot-prop path into nested objects', () => {
-        // Given: items with { sender: { name: string } }
-        // When: sort by 'sender.name'
-        // Then: sorted by the nested value
-      });
-    });
-  });
-
-  describe('Limit', () => {
-    it('returns at most N items', () => {
-      // Given: 10 items, limit: 3
-      // When: execute
-      // Then: 3 items
-    });
-
-    it('returns all when limit exceeds array length', () => {
-      // Given: 3 items, limit: 100
-      // When: execute
-      // Then: 3 items
-    });
-
-    it('returns empty when limit is zero', () => {
-      // Given: items, limit: 0
-      // When: execute
-      // Then: []
-    });
-  });
-
-  describe('Offset Pagination', () => {
-    it('skips the first N items', () => {
-      // Given: 5 sorted items, offset: 2
-      // When: execute
-      // Then: last 3 items
-    });
-
-    it('returns empty when offset exceeds length', () => {
-      // Given: 3 items, offset: 10
-      // When: execute
-      // Then: []
-    });
-
-    it('combines offset and limit correctly', () => {
-      // Given: 10 sorted items, offset: 3, limit: 2
-      // When: execute
-      // Then: items at sorted positions 3 and 4
-    });
-  });
-
-  describe('Cursor Pagination (after_pk)', () => {
-
-    describe('Basic Cursor', () => {
-      it('returns items after the cursor, excluding the cursor itself', () => {
-        // Given: sorted [A, B, C, D, E], after_pk = B
-        // When: execute
-        // Then: [C, D, E]
-      });
-
-      it('returns items after cursor with limit', () => {
-        // Given: sorted [A, B, C, D, E], after_pk = B, limit = 2
-        // When: execute
-        // Then: [C, D]
-      });
-
-      it('returns empty when cursor is last item', () => {
-        // Given: sorted [A, B, C], after_pk = C
-        // When: execute
-        // Then: []
-      });
-
-      it('returns all except first when cursor is first item', () => {
-        // Given: sorted [A, B, C], after_pk = A
-        // When: execute
-        // Then: [B, C]
-      });
-    });
-
-    describe('Stale / Missing Cursor', () => {
-      it('returns empty when after_pk matches no item', () => {
-        // Given: items, after_pk = 'nonexistent'
-        // When: execute
-        // Then: []
-      });
-    });
-
-    describe('Sequential Pagination Completeness', () => {
-      it('paginating through entire dataset yields every item exactly once', () => {
-        // Given: N items, page size M
-        // When: repeatedly call with after_pk = last item of previous page
-        // Then: union of all pages === full sorted dataset, no duplicates
-      });
-
-      it('completeness holds when items have duplicate sort values', () => {
-        // Given: items with many duplicate sort values, page size < duplicate count
-        // When: sequential cursor pagination
-        // Then: all items appear exactly once
-      });
-    });
-  });
-
-  describe('Composition', () => {
-    it('applies sort before limit', () => {
-      // Given: unsorted items, sort ASC, limit 2
-      // When: execute
-      // Then: first 2 of sorted order, not first 2 of input order
-    });
-
-    it('applies sort before offset', () => {
-      // Given: unsorted items, sort ASC, offset 2
-      // When: execute
-      // Then: items after position 2 in sorted order
-    });
-
-    it('returns all items unchanged when SortAndSlice is empty', () => {
-      // Given: items, {}
-      // When: execute
-      // Then: all items present (order may vary)
-    });
-
-    it('returns at most N items when only limit is set (no sort)', () => {
-      // Given: 10 items, limit: 3, no sort keys
-      // When: execute(items, { limit: 3 }, 'id')
-      // Then: 3 items returned (order may vary)
-    });
-  });
-
-  describe('Invariants', () => {
-    it('calling twice with same input returns identical result', () => {
-      // Given: items, sortAndSlice, pk
-      // When: call twice
-      // Then: results deep-equal
-    });
-
-    it('limit N result is a prefix of limit N+1 result', () => {
-      // Property: result(limit=N) is a prefix of result(limit=N+1)
-    });
-
-    it('offset pages are complementary with limit', () => {
-      // Property: result(offset=0, limit=N) ++ result(offset=N, limit=M)
-      //           covers same items as result(limit=N+M)
-    });
-  });
-
-  describe('Edge Cases', () => {
-    it('handles empty input array', () => {
-      // Given: [], any sortAndSlice
-      // When: execute
-      // Then: []
-    });
-
-    it('handles single-item array', () => {
-      // Given: [item], sort
-      // When: execute
-      // Then: [item]
-    });
-  });
-}
-```
-
 ---
 
 ## File: `schemas.test.ts`
@@ -410,15 +165,8 @@ describe('SortAndSliceSchema', () => {
 
 ## File: `sortAndSliceObjects.test.ts`
 
-Behavioral tests delegated to `standardTests`. Per-file tests cover input validation and JS-specific immutability guarantees.
-
 ```ts
 describe('sortAndSliceObjects', () => {
-
-  // --- Standard tests (behavioral / data-result) ---
-  standardTests({ test, expect, execute, implementationName: 'runtime' });
-
-  // --- Per-file only ---
 
   describe('Input Validation', () => {
     it('returns error for negative limit', () => {
@@ -438,17 +186,196 @@ describe('sortAndSliceObjects', () => {
       // When: sortAndSliceObjects
       // Then: { success: false }
     });
+  });
 
-    it('returns error for non-integer limit', () => {
-      // Given: items, { limit: 1.5 }, pk
-      // When: sortAndSliceObjects
-      // Then: { success: false, errors: [...] }
+  describe('Sorting', () => {
+
+    describe('Single Key', () => {
+      it('sorts items in ascending order by a numeric field', () => {
+        // Given: items with numeric 'age' values in random order
+        // When: sortAndSliceObjects(items, { sort: [{ key: 'age', direction: 1 }] }, 'id')
+        // Then: items ordered by age ascending
+      });
+
+      it('sorts items in descending order by a string field', () => {
+        // Given: items with string 'name' values
+        // When: sort direction: -1
+        // Then: items ordered by name descending (lexicographic)
+      });
     });
 
-    it('returns error for invalid direction', () => {
-      // Given: items, { sort: [{ key: 'name', direction: 2 }] }, pk
+    describe('Multi-Key', () => {
+      it('uses secondary sort key to break ties on primary key', () => {
+        // Given: items where several share the same primary sort value
+        // When: sort by [category ASC, name ASC]
+        // Then: within each category, items are sorted by name
+      });
+
+      it('respects independent direction per sort key', () => {
+        // Given: items with category and date
+        // When: sort by [category ASC, date DESC]
+        // Then: categories ascending, within each category dates descending
+      });
+    });
+
+    describe('Null / Undefined Values', () => {
+      it('places items with null sort values after all non-null items', () => {
+        // Given: items where some have null for the sort key
+        // When: sort ascending
+        // Then: non-null items first (sorted), null items last
+      });
+
+      it('places items with undefined sort values after all non-null items', () => {
+        // Given: items where some lack the sort key entirely
+        // When: sort ascending
+        // Then: non-null items first, undefined items last
+      });
+
+      it('null-last behaviour applies regardless of sort direction', () => {
+        // Given: items with nulls
+        // When: sort descending
+        // Then: non-null items first (sorted desc), null items last
+      });
+    });
+
+    describe('PK Tiebreaker', () => {
+      it('produces deterministic order when all sort values are identical', () => {
+        // Given: items all with same sort value, different PKs
+        // When: sort by that key
+        // Then: items ordered by PK ascending as tiebreaker
+      });
+
+      it('does not add duplicate tiebreaker when PK is already last sort key', () => {
+        // Given: sort: [{ key: 'date', direction: -1 }, { key: 'id', direction: 1 }]
+        // When: sortAndSliceObjects
+        // Then: result identical to when PK tiebreaker would be auto-appended
+        // (Verified by comparing with sort that omits the explicit PK entry)
+      });
+    });
+
+    describe('Nested Properties', () => {
+      it('sorts by a dot-prop path into nested objects', () => {
+        // Given: items with nested structure { sender: { name: string } }
+        // When: sort by 'sender.name'
+        // Then: items sorted by the nested value
+      });
+    });
+  });
+
+  describe('Cursor Pagination (after_pk)', () => {
+
+    describe('Basic Cursor', () => {
+      it('returns items after the cursor item, excluding the cursor itself', () => {
+        // Given: sorted items [A, B, C, D, E], after_pk = B's PK
+        // When: sortAndSliceObjects
+        // Then: [C, D, E]
+      });
+
+      it('returns items after cursor with limit applied', () => {
+        // Given: sorted items [A, B, C, D, E], after_pk = B, limit = 2
+        // When: sortAndSliceObjects
+        // Then: [C, D]
+      });
+
+      it('returns empty when cursor points to last item', () => {
+        // Given: sorted items [A, B, C], after_pk = C's PK
+        // When: sortAndSliceObjects
+        // Then: []
+      });
+
+      it('returns all items except first when cursor points to first item', () => {
+        // Given: sorted items [A, B, C], after_pk = A's PK
+        // When: sortAndSliceObjects
+        // Then: [B, C]
+      });
+    });
+
+    describe('Sequential Pagination Completeness', () => {
+      it('paginating through entire dataset yields every item exactly once', () => {
+        // Given: N items, page size M
+        // When: repeatedly call with after_pk = last item of previous page
+        // Then: union of all pages equals full sorted dataset, no duplicates
+      });
+
+      it('completeness holds when items have duplicate sort values', () => {
+        // Given: items with many duplicate sort values, page size smaller than duplicates
+        // When: sequential cursor pagination
+        // Then: all items appear exactly once across pages
+      });
+
+      it('[property-based] completeness holds for random data with nulls and duplicates', () => {
+        // Given: fast-check generated array of objects with random values (including nulls, duplicates), random page size 1..N
+        // When: sequential cursor pagination via sortAndSliceObjects
+        // Then: concatenated pages equal full sorted result, no duplicates, no gaps
+      });
+    });
+
+    describe('Stale / Missing Cursor', () => {
+      it('returns empty array when after_pk matches no item', () => {
+        // Given: items, after_pk = 'nonexistent'
+        // When: sortAndSliceObjects
+        // Then: { success: true, items: [] }
+      });
+    });
+  });
+
+  describe('Offset Pagination', () => {
+    it('skips the first N items', () => {
+      // Given: 5 sorted items, offset: 2
       // When: sortAndSliceObjects
-      // Then: { success: false, errors: [...] }
+      // Then: last 3 items
+    });
+
+    it('returns empty when offset exceeds array length', () => {
+      // Given: 3 items, offset: 10
+      // When: sortAndSliceObjects
+      // Then: []
+    });
+
+    it('combines offset and limit correctly', () => {
+      // Given: 10 sorted items, offset: 3, limit: 2
+      // When: sortAndSliceObjects
+      // Then: items at positions 3 and 4
+    });
+  });
+
+  describe('Limit', () => {
+    it('returns at most N items', () => {
+      // Given: 10 items, limit: 3
+      // When: sortAndSliceObjects
+      // Then: 3 items
+    });
+
+    it('returns all items when limit exceeds array length', () => {
+      // Given: 3 items, limit: 100
+      // When: sortAndSliceObjects
+      // Then: 3 items
+    });
+
+    it('returns empty array when limit is zero', () => {
+      // Given: items, limit: 0
+      // When: sortAndSliceObjects
+      // Then: []
+    });
+  });
+
+  describe('Composition (sort + limit + offset / cursor)', () => {
+    it('applies sort before limit', () => {
+      // Given: unsorted items, sort ASC, limit 2
+      // When: sortAndSliceObjects
+      // Then: first 2 items of sorted order (not first 2 of input order)
+    });
+
+    it('applies sort before offset', () => {
+      // Given: unsorted items, sort ASC, offset 2
+      // When: sortAndSliceObjects
+      // Then: items after position 2 in sorted order
+    });
+
+    it('returns all items unchanged when SortAndSlice is empty', () => {
+      // Given: items, {}
+      // When: sortAndSliceObjects
+      // Then: items in original order, all present
     });
   });
 
@@ -465,22 +392,46 @@ describe('sortAndSliceObjects', () => {
       // Then: each result item === corresponding input item (same reference)
     });
   });
+
+  describe('Invariants', () => {
+    it('calling twice with same input returns identical result', () => {
+      // Given: items, sortAndSlice, pk
+      // When: call twice
+      // Then: results deep-equal
+    });
+
+    it('limit N result is a prefix of limit N+1 result', () => {
+      // Property: for any N, result(limit=N).items is a prefix of result(limit=N+1).items
+    });
+
+    it('offset pages are complementary with limit', () => {
+      // Property: result(offset=0, limit=N) ++ result(offset=N, limit=M)
+      //           covers same items as result(limit=N+M)
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('handles empty input array', () => {
+      // Given: [], any sortAndSlice
+      // When: sortAndSliceObjects
+      // Then: { success: true, items: [] }
+    });
+
+    it('handles single-item array', () => {
+      // Given: [item], sort
+      // When: sortAndSliceObjects
+      // Then: [item]
+    });
+  });
 });
 ```
 
 ---
 
-## File: `prepareObjectTableQuery.sqlite.test.ts` / `prepareObjectTableQuery.pg.test.ts`
-
-Behavioral tests delegated to `standardTests` (adapter creates in-memory DB, inserts objects as JSON, executes built clauses, returns parsed objects). Per-file tests inspect the generated SQL strings and clause structure.
+## File: `prepareObjectTableQuery.test.ts`
 
 ```ts
-describe('prepareObjectTableQuery (sqlite|pg)', () => {
-
-  // --- Standard tests (behavioral / data-result) ---
-  standardTests({ test, expect, execute: matchInDb, implementationName: 'sqlite|pg-object' });
-
-  // --- Per-file only (SQL output inspection) ---
+describe('prepareObjectTableQuery', () => {
 
   describe('Input Validation', () => {
     it('returns error for invalid SortAndSlice', () => {
@@ -677,17 +628,10 @@ describe('prepareObjectTableQuery (sqlite|pg)', () => {
 
 ---
 
-## File: `prepareColumnTableQuery.sqlite.test.ts` / `prepareColumnTableQuery.pg.test.ts`
-
-Behavioral tests delegated to `standardTests` (adapter creates in-memory DB with typed columns, inserts items as rows, executes built clauses, returns row objects). Per-file tests inspect generated SQL strings and column-specific concerns.
+## File: `prepareColumnTableQuery.test.ts`
 
 ```ts
-describe('prepareColumnTableQuery (sqlite|pg)', () => {
-
-  // --- Standard tests (behavioral / data-result) ---
-  standardTests({ test, expect, execute: matchInDb, implementationName: 'sqlite|pg-column' });
-
-  // --- Per-file only ---
+describe('prepareColumnTableQuery', () => {
 
   describe('Input Validation', () => {
 
@@ -713,12 +657,6 @@ describe('prepareColumnTableQuery (sqlite|pg)', () => {
 
     it('returns error for invalid SortAndSlice', () => {
       // Given: negative limit
-      // When: prepareColumnTableQuery
-      // Then: { success: false }
-    });
-
-    it('returns error for negative limit', () => {
-      // Given: { limit: -1 }
       // When: prepareColumnTableQuery
       // Then: { success: false }
     });
@@ -855,223 +793,6 @@ describe('prepareColumnTableQuery (sqlite|pg)', () => {
 
 ---
 
-## File: `sql/internals/quoteIdentifier.test.ts`
-
-```ts
-describe('quoteIdentifier', () => {
-  it('wraps a simple identifier in double quotes', () => {
-    // Given: 'name'
-    // When: quoteIdentifier('name')
-    // Then: '"name"'
-  });
-
-  it('handles reserved words', () => {
-    // Given: 'order'
-    // When: quoteIdentifier('order')
-    // Then: '"order"'
-  });
-
-  it('handles special characters', () => {
-    // Given: 'user-name'
-    // When: quoteIdentifier('user-name')
-    // Then: '"user-name"'
-  });
-
-  it('escapes embedded double quotes by doubling them', () => {
-    // Given: 'col"name'
-    // When: quoteIdentifier('col"name')
-    // Then: '"col""name"'
-  });
-
-  it('handles empty string', () => {
-    // Given: ''
-    // When: quoteIdentifier('')
-    // Then: '""'
-  });
-});
-```
-
----
-
-## File: `sql/internals/buildOrderByClause.test.ts`
-
-```ts
-describe('buildOrderByClause', () => {
-
-  describe('Postgres', () => {
-    it('generates ASC/DESC with NULLS LAST', () => {
-      // Given: dialect 'pg', sort key ASC
-      // When: buildOrderByClause
-      // Then: contains 'ASC NULLS LAST'
-    });
-
-    it('joins multiple keys with commas', () => {
-      // Given: dialect 'pg', two sort keys
-      // When: buildOrderByClause
-      // Then: comma-separated ORDER BY entries
-    });
-
-    it('uses pathToSqlExpression for JSON column access', () => {
-      // Given: dialect 'pg', objectColumnName 'data', sort key 'sender.name'
-      // When: buildOrderByClause
-      // Then: ORDER BY uses JSON path extraction expression
-    });
-  });
-
-  describe('SQLite', () => {
-    it('simulates NULLS LAST via IS NULL', () => {
-      // Given: dialect 'sqlite', sort key ASC
-      // When: buildOrderByClause
-      // Then: contains IS NULL simulation for NULLS LAST
-    });
-
-    it('joins multiple keys with IS NULL pairs', () => {
-      // Given: dialect 'sqlite', two sort keys
-      // When: buildOrderByClause
-      // Then: each key has an IS NULL companion entry
-    });
-
-    it('uses pathToSqlExpression for JSON column access', () => {
-      // Given: dialect 'sqlite', objectColumnName 'data', sort key 'sender.name'
-      // When: buildOrderByClause
-      // Then: ORDER BY uses JSON path extraction expression
-    });
-  });
-});
-```
-
----
-
-## File: `sql/internals/buildLimitOffset.test.ts`
-
-```ts
-describe('buildLimitOffset', () => {
-
-  describe('_buildLimitClause', () => {
-    it('Postgres uses $1 placeholder', () => {
-      // Given: dialect 'pg', limit 10
-      // When: _buildLimitClause
-      // Then: statement contains '$1', args [10]
-    });
-
-    it('SQLite uses ? placeholder', () => {
-      // Given: dialect 'sqlite', limit 10
-      // When: _buildLimitClause
-      // Then: statement contains '?', args [10]
-    });
-
-    it('handles zero limit', () => {
-      // Given: limit 0
-      // When: _buildLimitClause
-      // Then: statement with 0 as parameter value
-    });
-  });
-
-  describe('_buildOffsetClause', () => {
-    it('Postgres uses $1 placeholder', () => {
-      // Given: dialect 'pg', offset 20
-      // When: _buildOffsetClause
-      // Then: statement contains '$1', args [20]
-    });
-
-    it('SQLite uses ? placeholder', () => {
-      // Given: dialect 'sqlite', offset 20
-      // When: _buildOffsetClause
-      // Then: statement contains '?', args [20]
-    });
-
-    it('handles zero offset', () => {
-      // Given: offset 0
-      // When: _buildOffsetClause
-      // Then: statement with 0 as parameter value
-    });
-  });
-});
-```
-
----
-
-## File: `sql/internals/buildAfterPkWhere.test.ts`
-
-```ts
-describe('buildAfterPkWhere', () => {
-
-  describe('Defense in Depth', () => {
-    it('returns error when sort is empty', () => {
-      // Given: empty sort array, after_pk set
-      // When: buildAfterPkWhere
-      // Then: error result
-    });
-  });
-
-  describe('Postgres', () => {
-    it('generates correct comparison for single key DESC', () => {
-      // Given: dialect 'pg', sort [date DESC], after_pk
-      // When: buildAfterPkWhere
-      // Then: WHERE uses < comparison via subquery
-    });
-
-    it('generates correct comparison for single key ASC', () => {
-      // Given: dialect 'pg', sort [name ASC], after_pk
-      // When: buildAfterPkWhere
-      // Then: WHERE uses > comparison via subquery
-    });
-
-    it('uses IS NOT DISTINCT FROM for NULL-safe equality', () => {
-      // Given: dialect 'pg', multi-key sort with after_pk
-      // When: buildAfterPkWhere
-      // Then: equality branches use IS NOT DISTINCT FROM
-    });
-
-    it('wraps NULL-aware comparison around direction operator', () => {
-      // Given: dialect 'pg', sort key with potential NULLs
-      // When: buildAfterPkWhere
-      // Then: comparison accounts for NULL ordering
-    });
-  });
-
-  describe('SQLite', () => {
-    it('uses IS for NULL-safe equality', () => {
-      // Given: dialect 'sqlite', multi-key sort with after_pk
-      // When: buildAfterPkWhere
-      // Then: equality branches use IS
-    });
-
-    it('uses ? placeholders', () => {
-      // Given: dialect 'sqlite', sort with after_pk
-      // When: buildAfterPkWhere
-      // Then: all placeholders are ?
-    });
-  });
-
-  describe('JSON Column Expressions', () => {
-    it('uses pathToSqlExpression for JSON column access', () => {
-      // Given: objectColumnName 'data', sort key 'sender.name'
-      // When: buildAfterPkWhere
-      // Then: WHERE clause uses JSON path extraction
-    });
-  });
-
-  describe('Table Name Quoting', () => {
-    it('quotes table names with special characters', () => {
-      // Given: tableName 'my-table'
-      // When: buildAfterPkWhere
-      // Then: table name is quoted in subquery
-    });
-  });
-
-  describe('Multi-Key Sort', () => {
-    it('generates OR chain for mixed ASC/DESC directions', () => {
-      // Given: sort [category ASC, date DESC, name ASC], after_pk
-      // When: buildAfterPkWhere
-      // Then: OR chain with lexicographic tuple comparison
-    });
-  });
-});
-```
-
----
-
 ## File: `flattenQueryClauses.test.ts`
 
 ```ts
@@ -1163,10 +884,79 @@ describe('flattenQueryClausesToSql', () => {
 
 ## File: `query-integration.test.ts`
 
-Most equivalence and end-to-end pagination tests are now proven by running the same `standardTests` across all 5 adapters. This file retains only tests that require composing WHERE filters with sort/pagination — something the standard tests don't cover because `execute` doesn't accept a WHERE filter.
-
 ```ts
 describe('Query Module Integration', () => {
+
+  describe('JS / SQL Equivalence', () => {
+    it('sortAndSliceObjects and prepareObjectTableQuery produce the same item order for the same data', () => {
+      // Given: a dataset, a SortAndSlice config
+      // When: sort in-memory via sortAndSliceObjects, and build SQL via prepareObjectTableQuery + execute against SQLite in-memory DB
+      // Then: both produce items in identical order
+    });
+
+    it('equivalence holds with null values in sort keys', () => {
+      // Given: dataset with nulls in sort columns
+      // When: compare JS and SQL ordering
+      // Then: identical order (nulls last in both)
+    });
+
+    it('equivalence holds with multi-key sort and cursor pagination', () => {
+      // Given: dataset, multi-key sort, after_pk cursor
+      // When: compare JS result with SQL result
+      // Then: same items in same order
+    });
+
+    it('equivalence holds for case-sensitive string sorting', () => {
+      // Given: dataset with mixed-case strings (e.g. 'apple', 'Banana', 'cherry')
+      // When: compare JS and SQL ordering
+      // Then: identical order (JS uses < operator, SQLite default collation matches)
+    });
+
+    it('[property-based] JS and SQL produce identical ordering for random data', () => {
+      // Given: fast-check generated dataset with random strings, numbers, nulls; random SortAndSlice
+      // When: sort in-memory and via SQL
+      // Then: PK orderings match
+    });
+  });
+
+  describe('End-to-End Pagination', () => {
+
+    describe('Cursor Pagination Covers All Rows', () => {
+      it('sequential cursor pages via prepareObjectTableQuery cover every row exactly once', () => {
+        // Given: N rows in SQLite table, page size M
+        // When: paginate via after_pk, flattening each page's SQL and executing
+        // Then: union of all pages === full dataset, no duplicates, no gaps
+      });
+
+      it('cursor pagination is stable when sort values have duplicates', () => {
+        // Given: rows with many duplicate sort values
+        // When: sequential cursor pagination
+        // Then: all rows appear exactly once
+      });
+
+      it('[property-based] cursor pagination completeness for random data in SQL', () => {
+        // Given: fast-check generated rows inserted into SQLite, random page size
+        // When: sequential cursor pagination via prepareObjectTableQuery + flatten + execute
+        // Then: concatenated pages equal full sorted result
+      });
+    });
+
+    describe('Stale Cursor in SQL', () => {
+      it('stale cursor returns empty result set when subquery yields no rows', () => {
+        // Given: rows in SQLite table, after_pk = 'nonexistent-pk'
+        // When: prepareObjectTableQuery + flatten + execute against SQLite
+        // Then: empty result set (subquery NULL causes WHERE to be falsy)
+      });
+    });
+
+    describe('Offset Pagination Covers All Rows', () => {
+      it('sequential offset pages cover every row exactly once', () => {
+        // Given: N rows, page size M
+        // When: paginate via offset (0, M, 2M, ...)
+        // Then: union === full dataset
+      });
+    });
+  });
 
   describe('WHERE + Sort Composition', () => {
 

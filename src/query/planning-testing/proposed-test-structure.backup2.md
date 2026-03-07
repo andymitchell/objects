@@ -206,12 +206,6 @@ export function standardTests(config: StandardTestConfig) {
       // When: execute
       // Then: all items present (order may vary)
     });
-
-    it('returns at most N items when only limit is set (no sort)', () => {
-      // Given: 10 items, limit: 3, no sort keys
-      // When: execute(items, { limit: 3 }, 'id')
-      // Then: 3 items returned (order may vary)
-    });
   });
 
   describe('Invariants', () => {
@@ -437,18 +431,6 @@ describe('sortAndSliceObjects', () => {
       // Given: items, { sort: [...], offset: 5, after_pk: 'x' }, pk
       // When: sortAndSliceObjects
       // Then: { success: false }
-    });
-
-    it('returns error for non-integer limit', () => {
-      // Given: items, { limit: 1.5 }, pk
-      // When: sortAndSliceObjects
-      // Then: { success: false, errors: [...] }
-    });
-
-    it('returns error for invalid direction', () => {
-      // Given: items, { sort: [{ key: 'name', direction: 2 }] }, pk
-      // When: sortAndSliceObjects
-      // Then: { success: false, errors: [...] }
     });
   });
 
@@ -716,12 +698,6 @@ describe('prepareColumnTableQuery (sqlite|pg)', () => {
       // When: prepareColumnTableQuery
       // Then: { success: false }
     });
-
-    it('returns error for negative limit', () => {
-      // Given: { limit: -1 }
-      // When: prepareColumnTableQuery
-      // Then: { success: false }
-    });
   });
 
   describe('ORDER BY Generation', () => {
@@ -848,223 +824,6 @@ describe('prepareColumnTableQuery (sqlite|pg)', () => {
 
     it('same input produces identical output', () => {
       // Property: idempotency
-    });
-  });
-});
-```
-
----
-
-## File: `sql/internals/quoteIdentifier.test.ts`
-
-```ts
-describe('quoteIdentifier', () => {
-  it('wraps a simple identifier in double quotes', () => {
-    // Given: 'name'
-    // When: quoteIdentifier('name')
-    // Then: '"name"'
-  });
-
-  it('handles reserved words', () => {
-    // Given: 'order'
-    // When: quoteIdentifier('order')
-    // Then: '"order"'
-  });
-
-  it('handles special characters', () => {
-    // Given: 'user-name'
-    // When: quoteIdentifier('user-name')
-    // Then: '"user-name"'
-  });
-
-  it('escapes embedded double quotes by doubling them', () => {
-    // Given: 'col"name'
-    // When: quoteIdentifier('col"name')
-    // Then: '"col""name"'
-  });
-
-  it('handles empty string', () => {
-    // Given: ''
-    // When: quoteIdentifier('')
-    // Then: '""'
-  });
-});
-```
-
----
-
-## File: `sql/internals/buildOrderByClause.test.ts`
-
-```ts
-describe('buildOrderByClause', () => {
-
-  describe('Postgres', () => {
-    it('generates ASC/DESC with NULLS LAST', () => {
-      // Given: dialect 'pg', sort key ASC
-      // When: buildOrderByClause
-      // Then: contains 'ASC NULLS LAST'
-    });
-
-    it('joins multiple keys with commas', () => {
-      // Given: dialect 'pg', two sort keys
-      // When: buildOrderByClause
-      // Then: comma-separated ORDER BY entries
-    });
-
-    it('uses pathToSqlExpression for JSON column access', () => {
-      // Given: dialect 'pg', objectColumnName 'data', sort key 'sender.name'
-      // When: buildOrderByClause
-      // Then: ORDER BY uses JSON path extraction expression
-    });
-  });
-
-  describe('SQLite', () => {
-    it('simulates NULLS LAST via IS NULL', () => {
-      // Given: dialect 'sqlite', sort key ASC
-      // When: buildOrderByClause
-      // Then: contains IS NULL simulation for NULLS LAST
-    });
-
-    it('joins multiple keys with IS NULL pairs', () => {
-      // Given: dialect 'sqlite', two sort keys
-      // When: buildOrderByClause
-      // Then: each key has an IS NULL companion entry
-    });
-
-    it('uses pathToSqlExpression for JSON column access', () => {
-      // Given: dialect 'sqlite', objectColumnName 'data', sort key 'sender.name'
-      // When: buildOrderByClause
-      // Then: ORDER BY uses JSON path extraction expression
-    });
-  });
-});
-```
-
----
-
-## File: `sql/internals/buildLimitOffset.test.ts`
-
-```ts
-describe('buildLimitOffset', () => {
-
-  describe('_buildLimitClause', () => {
-    it('Postgres uses $1 placeholder', () => {
-      // Given: dialect 'pg', limit 10
-      // When: _buildLimitClause
-      // Then: statement contains '$1', args [10]
-    });
-
-    it('SQLite uses ? placeholder', () => {
-      // Given: dialect 'sqlite', limit 10
-      // When: _buildLimitClause
-      // Then: statement contains '?', args [10]
-    });
-
-    it('handles zero limit', () => {
-      // Given: limit 0
-      // When: _buildLimitClause
-      // Then: statement with 0 as parameter value
-    });
-  });
-
-  describe('_buildOffsetClause', () => {
-    it('Postgres uses $1 placeholder', () => {
-      // Given: dialect 'pg', offset 20
-      // When: _buildOffsetClause
-      // Then: statement contains '$1', args [20]
-    });
-
-    it('SQLite uses ? placeholder', () => {
-      // Given: dialect 'sqlite', offset 20
-      // When: _buildOffsetClause
-      // Then: statement contains '?', args [20]
-    });
-
-    it('handles zero offset', () => {
-      // Given: offset 0
-      // When: _buildOffsetClause
-      // Then: statement with 0 as parameter value
-    });
-  });
-});
-```
-
----
-
-## File: `sql/internals/buildAfterPkWhere.test.ts`
-
-```ts
-describe('buildAfterPkWhere', () => {
-
-  describe('Defense in Depth', () => {
-    it('returns error when sort is empty', () => {
-      // Given: empty sort array, after_pk set
-      // When: buildAfterPkWhere
-      // Then: error result
-    });
-  });
-
-  describe('Postgres', () => {
-    it('generates correct comparison for single key DESC', () => {
-      // Given: dialect 'pg', sort [date DESC], after_pk
-      // When: buildAfterPkWhere
-      // Then: WHERE uses < comparison via subquery
-    });
-
-    it('generates correct comparison for single key ASC', () => {
-      // Given: dialect 'pg', sort [name ASC], after_pk
-      // When: buildAfterPkWhere
-      // Then: WHERE uses > comparison via subquery
-    });
-
-    it('uses IS NOT DISTINCT FROM for NULL-safe equality', () => {
-      // Given: dialect 'pg', multi-key sort with after_pk
-      // When: buildAfterPkWhere
-      // Then: equality branches use IS NOT DISTINCT FROM
-    });
-
-    it('wraps NULL-aware comparison around direction operator', () => {
-      // Given: dialect 'pg', sort key with potential NULLs
-      // When: buildAfterPkWhere
-      // Then: comparison accounts for NULL ordering
-    });
-  });
-
-  describe('SQLite', () => {
-    it('uses IS for NULL-safe equality', () => {
-      // Given: dialect 'sqlite', multi-key sort with after_pk
-      // When: buildAfterPkWhere
-      // Then: equality branches use IS
-    });
-
-    it('uses ? placeholders', () => {
-      // Given: dialect 'sqlite', sort with after_pk
-      // When: buildAfterPkWhere
-      // Then: all placeholders are ?
-    });
-  });
-
-  describe('JSON Column Expressions', () => {
-    it('uses pathToSqlExpression for JSON column access', () => {
-      // Given: objectColumnName 'data', sort key 'sender.name'
-      // When: buildAfterPkWhere
-      // Then: WHERE clause uses JSON path extraction
-    });
-  });
-
-  describe('Table Name Quoting', () => {
-    it('quotes table names with special characters', () => {
-      // Given: tableName 'my-table'
-      // When: buildAfterPkWhere
-      // Then: table name is quoted in subquery
-    });
-  });
-
-  describe('Multi-Key Sort', () => {
-    it('generates OR chain for mixed ASC/DESC directions', () => {
-      // Given: sort [category ASC, date DESC, name ASC], after_pk
-      // When: buildAfterPkWhere
-      // Then: OR chain with lexicographic tuple comparison
     });
   });
 });

@@ -1,4 +1,5 @@
 import type { PrimaryKeyValue } from '../../../utils/getKeyValue.ts';
+import type { DotPropPathConversionResult } from '../../../utils/sql/types.ts';
 import type { PreparedStatementArgument } from '../../../utils/sql/types.ts';
 import type { QueryError } from '../../types.ts';
 import type { SqlDialect, SqlFragment } from '../types.ts';
@@ -16,12 +17,12 @@ type BuildAfterPkWhereResult =
  * nothing comes after it; if row value is NULL, it comes after any non-NULL cursor.
  *
  * @example
- * _buildAfterPkWhereClause('abc', [{ key: 'date', direction: -1 }], k => `data->>'${k}'`, "data->>'id'", 'emails', 'pg')
+ * _buildAfterPkWhereClause('abc', [{ key: 'date', direction: -1 }], k => ({ success: true, expression: `data->>'${k}'` }), "data->>'id'", 'emails', 'pg')
  */
 export function _buildAfterPkWhereClause(
     afterPk: PrimaryKeyValue,
     sort: Array<{ key: string; direction: 1 | -1 }>,
-    pathToSqlExpression: (dotPropPath: string) => string,
+    pathToSqlExpression: (dotPropPath: string) => DotPropPathConversionResult,
     pkExpression: string,
     tableName: string,
     dialect: SqlDialect
@@ -43,25 +44,31 @@ export function _buildAfterPkWhereClause(
     const subqueryFor = (expr: string) =>
         `(SELECT ${expr} FROM ${quotedTable} WHERE ${pkExpression} = ${pkParam})`;
 
-    // Lexicographic tuple comparison as OR chain:
-    // For sort [a DESC, b ASC, pk ASC]:
-    //   (a <nullaware sub_a) OR
-    //   (a IS NOT DISTINCT FROM sub_a AND b >nullaware sub_b) OR
-    //   (a IS NOT DISTINCT FROM sub_a AND b IS NOT DISTINCT FROM sub_b AND pk >nullaware sub_pk)
     const orBranches: string[] = [];
+    const errors: QueryError[] = [];
 
     for (let i = 0; i < sort.length; i++) {
         const parts: string[] = [];
 
         // Equality prefix: all sort keys before index i
         for (let j = 0; j < i; j++) {
-            const expr = pathToSqlExpression(sort[j]!.key);
+            const result = pathToSqlExpression(sort[j]!.key);
+            if (!result.success) {
+                errors.push({ type: 'path_conversion', message: result.error });
+                continue;
+            }
+            const expr = result.expression;
             parts.push(`${expr} ${eqOp} ${subqueryFor(expr)}`);
         }
 
         // Direction comparison on the i-th key (NULL-aware for NULLS LAST)
         const entry = sort[i]!;
-        const expr = pathToSqlExpression(entry.key);
+        const result = pathToSqlExpression(entry.key);
+        if (!result.success) {
+            errors.push({ type: 'path_conversion', message: result.error });
+            continue;
+        }
+        const expr = result.expression;
         const cmpOp = entry.direction === 1 ? '>' : '<';
         const sub = subqueryFor(expr);
 
@@ -69,6 +76,10 @@ export function _buildAfterPkWhereClause(
         parts.push(`(${sub} IS NOT NULL AND (${expr} ${cmpOp} ${sub} OR ${expr} IS NULL))`);
 
         orBranches.push(`(${parts.join(' AND ')})`);
+    }
+
+    if (errors.length > 0) {
+        return { success: false, errors };
     }
 
     return {

@@ -24,6 +24,8 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;
+    /** Accumulated path conversion errors, merged into caller's errors array after generateSql completes. */
+    private conversionErrors: WhereClauseError[] = [];
 
     constructor(nodeMap: TreeNodeMap, sqlColumnName: string, doNotSpreadArray?: boolean) {
         this.nodeMap = nodeMap;
@@ -46,9 +48,14 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         }
     }
 
-    /** Wraps convertDotPropPathToSqliteJsonPath using this instance's column name and nodeMap. */
+    /** Wraps convertDotPropPathToSqliteJsonPath using this instance's column name and nodeMap. On failure, records error and returns 'FALSE'. */
     private getSqlIdentifier(dotPropPath: string, errorIfNotAsExpected?: ZodKind[], customColumnName?: string): string {
-        return convertDotPropPathToSqliteJsonPath(customColumnName ?? this.sqlColumnName, dotPropPath, this.nodeMap, errorIfNotAsExpected);
+        const result = convertDotPropPathToSqliteJsonPath(customColumnName ?? this.sqlColumnName, dotPropPath, this.nodeMap, errorIfNotAsExpected);
+        if (!result.success) {
+            this.conversionErrors.push({ kind: 'path_conversion', error: result.error, message: result.error.message });
+            return 'FALSE';
+        }
+        return result.expression;
     }
 
     /** Pushes a value into the statementArguments array and returns `?`. Objects/arrays are JSON.stringify'd first. */
@@ -66,6 +73,22 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
      * Two main branches: direct comparison (no arrays), or json_each spreading + EXISTS wrapping (arrays).
      */
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
+        // Reset conversion errors for this call
+        this.conversionErrors = [];
+
+        const result = this._generateSqlInner(dotpropPath, filter, statementArguments, errors, rootFilter);
+
+        // Merge any accumulated conversion errors into the caller's errors array
+        if (this.conversionErrors.length > 0) {
+            errors.push(...this.conversionErrors);
+            this.conversionErrors = [];
+        }
+
+        return result;
+    }
+
+    /** Inner implementation of generateSql, separated so conversionErrors can be collected. */
+    private _generateSqlInner(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
         const countArraysInPath = this.countArraysInPath(dotpropPath);
         if (countArraysInPath > 0) {
 
@@ -207,7 +230,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
     protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
 
         const optionalWrapper = (sqlIdentifier: string, query: string) => {
-            if (!this.nodeMap[dotpropPath]) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if (!this.nodeMap[dotpropPath]) return query;
             if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
                 return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
             }
@@ -216,7 +239,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
         /** Wrapper for optional fields where missing matches (e.g. $ne, $nin, $not). */
         const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
-            if (!this.nodeMap[dotpropPath]) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if (!this.nodeMap[dotpropPath]) return query;
             if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
                 return `(${sqlIdentifier} IS NULL OR ${query})`;
             }
@@ -285,6 +308,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         if (isValueComparisonRegex(filter)) {
             if (errors && rootFilter) {
                 errors.push({
+                    kind: 'filter',
                     sub_filter: { [dotpropPath]: filter } as any,
                     root_filter: rootFilter as any,
                     message: '$regex is not supported in SQLite'

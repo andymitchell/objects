@@ -2,6 +2,7 @@ import type { WhereFilterDefinition } from '../../where-filter/types.ts';
 import { prepareWhereClauseForPg, PropertyTranslatorJsonbSchema } from '../../where-filter/sql/postgres/index.ts';
 import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from '../../where-filter/sql/sqlite/index.ts';
 import type { PreparedWhereClauseStatement } from '../../where-filter/sql/types.ts';
+import type { DotPropPathConversionResult } from '../../utils/sql/types.ts';
 import { convertDotPropPathToPostgresJsonPath } from '../../utils/sql/postgres/convertDotPropPathToPostgresJsonPath.ts';
 import { convertDotPropPathToSqliteJsonPath } from '../../utils/sql/sqlite/convertDotPropPathToSqliteJsonPath.ts';
 import { SortAndSliceSchema } from '../schemas.ts';
@@ -100,7 +101,7 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
     }
 
     // Path-to-SQL converter for this table's JSON column
-    const pathToSqlExpression = (dotPropPath: string): string => {
+    const pathToSqlExpression = (dotPropPath: string): DotPropPathConversionResult => {
         if (dialect === 'pg') {
             return convertDotPropPathToPostgresJsonPath(table.objectColumnName, dotPropPath, table.schema);
         } else {
@@ -129,14 +130,23 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
     }
 
     // 4. Build ORDER BY
-    const orderByStatement = resolvedSort
-        ? _buildOrderByClause(resolvedSort, pathToSqlExpression, dialect)
-        : null;
+    let orderByStatement: string | null = null;
+    if (resolvedSort) {
+        const orderByResult = _buildOrderByClause(resolvedSort, pathToSqlExpression, dialect);
+        if (!orderByResult.success) {
+            return { success: false, errors: orderByResult.errors };
+        }
+        orderByStatement = orderByResult.orderBy;
+    }
 
     // 5. Build cursor WHERE (if after_pk present)
     let cursorStatement: SqlFragment | null = null;
     if (sortAndSlice?.after_pk !== undefined && resolvedSort) {
-        const pkExpression = pathToSqlExpression(table.ddl.primary_key);
+        const pkResult = pathToSqlExpression(table.ddl.primary_key);
+        if (!pkResult.success) {
+            return { success: false, errors: [{ type: 'path_conversion', message: pkResult.error }] };
+        }
+        const pkExpression = pkResult.expression;
         const cursorResult = _buildAfterPkWhereClause(
             sortAndSlice.after_pk,
             resolvedSort,

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { DotPropPathConversionResult } from '../../../utils/sql/types.ts';
 import { _buildAfterPkWhereClause } from './buildAfterPkWhere.ts';
 
-const identity = (k: string) => k;
-const jsonExpr = (k: string) => `data->>'${k}'`;
+const identity = (k: string): DotPropPathConversionResult => ({ success: true, expression: k });
+const jsonExpr = (k: string): DotPropPathConversionResult => ({ success: true, expression: `data->>'${k}'` });
 
 describe('_buildAfterPkWhereClause', () => {
     describe('defense-in-depth: empty sort', () => {
@@ -183,6 +184,24 @@ describe('_buildAfterPkWhereClause', () => {
             expect(sql).toContain('name > (SELECT name');
             // Branch 3: priority eq + name eq + id > sub
             expect(sql).toContain('id > (SELECT id');
+        });
+    });
+
+    describe('error propagation', () => {
+        it('returns errors when pathToSqlExpression fails', () => {
+            const failing = (_k: string): DotPropPathConversionResult => ({ success: false, error: 'Bad path' });
+            const result = _buildAfterPkWhereClause(
+                'abc',
+                [{ key: 'bad_key', direction: 1 }],
+                failing,
+                'id',
+                'emails',
+                'pg'
+            );
+            expect(result.success).toBe(false);
+            if (result.success) return;
+            expect(result.errors.length).toBeGreaterThan(0);
+            expect(result.errors[0]!.message).toBe('Bad path');
         });
     });
 });

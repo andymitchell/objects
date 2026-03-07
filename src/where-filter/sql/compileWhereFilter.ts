@@ -18,6 +18,7 @@ export function compileWhereFilter<T extends Record<string, any> = any>(filter: 
     const errors: WhereClauseError[] = [];
     if (!isWhereFilterDefinition(filter)) {
         errors.push({
+            kind: 'filter',
             sub_filter: filter as any,
             root_filter: filter as any,
             message: `filter was not well-defined. Received: ${safeJson(filter)}`

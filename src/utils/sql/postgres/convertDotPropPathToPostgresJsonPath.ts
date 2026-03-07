@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
+import type { DotPropPathConversionResult } from "../types.ts";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
 
@@ -11,15 +12,15 @@ export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this
  *
  * @example
  * convertDotPropPathToPostgresJsonPath('data', 'contact.name', nodeMap)
- * // → "(data->'contact'->>'name')::text"
+ * // → { success: true, expression: "(data->'contact'->>'name')::text" }
  *
  * @example
- * convertDotPropPathToPostgresJsonPath('data', 'contact.locations', nodeMap)
- * // → "(data->'contact'->'locations')::jsonb"  (ZodArray keeps -> and casts to jsonb)
+ * convertDotPropPathToPostgresJsonPath('data', 'unknown.path', nodeMap)
+ * // → { success: false, error: { type: 'unknown_path', dotPropPath: 'unknown.path', message: "Unknown dotPropPath. ..." } }
  */
-export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMap: TreeNodeMap, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string;
-export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, schema:z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string;
-export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMapOrSchema: TreeNodeMap | z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):string {
+export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMap: TreeNodeMap, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):DotPropPathConversionResult;
+export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, schema:z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):DotPropPathConversionResult;
+export function convertDotPropPathToPostgresJsonPath<T extends Record<string, any> = Record<string, any>>(columnName:string, dotPropPath:string, nodeMapOrSchema: TreeNodeMap | z.ZodSchema<T>, errorIfNotAsExpected?:ZodKind[], noCasting?:boolean):DotPropPathConversionResult {
     let nodeMap: TreeNodeMap | undefined;
     let schema: z.ZodSchema<T> | undefined;
     if( isZodSchema(nodeMapOrSchema) ) {
@@ -28,13 +29,13 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         nodeMap = nodeMapOrSchema;
     }
     if( !nodeMap ) {
-        if( !schema ) throw new Error("Must supply TreeNodeMap or Schema");
+        if( !schema ) return { success: false, error: { type: 'missing_schema', dotPropPath, message: "Must supply TreeNodeMap or Schema" } };
         const result = convertSchemaToDotPropPathTree(schema);
         nodeMap = result.map;
     }
 
     if( !nodeMap[dotPropPath] ) {
-        throw new Error(`Unknown dotPropPath. ${UNSAFE_WARNING}`);
+        return { success: false, error: { type: 'unknown_path', dotPropPath, message: `Unknown dotPropPath. ${UNSAFE_WARNING}` } };
     }
 
     const jsonbParts = dotPropPath.split(".");
@@ -49,22 +50,22 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
     }
 
     const nodeMapForPath = nodeMap[dotPropPath];
-    if( !nodeMapForPath ) throw new Error(`No details at nodeMap[dotPropPath] for ${dotPropPath}`);
+    if( !nodeMapForPath ) return { success: false, error: { type: 'unknown_path', dotPropPath, message: `No details at nodeMap[dotPropPath] for ${dotPropPath}` } };
     const zodKind = nodeMapForPath.kind;
 
     let jsonbPath:string = '';
     while(jsonbParts.length) {
         const part = jsonbParts.shift();
         if( !part ) {
-            throw new Error(`Unknown part in dotPropPath. ${UNSAFE_WARNING}`);
+            return { success: false, error: { type: 'invalid_path', dotPropPath, message: `Unknown part in dotPropPath. ${UNSAFE_WARNING}` } };
         }
         jsonbPath += `${jsonbParts.length>0 || (jsonbParts.length===0 && ['ZodArray', 'ZodObject'].includes(zodKind))? '->' : '->>'}'${part}'`;
     }
 
 
-    if( !castingMap[zodKind] ) throw new Error(`Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}`);
-    if( errorIfNotAsExpected && !errorIfNotAsExpected.includes(zodKind) ) throw new Error(`ZodKind Postgres cast was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${UNSAFE_WARNING}`);
+    if( !castingMap[zodKind] ) return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}` } };
+    if( errorIfNotAsExpected && !errorIfNotAsExpected.includes(zodKind) ) return { success: false, error: { type: 'unexpected_kind', dotPropPath, message: `ZodKind Postgres cast was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${UNSAFE_WARNING}` } };
 
     const cast = noCasting? '' : (castingMap[zodKind] ?? '');
-    return `(${columnName}${jsonbPath})${cast}`
+    return { success: true, expression: `(${columnName}${jsonbPath})${cast}` };
 }

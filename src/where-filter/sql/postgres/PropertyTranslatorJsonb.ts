@@ -25,6 +25,8 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;
+    /** Accumulated path conversion errors, merged into caller's errors array after generateSql completes. */
+    private conversionErrors: WhereClauseError[] = [];
 
     constructor(nodeMap: TreeNodeMap, sqlColumnName: string, doNotSpreadArray?: boolean) {
         this.nodeMap = nodeMap;
@@ -47,9 +49,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         }
     }
 
-    /** Wraps convertDotPropPathToPostgresJsonPath, using this instance's column name and nodeMap. */
+    /** Wraps convertDotPropPathToPostgresJsonPath, using this instance's column name and nodeMap. On failure, records error and returns 'FALSE'. */
     private getSqlIdentifier(dotPropPath: string, errorIfNotAsExpected?: ZodKind[], customColumnName?: string): string {
-        return convertDotPropPathToPostgresJsonPath(customColumnName ?? this.sqlColumnName, dotPropPath, this.nodeMap, errorIfNotAsExpected);
+        const result = convertDotPropPathToPostgresJsonPath(customColumnName ?? this.sqlColumnName, dotPropPath, this.nodeMap, errorIfNotAsExpected);
+        if (!result.success) {
+            this.conversionErrors.push({ kind: 'path_conversion', error: result.error, message: result.error.message });
+            return 'FALSE';
+        }
+        return result.expression;
     }
 
     /** Pushes a value into the statementArguments array and returns its `$N` placeholder. Objects/arrays are JSON.stringify'd first. */
@@ -69,6 +76,22 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      * Compound array filters use COUNT(DISTINCT CASE WHEN...) so different elements can satisfy different keys.
      */
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
+        // Reset conversion errors for this call
+        this.conversionErrors = [];
+
+        const result = this._generateSqlInner(dotpropPath, filter, statementArguments, errors, rootFilter);
+
+        // Merge any accumulated conversion errors into the caller's errors array
+        if (this.conversionErrors.length > 0) {
+            errors.push(...this.conversionErrors);
+            this.conversionErrors = [];
+        }
+
+        return result;
+    }
+
+    /** Inner implementation of generateSql, separated so conversionErrors can be collected. */
+    private _generateSqlInner(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
         // TODO Probably provide a version of this for JSONB that others can reference
         const countArraysInPath = this.countArraysInPath(dotpropPath);
         if (countArraysInPath > 0) { // && !this.doNotSpreadArray
@@ -137,13 +160,23 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 // $size: array has exactly N elements
                 if (isArrayValueComparisonSize(filter)) {
                     // Use jsonb_array_length on the raw JSONB array path
-                    const jsonbPath = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    if (!sizeResult.success) {
+                        this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
+                        return 'FALSE';
+                    }
+                    const jsonbPath = sizeResult.expression;
                     const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
                     return `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
                 }
                 // $exists on array
                 if (isValueComparisonExists(filter)) {
-                    const jsonbPath = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    const existsResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    if (!existsResult.success) {
+                        this.conversionErrors.push({ kind: 'path_conversion', error: existsResult.error, message: existsResult.error.message });
+                        return 'FALSE';
+                    }
+                    const jsonbPath = existsResult.expression;
                     if (filter.$exists) {
                         return `${jsonbPath} IS NOT NULL`;
                     } else {
@@ -243,7 +276,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
 
         const optionalWrapper = (sqlIdentifier: string, query: string) => {
-            if (!this.nodeMap[dotpropPath]) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if (!this.nodeMap[dotpropPath]) return query;
             if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
                 return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
             }
@@ -252,7 +285,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
 
         /** Wrapper for optional fields where missing matches (e.g. $ne, $nin, $not). */
         const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
-            if (!this.nodeMap[dotpropPath]) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+            if (!this.nodeMap[dotpropPath]) return query;
             if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
                 return `(${sqlIdentifier} IS NULL OR ${query})`;
             }

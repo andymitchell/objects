@@ -1,6 +1,7 @@
 
 import type { WhereFilterDefinition } from "../types.ts";
 import type { ValueComparisonRangeOperators } from "../consts.ts";
+import type { DotPropPathConversionError } from "../../utils/sql/types.ts";
 
 // Re-export base SQL types from canonical location
 export type { PreparedStatementArgument, PreparedStatementArgumentOrObject } from '../../utils/sql/types.ts';
@@ -25,12 +26,23 @@ export interface IPropertyTranslator<T extends Record<string, any>> {
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string;
 }
 
-/** Error detail for a sub-filter that could not be compiled to SQL. */
-export type WhereClauseError = {
+/** Error from a sub-filter that could not be compiled to SQL (has filter context). */
+export type WhereClauseFilterError = {
+    kind: 'filter';
     sub_filter: WhereFilterDefinition;
     root_filter: WhereFilterDefinition;
     message: string;
 };
+
+/** Error from a dot-prop path conversion failure (no filter context available). */
+export type WhereClausePathError = {
+    kind: 'path_conversion';
+    error: DotPropPathConversionError;
+    message: string;
+};
+
+/** Discriminated union of where-clause compilation errors. All variants carry `.message` for uniform access. */
+export type WhereClauseError = WhereClauseFilterError | WhereClausePathError;
 
 /**
  * Discriminated union result from SQL where-clause builders.

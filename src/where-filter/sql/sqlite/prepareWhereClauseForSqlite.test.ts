@@ -23,17 +23,19 @@ describe('sqlite where clause builder', () => {
                 if (e instanceof Error) {
                     if (e.message.toLowerCase().indexOf('unsupported') > -1) {
                         return undefined;
-                    } else if (e.message.indexOf(SQLITE_UNSAFE_WARNING) > -1) {
-                        return false;
                     }
                 }
                 throw e;
             }
 
             if (!clause.success) {
+                // Check for path conversion errors (previously thrown as SQLITE_UNSAFE_WARNING)
+                const msg = clause.errors.map(e => e.message).join('; ');
+                if (msg.includes(SQLITE_UNSAFE_WARNING)) {
+                    return false;
+                }
                 // Re-throw validation errors so standardTests error-handling tests still work.
                 // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
-                const msg = clause.errors.map(e => e.message).join('; ');
                 if (msg.toLowerCase().includes('not well-defined')) {
                     throw new Error(msg);
                 }

@@ -1,4 +1,5 @@
 import type { PreparedWhereClauseStatement } from '../../where-filter/sql/types.ts';
+import type { DotPropPathConversionResult } from '../../utils/sql/types.ts';
 import { SortAndSliceSchema } from '../schemas.ts';
 import type { ColumnTableInfo, PreparedQueryClausesResult, QueryError, SortAndSlice } from '../types.ts';
 import type { SqlDialect, SqlFragment } from './types.ts';
@@ -102,13 +103,18 @@ export function prepareColumnTableQuery<T extends Record<string, any>>(
         }
     }
 
-    // Column names used directly (identity function)
-    const pathToSqlExpression = (key: string): string => quoteIdentifier(key);
+    // Column names used directly (identity function — never fails)
+    const pathToSqlExpression = (key: string): DotPropPathConversionResult => ({ success: true, expression: quoteIdentifier(key) });
 
     // 4. Build ORDER BY
-    const orderByStatement = resolvedSort
-        ? _buildOrderByClause(resolvedSort, pathToSqlExpression, dialect)
-        : null;
+    let orderByStatement: string | null = null;
+    if (resolvedSort) {
+        const orderByResult = _buildOrderByClause(resolvedSort, pathToSqlExpression, dialect);
+        if (!orderByResult.success) {
+            return { success: false, errors: orderByResult.errors };
+        }
+        orderByStatement = orderByResult.orderBy;
+    }
 
     // 5. Build cursor WHERE (if after_pk)
     let cursorStatement: SqlFragment | null = null;

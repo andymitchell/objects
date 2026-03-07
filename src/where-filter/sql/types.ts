@@ -1,7 +1,7 @@
 
 import type { WhereFilterDefinition } from "../types.ts";
 import type { ValueComparisonRangeOperators } from "../consts.ts";
-import type { DotPropPathConversionError } from "../../utils/sql/types.ts";
+import type { DotPropPathConversionError, PreparedStatementArgument } from "../../utils/sql/types.ts";
 
 // Re-export base SQL types from canonical location
 export type { PreparedStatementArgument, PreparedStatementArgumentOrObject } from '../../utils/sql/types.ts';

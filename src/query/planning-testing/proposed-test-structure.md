@@ -4,6 +4,8 @@ Hierarchy of `describe` blocks with skeleton `it` blocks (empty, with Given/When
 
 **Standard Tests pattern**: behavioral/data-result tests shared across all environments live in `standardTests.ts`. Each environment test file implements an `execute` adapter and calls `standardTests()`. Per-file tests cover implementation-specific concerns (SQL string output, input validation, dialect differences). See `../claude-separate-standard-tests.md` for full rationale.
 
+# Test Files To Implement
+
 ---
 
 ## File: `standardTests.ts`
@@ -1241,3 +1243,19 @@ describe('Query Module Integration', () => {
   });
 });
 ```
+
+
+# Plan
+
+## [ ] Task 1
+
+In all affected test files, wrap _all_ existing tests in a single `describe` block called 'DEPRECATED_OLD_TESTS' with a comment saying `// these should be safe to remove as replaced`
+
+## [ ] Task 2 
+
+Make sure you understand the `Standard Tests pattern`, and that some tests can be skipped by an implementation (if it doesn't work). You can see examples in `../claude-separate-standard-tests.md`. You can see a real example in `../../where-filter/standardTests.ts`. 
+
+Confirm with me your understanding and let me approve it. 
+
+Then build all the test files above in `Test Files To Implement`. Keep the wrapped DEPRECATED_OLD_TESTS at the bottom of the file, and implement these tests. 
+

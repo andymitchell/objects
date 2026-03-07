@@ -56,7 +56,7 @@ src/utils/sql/
 - `where-filter/sql/` ← imports from `utils/sql/` (path converters, base types)
 - `query/sql/` ← imports from `utils/sql/` (path converters, base types)
 - `query/sql/` ← imports from `where-filter/` (only `prepareWhereClauseForPg`/`ForSqlite` — needed by `prepareObjectTableQuery` to convert `WhereFilterDefinition` to SQL)
-- `query/sql/` ← imports from `@andyrmitchell/utils` (`concatSqlParametersForDialect`, `SqlDialect`)
+- `query/sql/` ← imports from `@andyrmitchell/utils/sql-parameters` (`concatSqlParameters`, `appendSqlParameters`, `SqlDialect`, `SqlFragment`)
 
 ---
 
@@ -350,7 +350,7 @@ function prepareObjectTableQuery<T extends Record<string, any>>(
 5. **Build cursor WHERE** (if `after_pk` present) via `_buildAfterPkWhereClause(resolvedSort, ...)`:
    - Uses subquery strategy
    - PK expression: `convertDotPropPathTo*JsonPath(table.objectColumnName, table.ddl.primary_key, table.schema)`
-6. **Compose WHERE clauses**: `concatSqlParametersForDialect([filterWhere, cursorWhere, ...additionalWhereClauses], dialect)` with AND
+6. **Compose WHERE clauses**: `concatSqlParameters([filterWhere, cursorWhere, ...additionalWhereClauses], dialect)` with AND
 7. **Build LIMIT/OFFSET** via `_buildLimitClause` / `_buildOffsetClause`
 8. **Convert** internal `{ sql, parameters }` shapes to `PreparedWhereClauseStatement` at the boundary (see Internal Shape Convention)
 9. Return `PreparedQueryClausesResult`
@@ -385,7 +385,7 @@ Same as `prepareObjectTableQuery` but simpler:
 3. **Validate sort keys** against `table.allowedColumns` (including the PK tiebreaker) — return `QueryError` if any key is not in the whitelist
 4. **Build ORDER BY** via `_buildOrderByClause(resolvedSort, ...)`: sort keys used as column names directly (no `convertDotPropPath*`)
 5. **Build cursor WHERE** (if `after_pk`) via `_buildAfterPkWhereClause(resolvedSort, ...)`: PK expression is just `table.pkColumnName`
-6. **Compose WHERE**: `concatSqlParametersForDialect(whereClauses, dialect)` — no filter conversion (caller provides pre-built)
+6. **Compose WHERE**: `concatSqlParameters(whereClauses, dialect)` — no filter conversion (caller provides pre-built)
 7. **Build LIMIT/OFFSET**
 8. **Convert** internal shapes to `PreparedWhereClauseStatement` at the boundary
 9. Return `PreparedQueryClausesResult`
@@ -414,19 +414,19 @@ function flattenQueryClausesToSql(
 **Algorithm:**
 
 1. Start with empty `sql` parts array and `parameters` array
-2. If `where_statement`: prepend `WHERE`, append statement + args (using `appendSqlParametersForDialect` for renumbering)
+2. If `where_statement`: prepend `WHERE`, append statement + args (using `appendSqlParameters` for renumbering)
 3. If `order_by_statement`: append `ORDER BY <statement>` (no params — pure string)
 4. If `limit_statement`: append `LIMIT`, append statement + args
 5. If `offset_statement`: append `OFFSET`, append statement + args
 6. Join parts with space, return `{ sql, parameters }`
 
-**Note:** The public `PreparedQueryClauses` type uses `PreparedWhereClauseStatement` (`{ where_clause_statement, statement_arguments }`). The flatten helper converts these to `{ sql, parameters }` internally before calling `appendSqlParametersForDialect` for parameter renumbering.
+**Note:** The public `PreparedQueryClauses` type uses `PreparedWhereClauseStatement` (`{ where_clause_statement, statement_arguments }`). The flatten helper converts these to `{ sql, parameters }` internally before calling `appendSqlParameters` for parameter renumbering.
 
 ---
 
 ## Internal Shape Convention
 
-Internal SQL functions (`_buildAfterPkWhereClause`, `_buildLimitClause`, `_buildOffsetClause`) return `{ sql: string, parameters: PreparedStatementArgument[] }` — the same shape that `concatSqlParametersForDialect` expects. This avoids field-name conversion at every composition step.
+Internal SQL functions (`_buildAfterPkWhereClause`, `_buildLimitClause`, `_buildOffsetClause`) return `SqlFragment` (`{ sql: string, parameters: any[] }`) from `@andyrmitchell/utils/sql-parameters` — the same shape that `concatSqlParameters` / `appendSqlParameters` expect. This avoids field-name conversion at every composition step.
 
 The public result type `PreparedQueryClauses` uses `PreparedWhereClauseStatement` (`{ where_clause_statement, statement_arguments }`) for API consumers. A small `toWhereClauseStatement` converter is applied once at the public boundary (inside `prepareObjectTableQuery` / `prepareColumnTableQuery`) when assembling the final result.
 
@@ -540,21 +540,21 @@ Used by `_buildAfterPkWhereClause` (for `tableName` in subqueries) and by the ca
 **File:** `query/sql/internals/buildLimitOffset.ts`
 
 ```ts
-/** Generates a parameterised LIMIT fragment (internal { sql, parameters } shape). */
+/** Generates a parameterised LIMIT fragment as SqlFragment. */
 function _buildLimitClause(
   limit: number,
   dialect: SqlDialect
-): { sql: string; parameters: PreparedStatementArgument[] }
+): SqlFragment
 
-/** Generates a parameterised OFFSET fragment (internal { sql, parameters } shape). */
+/** Generates a parameterised OFFSET fragment as SqlFragment. */
 function _buildOffsetClause(
   offset: number,
   dialect: SqlDialect
-): { sql: string; parameters: PreparedStatementArgument[] }
+): SqlFragment
 ```
 
 **Algorithm:**
-- Pg: `{ sql: '$1', parameters: [limit] }` (rebased by caller via `appendSqlParametersForDialect`)
+- Pg: `{ sql: '$1', parameters: [limit] }` (rebased by caller via `appendSqlParameters`)
 - SQLite: `{ sql: '?', parameters: [limit] }` (no rebasing needed — `?` is positional)
 - Same pattern for OFFSET
 
@@ -580,11 +580,15 @@ Defense-in-depth runtime checks (in addition to Zod):
 
 ## Implementation Phases
 
-### [ ] Phase 1 — Dialect-aware SQL concat in `@andyrmitchell/utils`
+### [x] Phase 1 — Dialect-aware SQL concat in `@andyrmitchell/utils`
 
-Update plan now that `@andyrmitchell/utils` exports `concatSqlParameters` / `appendSqlParameters` / `rebaseSqlParameters` for both pg and sqlite, exports on sub-path /sql-parameters. 
-You can see it directly on this machine at @~/git/breef/utils/src/sub-packages/sql-parameters
+Already done. `@andyrmitchell/utils/sql-parameters` exports:
+- `concatSqlParameters(fragments: SqlFragment[], dialect: SqlDialect, join?: string): SqlFragment`
+- `appendSqlParameters(existingParameters: any[], appending: SqlFragment, dialect: SqlDialect): AppendSqlParametersResult`
+- `rebaseSqlParameters(sql: string, rebase: number, dialect: SqlDialect): string`
+- Types: `SqlDialect` (`'pg' | 'sqlite'`), `SqlFragment` (`{ sql: string, parameters: any[] }`), `AppendSqlParametersResult`
 
+**IMPORTANT:** Always import from `@andyrmitchell/utils/sql-parameters`, NOT `@andyrmitchell/utils`. The root path re-exports pg-only deprecated wrappers with no `dialect` param.
 
 
 ### [ ] Phase 2 — Extract `src/utils/sql/`
@@ -609,7 +613,7 @@ You can see it directly on this machine at @~/git/breef/utils/src/sub-packages/s
 
 ### [ ] Phase 4 — SQL Internals
 
-1. Create `query/sql/types.ts` — SQL-specific internal types. Import `SqlDialect` from `@andyrmitchell/utils`. Internal fragment shape: `{ sql: string, parameters: PreparedStatementArgument[] }`.
+1. Create `query/sql/types.ts` — SQL-specific internal types. Import `SqlDialect`, `SqlFragment` from `@andyrmitchell/utils/sql-parameters`. Use `SqlFragment` (`{ sql: string, parameters: any[] }`) as internal fragment shape.
 2. Implement `quoteIdentifier` in `query/sql/internals/quoteIdentifier.ts` — double-quote wrapping with `"` escape
 3. Implement `_buildOrderByClause` in `query/sql/internals/buildOrderByClause.ts` — includes dialect-aware NULLS LAST handling (Pg: `NULLS LAST`; SQLite: `col IS NULL ASC, col ASC`)
 4. Implement `_buildLimitClause` / `_buildOffsetClause` in `query/sql/internals/buildLimitOffset.ts` — returns internal `{ sql, parameters }` shape
@@ -618,9 +622,9 @@ You can see it directly on this machine at @~/git/breef/utils/src/sub-packages/s
 
 ### [ ] Phase 5 — SQL Public API
 
-1. Implement `prepareObjectTableQuery` in `query/sql/prepareObjectTableQuery.ts` — builds `resolvedSort` (with PK tiebreaker) early, passes to both ORDER BY and cursor WHERE builders, uses `concatSqlParametersForDialect` from `@andyrmitchell/utils`, converts internal `{ sql, parameters }` to `PreparedWhereClauseStatement` at the boundary
+1. Implement `prepareObjectTableQuery` in `query/sql/prepareObjectTableQuery.ts` — builds `resolvedSort` (with PK tiebreaker) early, passes to both ORDER BY and cursor WHERE builders, uses `concatSqlParameters` from `@andyrmitchell/utils/sql-parameters`, converts internal `{ sql, parameters }` to `PreparedWhereClauseStatement` at the boundary
 2. Implement `prepareColumnTableQuery` in `query/sql/prepareColumnTableQuery.ts` — same `resolvedSort` pattern, validates sort keys against `table.allowedColumns`, uses `quoteIdentifier` for `pkColumnName`
-3. Implement `flattenQueryClausesToSql` in `query/sql/flattenQueryClauses.ts` — converts `PreparedWhereClauseStatement` fields to `{sql, parameters}` shape for `appendSqlParametersForDialect`
+3. Implement `flattenQueryClausesToSql` in `query/sql/flattenQueryClauses.ts` — converts `PreparedWhereClauseStatement` fields to `{sql, parameters}` shape for `appendSqlParameters`
 4. Create `query/sql/index.ts` barrel
 5. Integration tests: end-to-end query building for both Pg and SQLite dialects, both table modes. Include: sort key not in `allowedColumns` → `QueryError`, NULL sort values with cursor pagination, NULLS LAST ordering verification
 

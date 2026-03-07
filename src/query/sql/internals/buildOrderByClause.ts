@@ -27,7 +27,7 @@ export function _buildOrderByClause(
     for (const entry of sort) {
         const result = pathToSqlExpression(entry.key);
         if (!result.success) {
-            errors.push({ type: 'path_conversion', message: result.error });
+            errors.push({ type: 'path_conversion', message: result.error.message });
             continue;
         }
         const expr = result.expression;

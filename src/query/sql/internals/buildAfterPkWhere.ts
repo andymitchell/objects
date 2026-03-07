@@ -54,7 +54,7 @@ export function _buildAfterPkWhereClause(
         for (let j = 0; j < i; j++) {
             const result = pathToSqlExpression(sort[j]!.key);
             if (!result.success) {
-                errors.push({ type: 'path_conversion', message: result.error });
+                errors.push({ type: 'path_conversion', message: result.error.message });
                 continue;
             }
             const expr = result.expression;
@@ -65,7 +65,7 @@ export function _buildAfterPkWhereClause(
         const entry = sort[i]!;
         const result = pathToSqlExpression(entry.key);
         if (!result.success) {
-            errors.push({ type: 'path_conversion', message: result.error });
+            errors.push({ type: 'path_conversion', message: result.error.message });
             continue;
         }
         const expr = result.expression;

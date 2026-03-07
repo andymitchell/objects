@@ -32,7 +32,7 @@ function createDbProxy(db: PGlite, latencyMs: number): Db {
         },
         async exec(sql: string): Promise<void> {
             await sleep(latencyMs);
-            return db.exec(sql);
+            await db.exec(sql);
         },
     };
 }

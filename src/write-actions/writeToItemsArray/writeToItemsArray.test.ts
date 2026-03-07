@@ -1,10 +1,8 @@
 import { z } from "zod";
 import { test, describe, expect } from 'vitest';
-import type { WriteAction, WritePayloadArrayScope } from "../types.ts";
-import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses } from "../helpers.ts";
-import type { WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL } from "./types.ts";
-import { produce, type Draft } from "immer";
-import type { IUser } from "../auth/types.ts";
+import { assertWriteArrayScope } from "../helpers.ts";
+import type { DDL } from "./types.ts";
+import { produce } from "immer";
 import { writeToItemsArray } from "./writeToItemsArray.ts";
 import { standardTests, type AdapterFactory } from "../standardTests.ts";
 
@@ -49,10 +47,11 @@ const obj2: Obj = { id: '2' };
 // Adapter factory for standardTests
 // ═══════════════════════════════════════════════════════════════════
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Zod v3/v4 generic variance mismatch
 const createAdapter: AdapterFactory = <T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>) => ({
-    apply: async ({ initialItems, writeActions, user, options }) => {
+    apply: async ({ initialItems, writeActions, user, options, schema: configSchema, ddl: configDdl }) => {
         const items = structuredClone(initialItems);
-        const result = writeToItemsArray(writeActions, items, schema, ddl, user, {
+        const result = writeToItemsArray(writeActions, items, configSchema, configDdl, user, {
             atomic: options?.atomic,
             attempt_recover_duplicate_create: options?.attempt_recover_duplicate_create,
         });
@@ -71,7 +70,8 @@ const createAdapter: AdapterFactory = <T extends Record<string, any>>(schema: z.
 describe('writeToItemsArray', () => {
 
     describe('standard tests', () => {
-        standardTests({ test, expect, createAdapter, implementationName: 'writeToItemsArray' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vitest global vs import type mismatch
+        standardTests({ test: test as any, expect: expect as any, createAdapter, implementationName: 'writeToItemsArray' });
     });
 
     // ═══════════════════════════════════════════════════════════════
@@ -305,8 +305,8 @@ describe('writeToItemsArray', () => {
         describe('4. WriteStrategy mutation contract', () => {
 
             test('update_handler mutates target in-place (mutable mode)', () => {
-                const item = { id: '1', text: 'original' };
-                const items = [item];
+                const item: Obj = { id: '1', text: 'original' };
+                const items: Obj[] = [item];
                 const result = writeToItemsArray(
                     [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '1' } } }],
                     items, ObjSchema, ddl, undefined, { mutate: true },
@@ -317,8 +317,8 @@ describe('writeToItemsArray', () => {
             });
 
             test('update_handler mutates cloned target (immutable mode)', () => {
-                const item = { id: '1', text: 'original' };
-                const items = [item];
+                const item: Obj = { id: '1', text: 'original' };
+                const items: Obj[] = [item];
                 const result = writeToItemsArray(
                     [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '1' } } }],
                     items, ObjSchema, ddl,

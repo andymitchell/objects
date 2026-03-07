@@ -100,7 +100,7 @@ describe('_buildOrderByClause', () => {
 
     describe('error propagation', () => {
         it('returns errors when pathToSqlExpression fails', () => {
-            const failing = (_k: string): DotPropPathConversionResult => ({ success: false, error: 'Unknown path' });
+            const failing = (_k: string): DotPropPathConversionResult => ({ success: false, error: { type: 'unknown_path', dotPropPath: 'bad_key', message: 'Unknown path' } });
             const result = _buildOrderByClause(
                 [{ key: 'bad_key', direction: 1 }],
                 failing,

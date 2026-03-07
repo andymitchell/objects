@@ -144,7 +144,7 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
     if (sortAndSlice?.after_pk !== undefined && resolvedSort) {
         const pkResult = pathToSqlExpression(table.ddl.primary_key);
         if (!pkResult.success) {
-            return { success: false, errors: [{ type: 'path_conversion', message: pkResult.error }] };
+            return { success: false, errors: [{ type: 'path_conversion', message: pkResult.error.message }] };
         }
         const pkExpression = pkResult.expression;
         const cursorResult = _buildAfterPkWhereClause(

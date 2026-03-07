@@ -189,7 +189,7 @@ describe('_buildAfterPkWhereClause', () => {
 
     describe('error propagation', () => {
         it('returns errors when pathToSqlExpression fails', () => {
-            const failing = (_k: string): DotPropPathConversionResult => ({ success: false, error: 'Bad path' });
+            const failing = (_k: string): DotPropPathConversionResult => ({ success: false, error: { type: 'invalid_path', dotPropPath: 'bad_key', message: 'Bad path' } });
             const result = _buildAfterPkWhereClause(
                 'abc',
                 [{ key: 'bad_key', direction: 1 }],

@@ -28,8 +28,8 @@ describe('cloneDeepSafe', () => {
                 },
             };
             
-            const result = cloneDeepSafe(obj, {strip_circular: true});
-            
+            const _result = cloneDeepSafe(obj, {strip_circular: true});
+
             expect(cloneDeepSafe(obj, {strip_circular: true})).toEqual(obj);
             
         })

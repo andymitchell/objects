@@ -125,7 +125,7 @@ describe('sortAndSliceObjects', () => {
 
     describe('edge cases', () => {
         it('empty array returns empty', () => {
-            const result = sortAndSliceObjects([], { sort: [{ key: 'date', direction: 1 }] }, 'id');
+            const result = sortAndSliceObjects<{date: string; id: string}>([], { sort: [{ key: 'date', direction: 1 }] }, 'id');
             expect(result.success).toBe(true);
             if (!result.success) return;
             expect(result.items).toEqual([]);

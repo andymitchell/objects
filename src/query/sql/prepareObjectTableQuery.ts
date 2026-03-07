@@ -18,12 +18,56 @@ function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseState
 }
 
 /**
- * Prepares SQL clauses for a table storing JSON objects in a single column.
- * Composes WhereFilterDefinition (or pre-built WHERE) with SortAndSlice into a complete query.
+ * Builds parameterised SQL clauses (WHERE, ORDER BY, LIMIT, OFFSET) for a table that stores
+ * objects as JSON in a single column (e.g. Postgres JSONB or SQLite JSON TEXT). This is the
+ * SQL counterpart to `sortAndSliceObjects` — both accept `SortAndSlice` and produce identical
+ * ordering semantics for the same data.
+ *
+ * Sort keys are dot-prop paths into the JSON object (e.g. `'sender.name'`), converted to
+ * dialect-specific JSON extraction expressions. The table's Zod schema validates that paths
+ * exist and determines type casting (Postgres `::numeric`, `::text`, etc.).
+ *
+ * Optionally composes a `WhereFilterDefinition` (Mongo-style filter) or a pre-built WHERE
+ * clause with cursor/offset pagination and additional WHERE clauses. All WHERE sources are
+ * combined with AND, and parameter numbering is handled automatically.
+ *
+ * Returns decomposed `PreparedQueryClauses` — use `flattenQueryClausesToSql` to assemble
+ * into a single SQL string, or access individual clauses for custom composition.
+ *
+ * @param dialect - SQL dialect: `'pg'` for Postgres (`$N` params) or `'sqlite'` (`?` params).
+ * @param table - Table descriptor with JSON column name, primary key, and Zod schema. See `ObjectTableInfo`.
+ * @param filter - Optional WHERE filter: a `WhereFilterDefinition` (Mongo-style, compiled internally)
+ *   or a pre-built `PreparedWhereClauseStatement` (passed through as-is).
+ * @param sortAndSlice - Optional sorting and pagination config. See `SortAndSlice`.
+ * @param additionalWhereClauses - Optional extra WHERE clauses (e.g. access control, soft-delete filters)
+ *   combined with AND alongside the filter and cursor clauses.
+ * @returns `{ success: true, ...PreparedQueryClauses }` on success,
+ *   `{ success: false, errors: QueryError[] }` on validation or building failure. Never throws.
  *
  * @example
- * const result = prepareObjectTableQuery('sqlite', table, { date: { $gt: '2024-01-01' } }, { sort: [{ key: 'date', direction: -1 }], limit: 20 });
- * if (result.success) { const flat = flattenQueryClausesToSql(result); }
+ * // Sort + filter + limit → flatten to SQL
+ * const result = prepareObjectTableQuery('pg', table, { sender: 'Andy' }, {
+ *   sort: [{ key: 'date', direction: -1 }], limit: 20,
+ * });
+ * if (result.success) {
+ *   const { sql, parameters } = flattenQueryClausesToSql(result, 'pg');
+ *   db.query(`SELECT * FROM emails ${sql}`, parameters);
+ * }
+ *
+ * @example
+ * // Cursor pagination for page 2
+ * const page2 = prepareObjectTableQuery('sqlite', table, undefined, {
+ *   sort: [{ key: 'date', direction: -1 }], limit: 20, after_pk: 'email_abc',
+ * });
+ *
+ * @example
+ * // Filter + additional access-control WHERE clause
+ * const result = prepareObjectTableQuery('pg', table, { status: 'active' }, { limit: 50 }, [
+ *   { where_clause_statement: 'owner_id = $1', statement_arguments: ['user_123'] },
+ * ]);
+ *
+ * @note A primary key tiebreaker is automatically appended to the sort to ensure deterministic ordering.
+ * @note Null values sort last (Postgres `NULLS LAST`, SQLite simulated), matching `sortAndSliceObjects` behaviour.
  */
 export function prepareObjectTableQuery<T extends Record<string, any>>(
     dialect: SqlDialect,

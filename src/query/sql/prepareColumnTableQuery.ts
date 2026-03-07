@@ -14,11 +14,50 @@ function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseState
 }
 
 /**
- * Prepares SQL clauses for a traditional relational table.
- * Sort keys map to column names directly (no JSON path extraction).
+ * Builds parameterised SQL clauses (WHERE, ORDER BY, LIMIT, OFFSET) for a traditional
+ * relational table where sort keys map directly to column names (no JSON path extraction).
+ * This is the relational-table counterpart to `prepareObjectTableQuery`.
+ *
+ * Sort keys are validated against `table.allowedColumns` — any key not in the whitelist
+ * is rejected with a `QueryError`, preventing SQL injection. Column names are double-quoted
+ * in the output to safely handle reserved words and special characters.
+ *
+ * Unlike `prepareObjectTableQuery`, this function does not accept a `WhereFilterDefinition`
+ * (which is designed for JSON columns). Instead, pass pre-built `PreparedWhereClauseStatement`
+ * arrays via `whereClauses` for any filtering.
+ *
+ * Returns decomposed `PreparedQueryClauses` — use `flattenQueryClausesToSql` to assemble
+ * into a single SQL string, or access individual clauses for custom composition.
+ *
+ * @param dialect - SQL dialect: `'pg'` for Postgres (`$N` params) or `'sqlite'` (`?` params).
+ * @param table - Table descriptor with PK column name and allowed column whitelist. See `ColumnTableInfo`.
+ * @param sortAndSlice - Sorting and pagination config. See `SortAndSlice`.
+ * @param whereClauses - Optional pre-built WHERE clauses combined with AND alongside cursor clauses.
+ * @returns `{ success: true, ...PreparedQueryClauses }` on success,
+ *   `{ success: false, errors: QueryError[] }` on validation or building failure. Never throws.
  *
  * @example
- * const result = prepareColumnTableQuery('pg', { tableName: 'users', pkColumnName: 'id', allowedColumns: ['id', 'created_at', 'name'] }, { sort: [{ key: 'created_at', direction: -1 }], limit: 50 });
+ * // Sort + limit → flatten to SQL
+ * const result = prepareColumnTableQuery('pg', {
+ *   tableName: 'users', pkColumnName: 'id', allowedColumns: ['id', 'created_at', 'name'],
+ * }, { sort: [{ key: 'created_at', direction: -1 }], limit: 50 });
+ * if (result.success) {
+ *   const { sql, parameters } = flattenQueryClausesToSql(result, 'pg');
+ *   db.query(`SELECT * FROM users ${sql}`, parameters);
+ * }
+ *
+ * @example
+ * // Cursor pagination with additional WHERE filter
+ * const result = prepareColumnTableQuery('sqlite', table, {
+ *   sort: [{ key: 'created_at', direction: -1 }], limit: 20, after_pk: 'user_abc',
+ * }, [
+ *   { where_clause_statement: 'active = ?', statement_arguments: [1] },
+ * ]);
+ *
+ * @note Sort keys not in `allowedColumns` produce a `QueryError`. The PK column must be included
+ *   in `allowedColumns` since it is used as an automatic sort tiebreaker.
+ * @note A primary key tiebreaker is automatically appended to the sort to ensure deterministic ordering.
+ * @note Null values sort last (Postgres `NULLS LAST`, SQLite simulated), matching `sortAndSliceObjects` behaviour.
  */
 export function prepareColumnTableQuery<T extends Record<string, any>>(
     dialect: SqlDialect,

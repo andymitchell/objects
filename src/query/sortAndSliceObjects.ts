@@ -3,12 +3,34 @@ import { SortAndSliceSchema } from './schemas.ts';
 import type { QueryError, SortAndSlice, SortAndSliceObjectsResult } from './types.ts';
 
 /**
- * Sorts and paginates an in-memory array of objects.
- * JS runtime equivalent of the SQL query builders — same SortAndSlice type, applied to a plain array.
+ * Sorts and paginates an in-memory array of objects using the same `SortAndSlice`
+ * configuration used by the SQL query builders (`prepareObjectTableQuery`, `prepareColumnTableQuery`).
+ * This ensures identical ordering semantics whether querying in-memory or against a database.
+ *
+ * Supports multi-key sorting (Mongo-style: `1` = ASC, `-1` = DESC), cursor-based pagination
+ * (`after_pk`), offset-based pagination, and limits. A primary key tiebreaker is automatically
+ * appended to ensure deterministic ordering when sort keys have duplicate values.
+ *
+ * @param items - The array to sort and paginate. Never mutated; a copy is returned.
+ * @param sortAndSlice - Sorting and pagination config. `offset` and `after_pk` are mutually exclusive.
+ * @param primaryKey - The property name that uniquely identifies each item (used for cursor lookup and tiebreaking).
+ * @returns `{ success: true, items: T[] }` on success, `{ success: false, errors: QueryError[] }` on validation failure.
  *
  * @example
- * const result = sortAndSliceObjects(emails, { sort: [{ key: 'date', direction: -1 }], limit: 20 }, 'id');
- * if (result.success) { use(result.items); }
+ * // Page 1: newest 20 emails
+ * const page1 = sortAndSliceObjects(emails, { sort: [{ key: 'date', direction: -1 }], limit: 20 }, 'id');
+ *
+ * @example
+ * // Page 2: cursor pagination using the last item's PK
+ * const page2 = sortAndSliceObjects(emails, { sort: [{ key: 'date', direction: -1 }], limit: 20, after_pk: lastId }, 'id');
+ *
+ * @example
+ * // Offset pagination
+ * const page3 = sortAndSliceObjects(emails, { sort: [{ key: 'date', direction: -1 }], limit: 20, offset: 40 }, 'id');
+ *
+ * @note Null/undefined values always sort last, regardless of sort direction — matching SQL `NULLS LAST`.
+ * @note A stale `after_pk` (pointing to a deleted/missing item) returns an empty array, not an error.
+ * @note Input is validated at runtime via Zod. Invalid config (e.g. `offset` + `after_pk` together) returns errors as values, never throws.
  */
 export function sortAndSliceObjects<T extends Record<string, any>>(
     items: T[],

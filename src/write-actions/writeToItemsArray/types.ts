@@ -78,33 +78,18 @@ export type WriteToItemsArrayOptions<T extends Record<string, any> = Record<stri
 }
 
 
-export type ListOrdering<T extends Record<string, any> = Record<string, any>> = {
-    /**
-     * The key on the item to sort by 
-     */
-    key: IfAny<T, string, PrimaryKeyProperties<T>>,
-
-    /**
-     * The sort direct
-     * 
-     * Expect to default to 'asc'
-     */
-    direction?: 'asc' | 'desc'
-}
-
+/**
+ * Rules for a single list scope within a DDL.
+ *
+ * **Ordering:** The DDL intentionally does not prescribe a default sort order.
+ * Collections default to primary-key ordering. Callers control ordering
+ * dynamically via `SortAndSlice` (from `@andyrmitchell/objects/query`).
+ */
 type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
     /**
      * The main identifier
      */
     primary_key: IfAny<T, string, PrimaryKeyProperties<T>>,// keyof T>,
-
-    /**
-     * Give guidance to what it can sort by. 
-     * 
-     * It can be used by store implementations to ensure consistent item/pagination order.
-     * 
-     */
-    order_by: ListOrdering<T>,
 }
 
 const PermissionIdFormatSchema = z.union([z.literal('uuid'), z.literal('email')]);

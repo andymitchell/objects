@@ -33,9 +33,9 @@ type Obj = z.infer<typeof ObjSchema>;
 const ddl: DDL<Obj> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
-        'children': { primary_key: 'cid', order_by: { key: 'cid' } },
-        'children.children': { primary_key: 'ccid', order_by: { key: 'ccid' } },
+        '.': { primary_key: 'id' },
+        'children': { primary_key: 'cid' },
+        'children.children': { primary_key: 'ccid' },
     },
     permissions: { type: 'none' },
 };
@@ -377,7 +377,7 @@ describe('writeToItemsArray', () => {
                 type ObjWithCount = z.infer<typeof ObjWithCountSchema>;
                 const ddlCount: DDL<ObjWithCount> = {
                     version: 1,
-                    lists: { '.': { primary_key: 'id', order_by: { key: 'id' } } },
+                    lists: { '.': { primary_key: 'id' } },
                     permissions: { type: 'none' },
                 };
 

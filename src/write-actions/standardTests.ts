@@ -54,7 +54,7 @@ type Flat = z.infer<typeof FlatSchema>;
 const flatDdl: DDL<Flat> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
+        '.': { primary_key: 'id' },
     },
     permissions: { type: 'none' },
 };
@@ -80,9 +80,9 @@ type Nested = z.infer<typeof NestedSchema>;
 const nestedDdl: DDL<Nested> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
-        'children': { primary_key: 'cid', order_by: { key: 'cid' } },
-        'children.items': { primary_key: 'iid', order_by: { key: 'iid' } },
+        '.': { primary_key: 'id' },
+        'children': { primary_key: 'cid' },
+        'children.items': { primary_key: 'iid' },
     },
     permissions: { type: 'none' },
 };
@@ -97,7 +97,7 @@ type Owner = z.infer<typeof OwnerSchema>;
 const ownerDdl: DDL<Owner> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
+        '.': { primary_key: 'id' },
     },
     permissions: {
         type: 'basic_ownership_property',
@@ -117,7 +117,7 @@ type OwnerEmail = z.infer<typeof OwnerEmailSchema>;
 const ownerEmailDdl: DDL<OwnerEmail> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
+        '.': { primary_key: 'id' },
     },
     permissions: {
         type: 'basic_ownership_property',
@@ -142,8 +142,8 @@ type FlatWithSubItems = z.infer<typeof FlatWithSubItemsSchema>;
 const flatWithSubItemsDdl: DDL<FlatWithSubItems> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
-        'sub_items': { primary_key: 'sid', order_by: { key: 'sid' } },
+        '.': { primary_key: 'id' },
+        'sub_items': { primary_key: 'sid' },
     },
     permissions: { type: 'none' },
 };
@@ -157,7 +157,7 @@ type OwnerScalarArray = z.infer<typeof OwnerScalarArraySchema>;
 const ownerScalarArrayDdl: DDL<OwnerScalarArray> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id', order_by: { key: 'id' } },
+        '.': { primary_key: 'id' },
     },
     permissions: {
         type: 'basic_ownership_property',

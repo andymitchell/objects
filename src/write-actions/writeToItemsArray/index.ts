@@ -1,6 +1,6 @@
 import {writeToItemsArray, writeToItemsArrayPreserveInputType} from "./writeToItemsArray.ts";
 import { checkWritePermission } from "./helpers/checkPermission.ts";
-import type { WriteToItemsArrayOptions, DDL, ListOrdering } from "./types.ts";
+import type { WriteToItemsArrayOptions, DDL } from "./types.ts";
 
 
 export {
@@ -10,6 +10,5 @@ export {
 };
 export type {
     DDL,
-    ListOrdering,
     WriteToItemsArrayOptions
 };

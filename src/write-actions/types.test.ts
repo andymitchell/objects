@@ -351,11 +351,11 @@ describe('4. WriteError discriminated union', () => {
 
 describe('5. DDL<T> type constraints', () => {
 
-    it('lists[.] requires keys of T for primary_key and order_by', () => {
+    it('lists[.] requires keys of T for primary_key', () => {
         const _ddl: DDL<Flat> = {
             version: 1,
             lists: {
-                '.': { primary_key: 'id', order_by: { key: 'id' } },
+                '.': { primary_key: 'id' },
             },
             permissions: { type: 'none' },
         };
@@ -366,7 +366,7 @@ describe('5. DDL<T> type constraints', () => {
             version: 1,
             lists: {
                 // @ts-expect-error: 'nonexistent' is not a PK property of Flat
-                '.': { primary_key: 'nonexistent', order_by: { key: 'id' } },
+                '.': { primary_key: 'nonexistent' },
             },
             permissions: { type: 'none' },
         };
@@ -376,9 +376,9 @@ describe('5. DDL<T> type constraints', () => {
         const _ddl: DDL<Task> = {
             version: 1,
             lists: {
-                '.': { primary_key: 'id', order_by: { key: 'id' } },
-                'subtasks': { primary_key: 'sid', order_by: { key: 'sid' } },
-                'subtasks.items': { primary_key: 'iid', order_by: { key: 'iid' } },
+                '.': { primary_key: 'id' },
+                'subtasks': { primary_key: 'sid' },
+                'subtasks.items': { primary_key: 'iid' },
             },
             permissions: { type: 'none' },
         };

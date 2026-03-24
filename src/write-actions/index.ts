@@ -58,7 +58,6 @@ export type {
     WriteToItemsArrayChanges,
     WriteToItemsArrayResult,
     DDL,
-    ListOrdering,
     WriteToItemsArrayOptions,
 } from './writeToItemsArray/types.ts';
 

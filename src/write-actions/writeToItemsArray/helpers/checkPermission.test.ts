@@ -54,7 +54,7 @@ const testItemsWithOwnerArray:TestItemOwnerArray = {
 
  const ddl:DDL<TestItem> = {
     version: 1,
-    lists: {'.': {primary_key: 'id', order_by: { key: 'id' }}},
+    lists: {'.': {primary_key: 'id'}},
     permissions: {
         type: 'basic_ownership_property',
         property_type: 'id',
@@ -66,7 +66,7 @@ const testItemsWithOwnerArray:TestItemOwnerArray = {
 
  const ddlWithOwnerArray:DDL<TestItemOwnerArray> = {
     version: 1,
-    lists: {'.': {primary_key: 'id', order_by: { key: 'id' }}},
+    lists: {'.': {primary_key: 'id'}},
     permissions: {
         type: 'basic_ownership_property',
         property_type: 'id_in_scalar_array',
@@ -80,7 +80,7 @@ const testItemsWithOwnerArray:TestItemOwnerArray = {
 
  const ddlWithObjectOwnersArray:DDL<TestItemOwnerObjectArray> = {
     version: 1,
-    lists: {'.': {primary_key: 'id', order_by: { key: 'id' }}, 'owners': {primary_key: 'email', order_by: { key: 'email' }}},
+    lists: {'.': {primary_key: 'id'}, 'owners': {primary_key: 'email'}},
     permissions: {
         type: 'basic_ownership_property',
         property_type: 'id',

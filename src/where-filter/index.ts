@@ -7,11 +7,9 @@ import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComp
 // SQL re-exports
 import {
     prepareWhereClauseForPg,
-    postgresWhereClauseBuilder,
     PropertyTranslatorJsonbSchema,
     PropertyTranslatorJsonb,
     prepareWhereClauseForSqlite,
-    sqliteWhereClauseBuilder,
     PropertyTranslatorSqliteJsonSchema,
     PropertyTranslatorSqliteJson,
     convertDotPropPathToPostgresJsonPath,
@@ -23,16 +21,12 @@ export {
     matchJavascriptObject,
     filterJavascriptObjects,
     compileMatchJavascriptObject,
-    // New names
     prepareWhereClauseForPg,
     prepareWhereClauseForSqlite,
     PropertyTranslatorJsonbSchema,
     PropertyTranslatorJsonb,
     PropertyTranslatorSqliteJsonSchema,
     PropertyTranslatorSqliteJson,
-    // Deprecated aliases
-    postgresWhereClauseBuilder,
-    sqliteWhereClauseBuilder,
     WhereFilterSchema,
     isWhereFilterDefinition,
     isPartialObjectFilter,
@@ -40,12 +34,6 @@ export {
     convertDotPropPathToPostgresJsonPath,
     convertDotPropPathToSqliteJsonPath,
 };
-
-// Backwards-compat aliases
-/** @deprecated Use `PropertyTranslatorJsonbSchema` instead. */
-export const PropertyMapSchema = PropertyTranslatorJsonbSchema;
-/** @deprecated Use `PropertyTranslatorSqliteJsonSchema` instead. */
-export const SqlitePropertyMapSchema = PropertyTranslatorSqliteJsonSchema;
 
 export type {
     MatchJavascriptObject,
@@ -57,9 +45,5 @@ export type {
     PreparedWhereClauseResult,
     WhereClauseError,
     ValueComparisonFlexi,
-    // New name
     IPropertyTranslator,
 };
-
-/** @deprecated Use `IPropertyTranslator` instead. */
-export type { IPropertyTranslator as IPropertyMap };

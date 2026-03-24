@@ -1,7 +1,3 @@
-import {getProperty} from "./getPropertySimpleDot.js";
-import type { DotPropPathsUnion, DotPropPathsRecord, PathValue, ArrayProperty, ArrayElement, NumberProperty } from "./types.js";
-
-export const DotPropPaths = {
-    getProperty
-}
-export type {DotPropPathsUnion, DotPropPathsRecord, PathValue, ArrayProperty, ArrayElement, NumberProperty};
+export { getProperty } from "./getPropertySimpleDot.ts";
+export { getTypedProperty, setTypedProperty } from "./typed-dot-prop.ts";
+export type { DotPropPathsUnion, DotPropPathsRecord, PathValue, ArrayProperty, ArrayElement, NumberProperty } from "./types.ts";

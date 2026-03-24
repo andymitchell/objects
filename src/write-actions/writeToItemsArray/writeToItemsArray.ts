@@ -2,7 +2,7 @@
 import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome } from "../types.ts";
 import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
-import { WhereFilter } from "../../where-filter/index-old.ts";
+import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
 import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.ts";
 import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe.ts";
@@ -287,7 +287,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 const pkValue = pk(item);
 
 
-                if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && (WhereFilter.matchJavascriptObject(item, action.payload.where)) ) {
+                if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && (matchJavascriptObject(item, action.payload.where)) ) {
                     const permissionFailure = scoped? undefined : checkWritePermission(item, ddl, user);
                     if( permissionFailure ) {
                         failureTracker.report(action, item, permissionFailure);

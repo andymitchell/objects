@@ -3,10 +3,6 @@
     "version": "1.0.0",
     "description": "",
     "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "default": "./dist/index.js"
-        },
         "./where-filter": {
             "types": "./dist/index-where-filter.d.ts",
             "default": "./dist/index-where-filter.js"
@@ -26,6 +22,18 @@
         "./query": {
             "types": "./dist/index-query.d.ts",
             "default": "./dist/index-query.js"
+        },
+        "./dot-prop-paths": {
+            "types": "./dist/index-dot-prop-paths.d.ts",
+            "default": "./dist/index-dot-prop-paths.js"
+        },
+        "./primary-key": {
+            "types": "./dist/index-primary-key.d.ts",
+            "default": "./dist/index-primary-key.js"
+        },
+        "./utils": {
+            "types": "./dist/index-utils.d.ts",
+            "default": "./dist/index-utils.js"
         }
     },
     "type": "module",

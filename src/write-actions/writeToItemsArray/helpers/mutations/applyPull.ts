@@ -1,4 +1,4 @@
-import { WhereFilter } from "../../../../where-filter/index-old.ts";
+import matchJavascriptObject from "../../../../where-filter/matchJavascriptObject.ts";
 import type { WhereFilterDefinition } from "../../../../where-filter/types.ts";
 import type { WriteError } from "../../../types.ts";
 import { deepEquals } from "./deepEquals.ts";
@@ -41,7 +41,7 @@ export function applyPull<T extends Record<string, any>>(
         // Object mode: remove elements matching the WhereFilter
         filtered = existing.filter(el => {
             if (typeof el === 'object' && el !== null) {
-                return !WhereFilter.matchJavascriptObject(el, itemsWhere);
+                return !matchJavascriptObject(el, itemsWhere);
             }
             return true;
         });

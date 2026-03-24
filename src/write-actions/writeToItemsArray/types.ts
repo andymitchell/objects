@@ -65,6 +65,16 @@ export type WriteToItemsArrayOptions<T extends Record<string, any> = Record<stri
      * @default false
      */
     mutate?: boolean
+
+    /**
+     * Strategy for applying create/update payloads.
+     *
+     * - `'lww'` **(default)** — last-write-wins merge.
+     * - `'custom'` — provide your own `WriteStrategy` handlers.
+     */
+    write_strategy?:
+        { type: 'lww' }
+        | { type: 'custom', strategy: WriteStrategy<T> }
 }
 
 
@@ -95,17 +105,6 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
      * 
      */
     order_by: ListOrdering<T>,
-
-    pre_triggers?: {
-        trigger: (replacement: T, existing?: T) => T // Throws an error if expect halt
-    }[],
-    write_strategy?: 
-        { type: 'lww' } // This is a naive implementation that assumes WriteActions are applied in the correct order. A more robust solution would be to compare timestamps for each dot-prop path.
-        | 
-        { type: 'custom', strategy: WriteStrategy<T> },
-    growset?: {
-        delete_key: keyof T
-    }
 }
 
 const PermissionIdFormatSchema = z.union([z.literal('uuid'), z.literal('email')]);

@@ -5,7 +5,6 @@ import { setProperty } from "dot-prop";
 import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
 import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.ts";
-import convertWriteActionToGrowSetSafe from "./helpers/convertWriteActionToGrowSetSafe.ts";
 import writeLww from "./writeStrategies/lww.ts";
 import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.ts";
 import { z } from "zod";
@@ -34,7 +33,9 @@ function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectClon
 }
 
 
-function getOptionDefaults<T extends Record<string, any>>(options?:Partial<WriteToItemsArrayOptions<T>>):Required<WriteToItemsArrayOptions<T>> {
+type OptionsWithDefaults<T extends Record<string, any>> = Required<Pick<WriteToItemsArrayOptions<T>, 'attempt_recover_duplicate_create' | 'mutate' | 'atomic'>> & Pick<WriteToItemsArrayOptions<T>, 'write_strategy'>;
+
+function getOptionDefaults<T extends Record<string, any>>(options?:Partial<WriteToItemsArrayOptions<T>>):OptionsWithDefaults<T> {
     return {
         attempt_recover_duplicate_create: 'never',
         mutate: false,
@@ -162,7 +163,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
         };
     }
 
-    const optionsIncDefaults:Required<WriteToItemsArrayOptions<T>> = getOptionDefaults<T>(options);
+    const optionsIncDefaults:OptionsWithDefaults<T> = getOptionDefaults<T>(options);
     if( isDraft(items) && !optionsIncDefaults.mutate ) {
         throw new Error("When using Immer drafts you need to use mutate. Immer does not support replacing the array.");
     }
@@ -203,9 +204,9 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
     // Choose the strategy
     let writeStrategy: WriteStrategy<T>;
-    switch(rules.write_strategy?.type ) {
+    switch(optionsIncDefaults.write_strategy?.type ) {
         case 'custom':
-            writeStrategy = rules.write_strategy.strategy
+            writeStrategy = optionsIncDefaults.write_strategy.strategy
             break;
         default:
             writeStrategy = writeLww as WriteStrategy<T>
@@ -263,8 +264,6 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                     } else {
                         const newItem = writeStrategy.create_handler(action.payload);
 
-                        // TODO Run pretriggers
-
                         const schemaOk = failureTracker.testSchema(action, newItem);
                         if( schemaOk ) {
                             existingIds.add(pkValue);
@@ -297,12 +296,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 
 
-                        // Check if it's a grow set (otherwise just do the action)
-                        const maybeExpandedWriteActions = convertWriteActionToGrowSetSafe(action, item, rules);
-
-                        for (const action of maybeExpandedWriteActions) {
-
-                            if( failureTracker.shouldHalt() ) break;
+                        if( !failureTracker.shouldHalt() ) {
                             switch (action.payload.type) {
                                 case 'update':
                                     if (!mutableUpdatedItem) {
@@ -435,7 +429,6 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                                 wipItems.splice(i, 1);
                                 i--;
                             } else if( mutableUpdatedItem ) {
-                                // TODO Run pretriggers
                                 if (addedHash[pkValue]) {
                                     addedHash[pkValue] = mutableUpdatedItem;
                                 } else {
@@ -504,7 +497,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 }
 
-function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<WriteToItemsArrayOptions<T>>) {
+function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults<T>) {
     let finalItems = optionsIncDefaults.mutate? originalItems as T[] : [...originalItems] as T[];
     for( let i = 0; i < finalItems.length; i++ ) {
         if( !finalItems[i] ) throw new Error(`finalItems[i] was empty, suggesting either an item has been nullified, or splicing has shortened the length such that i is beyond the end. i: ${i}, length: ${finalItems.length}`);
@@ -526,7 +519,7 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
 function emptyWriteToItemsArrayChanges<T extends Record<string, any>>(originalItems:T[]):WriteToItemsArrayChanges<T> {
     return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems, created_at: Date.now()};
 }
-function generateWriteToItemsArrayChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:Required<WriteToItemsArrayOptions<T>>):WriteToItemsArrayChanges<T> {
+function generateWriteToItemsArrayChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults<T>):WriteToItemsArrayChanges<T> {
 
     const changes: WriteToItemsArrayChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now() };
     const newChange = !!(changes.insert.length || changes.update.length || changes.remove_keys.length);

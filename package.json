@@ -22,6 +22,10 @@
         "./objects-delta-testing": {
             "types": "./dist/index-objects-delta-testing.d.ts",
             "default": "./dist/index-objects-delta-testing.js"
+        },
+        "./query": {
+            "types": "./dist/index-query.d.ts",
+            "default": "./dist/index-query.js"
         }
     },
     "type": "module",

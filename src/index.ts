@@ -16,6 +16,26 @@ export * from "./where-filter/index.ts";
 export * from "./objects-delta/index.ts";
 export * from './write-actions/index.ts';
 
+// Query — omit PrimaryKeyValue to avoid duplicate export (already exported from getKeyValue.ts)
+export type {
+    SortEntry,
+    SortDefinition,
+    SortAndSlice,
+    QueryError,
+    SortAndSliceObjectsResult,
+    PreparedQueryClauses,
+    PreparedQueryClausesResult,
+    TableInfo,
+    ObjectTableInfo,
+    ColumnTableInfo,
+    FlattenedQuerySql,
+    SqlDialect,
+    SqlFragment,
+} from "./query/index.ts";
+export { SortEntrySchema, SortDefinitionSchema, SortAndSliceSchema } from "./query/index.ts";
+export { sortAndSliceObjects } from "./query/index.ts";
+export { prepareObjectTableQuery, prepareColumnTableQuery, flattenQueryClausesToSql } from "./query/index.ts";
+
 export {
     isPlainObject, 
     safeKeyValue, 

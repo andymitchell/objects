@@ -9,6 +9,7 @@ export default defineConfig([
 
             'index-objects-delta': 'src/objects-delta/index.ts',
             'index-objects-delta-testing': 'src/objects-delta/index-testing.ts',
+            'index-query': 'src/query/index.ts',
         },
         publicDir: false,
         clean: true,

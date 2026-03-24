@@ -1,4 +1,4 @@
-import type { IUser } from "../../write-actions/auth/types.ts";
+import type { IUser } from "../auth.ts";
 
 /**
  * Creates a test IUser with configurable identity claims.

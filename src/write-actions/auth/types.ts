@@ -1,16 +1,3 @@
-export interface IUser {
-    getID():string | undefined;
-    getUuid():string | undefined;
-    getEmail():string | undefined;
-}
-
-
-export function isIUser(x:unknown): x is IUser {
-    if (typeof x === 'object' && x !== null) {
-        const hasEmail = "getEmail" in x && typeof x.getEmail==='function';
-        const hasUuid = "getUuid" in x && typeof x.getUuid==='function';
-
-        return hasEmail && hasUuid;
-    }
-    return false;
-}
+// Re-export from canonical location in ownership module
+export { isIUser } from "../../ownership/auth.ts";
+export type { IUser } from "../../ownership/auth.ts";

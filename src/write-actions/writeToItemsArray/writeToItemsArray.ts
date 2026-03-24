@@ -4,7 +4,7 @@ import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
-import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules, WriteStrategy } from "./types.ts";
+import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, DDL, ItemHash, ListRules } from "./types.ts";
 import writeLww from "./writeStrategies/lww.ts";
 import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.ts";
 import { z } from "zod";
@@ -33,9 +33,9 @@ function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectClon
 }
 
 
-type OptionsWithDefaults<T extends Record<string, any>> = Required<Pick<WriteToItemsArrayOptions<T>, 'attempt_recover_duplicate_create' | 'mutate' | 'atomic'>> & Pick<WriteToItemsArrayOptions<T>, 'write_strategy'>;
+type OptionsWithDefaults = Required<Pick<WriteToItemsArrayOptions, 'attempt_recover_duplicate_create' | 'mutate' | 'atomic'>> & Pick<WriteToItemsArrayOptions, 'enforce_ownership'>;
 
-function getOptionDefaults<T extends Record<string, any>>(options?:Partial<WriteToItemsArrayOptions<T>>):OptionsWithDefaults<T> {
+function getOptionDefaults(options?:Partial<WriteToItemsArrayOptions>):OptionsWithDefaults {
     return {
         attempt_recover_duplicate_create: 'never',
         mutate: false,
@@ -97,14 +97,14 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  * @param items The items to perform them on (by default they will not be mutated)
  * @param schema
  * @param ddl The rules for how the write actions will be implemented
- * @param user Required if the `ddl` specifies permissions
+ * @param user Required if the `ddl` specifies ownership
  * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
-export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, I extends T | Draft<T>>(writeActions: WriteAction<T>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>): WriteToItemsArrayResult<I> {
+export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, I extends T | Draft<T>>(writeActions: WriteAction<T>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<I> {
     // This function works as overload for writeToItemsArray (instead of the 'PreserveInputType' suffix);
     // but with the cost of requiring the user to specify 2 generics instead of just 1 T.
     // So decided to give the consumer the choice.
@@ -132,7 +132,7 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  * @param items The items to perform them on (by default they will not be mutated)
  * @param schema
  * @param ddl The rules for how the write actions will be implemented
- * @param user Required if the `ddl` specifies permissions
+ * @param user Required if the `ddl` specifies ownership
  * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
@@ -141,7 +141,7 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  * 
  * @note 
  */
-export function writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>): WriteToItemsArrayResult<T>  {
+export function writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<T>  {
 
     // Wondering if using this in a Read-Modify-Write process (e.g. read items from sql, modify with this, write back to table)
     // is too slow and you should implement a custom WriteAction-to-SQL converter (or any other target)? 
@@ -152,7 +152,7 @@ export function writeToItemsArray<T extends Record<string, any>>(writeActions: W
 
     return _writeToItemsArray(writeActions, items, schema, ddl, user, options);
 }
-function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions<T>, scoped?:boolean): WriteToItemsArrayResult<T> {
+function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions, scoped?:boolean): WriteToItemsArrayResult<T> {
 
 
     if( writeActions.length===0 ) {
@@ -163,7 +163,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
         };
     }
 
-    const optionsIncDefaults:OptionsWithDefaults<T> = getOptionDefaults<T>(options);
+    const optionsIncDefaults:OptionsWithDefaults = getOptionDefaults(options);
     if( isDraft(items) && !optionsIncDefaults.mutate ) {
         throw new Error("When using Immer drafts you need to use mutate. Immer does not support replacing the array.");
     }
@@ -202,15 +202,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
     const failureTracker = new WriteActionFailuresTracker<T>(schema, rules);
 
 
-    // Choose the strategy
-    let writeStrategy: WriteStrategy<T>;
-    switch(optionsIncDefaults.write_strategy?.type ) {
-        case 'custom':
-            writeStrategy = optionsIncDefaults.write_strategy.strategy
-            break;
-        default:
-            writeStrategy = writeLww as WriteStrategy<T>
-    }
+    const writeStrategy = writeLww;
 
     const existingIds = new Set(wipItems.map(item => safeKeyValue(item[rules.primary_key])));
 
@@ -258,11 +250,11 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                         failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                     }
                 } else {
-                    const permissionFailure = scoped? undefined : checkWritePermission(action.payload.data, ddl, user);
+                    const permissionFailure = (scoped || options?.enforce_ownership === false)? undefined : checkWritePermission(action.payload.data, ddl, user);
                     if( permissionFailure ) {
                         failureTracker.report(action, action.payload.data, permissionFailure);
                     } else {
-                        const newItem = writeStrategy.create_handler(action.payload);
+                        const newItem = writeStrategy.create_handler(action.payload) as T;
 
                         const schemaOk = failureTracker.testSchema(action, newItem);
                         if( schemaOk ) {
@@ -287,7 +279,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 
                 if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && (matchJavascriptObject(item, action.payload.where)) ) {
-                    const permissionFailure = scoped? undefined : checkWritePermission(item, ddl, user);
+                    const permissionFailure = (scoped || options?.enforce_ownership === false)? undefined : checkWritePermission(item, ddl, user);
                     if( permissionFailure ) {
                         failureTracker.report(action, item, permissionFailure);
                     } else {
@@ -497,7 +489,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 }
 
-function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults<T>) {
+function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults) {
     let finalItems = optionsIncDefaults.mutate? originalItems as T[] : [...originalItems] as T[];
     for( let i = 0; i < finalItems.length; i++ ) {
         if( !finalItems[i] ) throw new Error(`finalItems[i] was empty, suggesting either an item has been nullified, or splicing has shortened the length such that i is beyond the end. i: ${i}, length: ${finalItems.length}`);
@@ -519,7 +511,7 @@ function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>
 function emptyWriteToItemsArrayChanges<T extends Record<string, any>>(originalItems:T[]):WriteToItemsArrayChanges<T> {
     return {insert: [], update: [], remove_keys: [], changed: false, final_items: originalItems, created_at: Date.now()};
 }
-function generateWriteToItemsArrayChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults<T>):WriteToItemsArrayChanges<T> {
+function generateWriteToItemsArrayChanges<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults):WriteToItemsArrayChanges<T> {
 
     const changes: WriteToItemsArrayChanges<T> = { insert: Object.values(addedHash), update: Object.values(updatedHash), remove_keys: Object.values(deletedHash).map(x => pk(x)), changed: false, final_items: [], created_at: Date.now() };
     const newChange = !!(changes.insert.length || changes.update.length || changes.remove_keys.length);

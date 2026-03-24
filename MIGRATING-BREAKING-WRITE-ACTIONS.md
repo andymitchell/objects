@@ -22,6 +22,10 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 12. **`./write-actions-old-types` sub-path removed** — the legacy generation-old type system is gone entirely.
 13. **Naming convention pass** — all types, schemas, and functions renamed for consistency under the `Write` prefix. See tables below for the full mapping.
 14. **`attempt_recover_duplicate_create: 'if-identical'` renamed to `'if-convergent'`** — the old name was misleading; the actual semantics are subset-convergence, not strict identity.
+15. **`ddl.permissions` renamed to `ddl.ownership`** — `DDLPermissions`, `DDLPermissionProperty`, `DDLPermissionsSchema`, `DDLPermissionPropertySchema` removed. Use `OwnershipRule` from `@andyrmitchell/objects/ownership`.
+16. **`type: 'basic_ownership_property'` renamed to `type: 'basic'`** — simpler discriminant now that ownership is its own module.
+17. **`checkWritePermission` removed from public API** — use `checkOwnership` from `@andyrmitchell/objects/ownership` instead. Returns `OwnershipCheckResult` (not `WriteError`).
+18. **New `@andyrmitchell/objects/ownership` sub-path** — exports `checkOwnership`, `prepareOwnershipWhereClause`, `OwnershipRule`, `IUser`, and standard test utilities.
 
 ---
 

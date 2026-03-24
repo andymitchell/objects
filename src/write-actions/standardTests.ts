@@ -56,7 +56,7 @@ const flatDdl: DDL<Flat> = {
     lists: {
         '.': { primary_key: 'id' },
     },
-    permissions: { type: 'none' },
+    ownership: { type: 'none' },
 };
 
 const NestedSchema = z.object({
@@ -84,7 +84,7 @@ const nestedDdl: DDL<Nested> = {
         'children': { primary_key: 'cid' },
         'children.items': { primary_key: 'iid' },
     },
-    permissions: { type: 'none' },
+    ownership: { type: 'none' },
 };
 
 const OwnerSchema = z.object({
@@ -99,8 +99,8 @@ const ownerDdl: DDL<Owner> = {
     lists: {
         '.': { primary_key: 'id' },
     },
-    permissions: {
-        type: 'basic_ownership_property',
+    ownership: {
+        type: 'basic',
         property_type: 'id',
         path: 'owner_id',
         format: 'uuid',
@@ -119,8 +119,8 @@ const ownerEmailDdl: DDL<OwnerEmail> = {
     lists: {
         '.': { primary_key: 'id' },
     },
-    permissions: {
-        type: 'basic_ownership_property',
+    ownership: {
+        type: 'basic',
         property_type: 'id',
         path: 'owner_email',
         format: 'email',
@@ -145,7 +145,7 @@ const flatWithSubItemsDdl: DDL<FlatWithSubItems> = {
         '.': { primary_key: 'id' },
         'sub_items': { primary_key: 'sid' },
     },
-    permissions: { type: 'none' },
+    ownership: { type: 'none' },
 };
 
 const OwnerScalarArraySchema = z.object({
@@ -159,8 +159,8 @@ const ownerScalarArrayDdl: DDL<OwnerScalarArray> = {
     lists: {
         '.': { primary_key: 'id' },
     },
-    permissions: {
-        type: 'basic_ownership_property',
+    ownership: {
+        type: 'basic',
         property_type: 'id_in_scalar_array',
         path: 'owner_ids',
         format: 'uuid',

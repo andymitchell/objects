@@ -34,6 +34,10 @@
         "./utils": {
             "types": "./dist/index-utils.d.ts",
             "default": "./dist/index-utils.js"
+        },
+        "./ownership": {
+            "types": "./dist/index-ownership.d.ts",
+            "default": "./dist/index-ownership.js"
         }
     },
     "type": "module",

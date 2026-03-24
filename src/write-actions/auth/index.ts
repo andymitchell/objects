@@ -1,9 +1,2 @@
-import { isIUser, type IUser } from "./types.js";
-
-export {
-    isIUser
-}
-
-export type {
-    IUser
-}
+export { isIUser } from "../../ownership/auth.ts";
+export type { IUser } from "../../ownership/auth.ts";

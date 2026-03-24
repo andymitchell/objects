@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { OwnershipRule } from "./types.ts";
-import type { IUser } from "../write-actions/auth/types.ts";
+import type { IUser } from "./auth.ts";
 import { mockUser } from "./testing-helpers/mockUser.ts";
 
 // ═══════════════════════════════════════════════════════════════════

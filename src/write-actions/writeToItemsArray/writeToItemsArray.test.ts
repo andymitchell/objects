@@ -37,7 +37,7 @@ const ddl: DDL<Obj> = {
         'children': { primary_key: 'cid' },
         'children.children': { primary_key: 'ccid' },
     },
-    permissions: { type: 'none' },
+    ownership: { type: 'none' },
 };
 
 const obj1: Obj = { id: '1' };
@@ -378,7 +378,7 @@ describe('writeToItemsArray', () => {
                 const ddlCount: DDL<ObjWithCount> = {
                     version: 1,
                     lists: { '.': { primary_key: 'id' } },
-                    permissions: { type: 'none' },
+                    ownership: { type: 'none' },
                 };
 
                 const item: ObjWithCount = { id: '1', count: 10 };

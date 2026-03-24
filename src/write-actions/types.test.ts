@@ -357,7 +357,7 @@ describe('5. DDL<T> type constraints', () => {
             lists: {
                 '.': { primary_key: 'id' },
             },
-            permissions: { type: 'none' },
+            ownership: { type: 'none' },
         };
     });
 
@@ -368,7 +368,7 @@ describe('5. DDL<T> type constraints', () => {
                 // @ts-expect-error: 'nonexistent' is not a PK property of Flat
                 '.': { primary_key: 'nonexistent' },
             },
-            permissions: { type: 'none' },
+            ownership: { type: 'none' },
         };
     });
 
@@ -380,7 +380,7 @@ describe('5. DDL<T> type constraints', () => {
                 'subtasks': { primary_key: 'sid' },
                 'subtasks.items': { primary_key: 'iid' },
             },
-            permissions: { type: 'none' },
+            ownership: { type: 'none' },
         };
     });
 });

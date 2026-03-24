@@ -1,10 +1,13 @@
 import { mergeWith } from "lodash-es";
-import type { WriteStrategy } from "../types.ts";
+import type { WritePayloadCreate, WritePayloadUpdate } from "../../types.ts";
 import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination.ts";
 import { VALUE_TO_DELETE_KEY } from "../../helpers.ts";
 
 
-const writeLww: WriteStrategy<Record<string, any>> = {
+const writeLww: {
+    create_handler: (writeActionPayload: WritePayloadCreate<Record<string, any>>) => Record<string, any>;
+    update_handler: (writeActionPayload: WritePayloadUpdate<Record<string, any>>, target: Record<string, any>) => void;
+} = {
     create_handler: (writeActionPayload) => {
         return writeActionPayload.data;
     },

@@ -137,7 +137,7 @@ export type WriteError =
  * Consumers may pass any string as a reason (e.g. `'not-authenticated'`);
  * core reasons are provided here for autocomplete and exhaustive matching.
  */
-export type CorePermissionDeniedReason = 'no-owner-id' | 'not-owner' | 'unknown-permission' | 'invalid-permissions' | 'expected-owner-email';
+export type CorePermissionDeniedReason = 'no-owner-id' | 'not-owner' | 'unknown-type' | 'invalid-rule' | 'expected-owner-email';
 
 /**
  * A `WriteError` enriched with the item context where the error occurred.

@@ -55,8 +55,8 @@ const testItemsWithOwnerArray:TestItemOwnerArray = {
  const ddl:DDL<TestItem> = {
     version: 1,
     lists: {'.': {primary_key: 'id'}},
-    permissions: {
-        type: 'basic_ownership_property',
+    ownership: {
+        type: 'basic',
         property_type: 'id',
         path: 'owner',
         format: 'uuid',
@@ -67,8 +67,8 @@ const testItemsWithOwnerArray:TestItemOwnerArray = {
  const ddlWithOwnerArray:DDL<TestItemOwnerArray> = {
     version: 1,
     lists: {'.': {primary_key: 'id'}},
-    permissions: {
-        type: 'basic_ownership_property',
+    ownership: {
+        type: 'basic',
         property_type: 'id_in_scalar_array',
         path: 'owners',
         format: 'uuid'
@@ -81,8 +81,8 @@ const testItemsWithOwnerArray:TestItemOwnerArray = {
  const ddlWithObjectOwnersArray:DDL<TestItemOwnerObjectArray> = {
     version: 1,
     lists: {'.': {primary_key: 'id'}, 'owners': {primary_key: 'email'}},
-    permissions: {
-        type: 'basic_ownership_property',
+    ownership: {
+        type: 'basic',
         property_type: 'id',
         path: 'owners.email',
         format: 'email'
@@ -123,7 +123,7 @@ describe('Can write', () => {
         test('TestItem invalid ddl', () => {
             const ddl2 = structuredClone(ddl);
             // @ts-ignore breaking for test
-            ddl2.permissions = {};
+            ddl2.ownership = {};
             
             const failures = checkWritePermission(testItems, ddl2, user1);
             expect(!!failures).toBe(true);

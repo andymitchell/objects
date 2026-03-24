@@ -1,10 +1,9 @@
-import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, PrimaryKeyProperties } from "../../dot-prop-paths/types.ts";
+import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue, PrimaryKeyProperties } from "../../dot-prop-paths/types.ts";
 import type { PrimaryKeyValue } from "../../utils/getKeyValue.ts";
 import type { IfAny } from "../../types.ts";
 import type { EnsureRecord } from "../../types.ts";
-import type {  WritePayloadCreate, WritePayloadUpdate, WriteResult } from "../types.ts";
-import { z } from "zod";
-import { isTypeEqual } from "@andyrmitchell/utils";
+import type { WriteResult } from "../types.ts";
+import type { OwnershipRule } from "../../ownership/types.ts";
 import type { ObjectsDelta } from "../../objects-delta/types.ts";
 
 
@@ -12,21 +11,8 @@ export type ItemHash<T> = Record<PrimaryKeyValue, T>;
 
 
 
-/**
- * Strategy for applying create/update payloads to items.
- *
- * `update_handler` MUST mutate `target` in-place — the caller owns the cloning
- * decision (via `getMutableItem`), so the handler always receives a safe-to-mutate object.
- */
-export interface WriteStrategy<T extends Record<string, any>> {
-    create_handler: (writeActionPayload: WritePayloadCreate<T>) => T;
-    /** Mutate `target` in-place with the payload data. */
-    update_handler: (writeActionPayload: WritePayloadUpdate<T>, target: T) => void
-}
+export type WriteToItemsArrayOptions = {
 
-
-export type WriteToItemsArrayOptions<T extends Record<string, any> = Record<string, any>> = {
-  
     /**
      * Conflict-resolution strategy when a `create` action targets a PK that already exists.
      *
@@ -42,39 +28,36 @@ export type WriteToItemsArrayOptions<T extends Record<string, any> = Record<stri
      */
     attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update',
 
-
-        
-    /** 
-     * Either all actions occur, or none (i.e. if 1 fails, they all fail). 
-     * 
+    /**
+     * Either all actions occur, or none (i.e. if 1 fails, they all fail).
+     *
      * Aka the actions are a transaction block
-     * 
+     *
      * @default false
      */
     atomic?: boolean
 
-    /** 
+    /**
      * Mutate in-place instead of cloning the array/objects when they update.
-     * 
-     * The most likely reason to do this is because you're passing an Immer draft, which needs the same array returning. 
-     * 
-     * **When mutating, referential comparison works for**: 
-     * - ✅ Using Immer Drafts for `items` (because the draft resolves to new objects) 
-     * - ❌ Everything else fails, because objects have the same reference even when changed 
-     * 
+     *
+     * The most likely reason to do this is because you're passing an Immer draft, which needs the same array returning.
+     *
+     * **When mutating, referential comparison works for**:
+     * - ✅ Using Immer Drafts for `items` (because the draft resolves to new objects)
+     * - ❌ Everything else fails, because objects have the same reference even when changed
+     *
      * @default false
      */
     mutate?: boolean
 
     /**
-     * Strategy for applying create/update payloads.
+     * Whether to enforce ownership checks on write actions.
      *
-     * - `'lww'` **(default)** — last-write-wins merge.
-     * - `'custom'` — provide your own `WriteStrategy` handlers.
+     * Set to `false` to bypass ownership verification (e.g. for admin operations).
+     *
+     * @default true
      */
-    write_strategy?:
-        { type: 'lww' }
-        | { type: 'custom', strategy: WriteStrategy<T> }
+    enforce_ownership?: boolean
 }
 
 
@@ -92,76 +75,10 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
     primary_key: IfAny<T, string, PrimaryKeyProperties<T>>,// keyof T>,
 }
 
-const PermissionIdFormatSchema = z.union([z.literal('uuid'), z.literal('email')]);
-export const DDLPermissionPropertySchema = z.union([
-    z.object({
-        property_type: z.literal('id'),
-        path: z.string(),
-        format: PermissionIdFormatSchema
-    }),
-    z.object({
-        property_type: z.literal('id_in_scalar_array'),
-        path: z.string(),
-        format: PermissionIdFormatSchema
-    })
-])
-export const DDLPermissionsSchema = z.union([
-    z.object({
-        type: z.literal('basic_ownership_property')
-    }).and(DDLPermissionPropertySchema),
-    z.object({
-        type: z.literal('none') 
-    }),
-    z.object({
-        type: z.literal('opa') // TODO
-    })
-])
-
-type PermissionIdFormat = 'uuid' | 'email';
-export type DDLPermissionProperty<T extends Record<string, any> = Record<string, any>> = 
-    {
-        property_type: 'id',
-        path: DotPropPathsUnionScalarSpreadingObjectArrays<T>,
-        format: PermissionIdFormat,
-        /**
-         * The person who will become the new owner, if they accept it. 
-         * 
-         * Beware this currently gives complete editing power to this person (as well as the existing owner). You'll need to manually add additional controls to limit the changes they can make, or limit the duration.
-         */
-        transferring_to_path?: DotPropPathsUnionScalarSpreadingObjectArrays<T>,
-    } | {
-        property_type: 'id_in_scalar_array',
-        path: DotPropPathsUnionScalarArraySpreadingObjectArrays<T>, 
-        format: PermissionIdFormat
-    }
-export type DDLPermissions<T extends Record<string, any> = Record<string, any>> = 
-    {
-        /**
-         * Only an owner can make changes to the object. 
-         * 
-         * This is a very basic implementation with no granularity. 
-         * 
-         * For more granularity, consider using/implementing OPA. Or provide a manual solution outside the scope of this package (e.g. if the item is stored in Postgres, handle it like normal DB permissions)
-         */
-        type: 'basic_ownership_property',
-    } & DDLPermissionProperty<T>
-    | {
-        /**
-         * Anyone can make changes 
-         */
-        type: 'none'
-    }
-    /* | {
-        type: 'opa',
-        wasm_path: string, // https://stackoverflow.com/questions/49611290/using-webassembly-in-chrome-extension https://groups.google.com/a/chromium.org/g/chromium-extensions/c/zVaQo3jpSpw/m/932YZv2UAgAJ 
-        on_error: (item: T, writeAction: WriteAction<T>) => T | void
-    },*/
-isTypeEqual<z.infer<typeof DDLPermissionPropertySchema>['property_type'], DDLPermissionProperty<any>['property_type']>(true);
-isTypeEqual<z.infer<typeof PermissionIdFormatSchema>, PermissionIdFormat>(true);
-
 type DDLRoot<T extends Record<string, any> = Record<string, any>> = {
     version: number,
-    permissions: DDLPermissions<T>
+    /** Declarative ownership hint — not necessarily enforced by every implementation. */
+    ownership: OwnershipRule<T>
 }
 export type ListRules<T extends Record<string, any> = Record<string, any>> = ListRulesCore<T>
 

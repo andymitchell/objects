@@ -12,6 +12,7 @@ export default defineConfig([
             'index-dot-prop-paths': 'src/dot-prop-paths/index.ts',
             'index-primary-key': 'src/primary-key/index.ts',
             'index-utils': 'src/utils/index.ts',
+            'index-ownership': 'src/ownership/index.ts',
         },
         publicDir: false,
         clean: true,

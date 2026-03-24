@@ -34,3 +34,9 @@ export type OwnershipRule<T extends Record<string, any> = Record<string, any>> =
          */
         type: 'none',
     }
+
+export type CoreOwnershipDeniedReason = 'no-owner-id' | 'not-owner' | 'unknown-type' | 'invalid-rule' | 'expected-owner-email';
+
+export type OwnershipCheckResult =
+    | { permitted: true }
+    | { permitted: false, reason: CoreOwnershipDeniedReason }

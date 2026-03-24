@@ -19,7 +19,7 @@ describe('equivalentCreateOccurs', () => {
                 primary_key: 'id'
             }
         },
-        permissions: {
+        ownership: {
             type: 'none'
         }
     }

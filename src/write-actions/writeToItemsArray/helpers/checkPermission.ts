@@ -1,80 +1,22 @@
 import type { Draft } from "immer";
 import type { IUser } from "../../auth/types.ts";
-import { type DDL, DDLPermissionsSchema } from "../types.ts";
-
-import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertySimpleDot.ts";
+import type { DDL } from "../types.ts";
 import type { WriteError } from "../../types.ts";
-
+import { checkOwnership } from "../../../ownership/checkOwnership.ts";
 
 /**
- * Check whether a user has permission to modify an item, based on the DDL's ownership rules.
+ * Internal thin wrapper — delegates to `checkOwnership` after extracting `ddl.ownership`.
  *
- * Returns `undefined` if permitted, or a `WriteError` describing the denial reason.
- * Use before executing a write action to predict whether it will be allowed.
+ * Why: keeps writeToItemsArray's call sites unchanged while the real logic lives in the ownership module.
  *
  * @example
  * const denied = checkWritePermission(item, ddl, user);
  * if (denied) console.log(denied.reason); // e.g. 'not-owner'
  */
-export function checkWritePermission<T extends Record<string, any>>(item:Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser, verifiedPermissionsSchema?: boolean):WriteError | undefined {
-    if( !ddl.permissions || ddl.permissions.type==='none' ) return undefined;
-    if( !verifiedPermissionsSchema ) {
-        if( !DDLPermissionsSchema.safeParse(ddl.permissions).success ) {
-            return {type: 'permission_denied', reason: 'invalid-permissions'};
-        }
+export function checkWritePermission<T extends Record<string, any>>(item: Readonly<T> | Draft<T>, ddl: DDL<T>, user?: IUser): WriteError | undefined {
+    const result = checkOwnership(item as Readonly<T>, ddl.ownership, user);
+    if (!result.permitted) {
+        return { type: 'permission_denied', reason: result.reason };
     }
-
-    if( user ) {
-        if( ddl.permissions.type==='basic_ownership_property' ) {
-            if( ddl.permissions.property_type==='id' || ddl.permissions.property_type==='id_in_scalar_array' ) {
-                let id: string | undefined;
-                if( ddl.permissions.format==='uuid' ) {
-                    id = user.getUuid();
-                } else if( ddl.permissions.format==='email' ) {
-                    id = user.getEmail();
-                }
-                if( id ) {
-                    if( ddl.permissions.format==='email' && !/.+\@.+\..+/.test(id) ) {
-                        return {type: 'permission_denied', reason: 'expected-owner-email'};
-                    } else {
-                    
-                        const arrayValues = getPropertySpreadingArrays(item, ddl.permissions.path);
-                        
-                        const passed = arrayValues.some(arrayValue => {
-                            if( ddl.permissions.type==='basic_ownership_property' ) {
-                                if( ddl.permissions!.property_type==='id_in_scalar_array' && Array.isArray(arrayValue.value) ) {
-                                    return arrayValue.value.includes(id);
-                                } else if( ddl.permissions!.property_type==='id' ) {
-                                    return arrayValue.value===id
-                                }
-                            } else {
-                                throw new Error("typeguard noop");
-                            }
-                        })
-
-                        let secondaryPassed = false;
-                        if( ddl.permissions!.property_type==='id' && ddl.permissions!.transferring_to_path ) {
-                            const secondaryArrayValues = getPropertySpreadingArrays(item, ddl.permissions.transferring_to_path);
-                            secondaryPassed = secondaryArrayValues.some(arrayValue => {
-                                return arrayValue.value===id
-                            })
-    
-                        }
-                        
-                        if( !passed && !secondaryPassed ) {
-                            return {'type': 'permission_denied', reason: 'not-owner'};
-                        }
-                        
-                    }
-                } else {
-                    return {type: 'permission_denied', reason: 'no-owner-id'};
-                }
-            } else {
-                return {type: 'permission_denied', reason: 'unknown-permission'};
-            }
-        }
-    } else {
-        return {type: 'permission_denied', reason: 'no-owner-id'};
-    }
-
+    return undefined;
 }

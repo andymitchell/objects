@@ -147,7 +147,7 @@ export function writeToItemsArray<T extends Record<string, any>>(writeActions: W
     // In testing it only yielded about a 1.5x improvement, but with major dual-path complexity
     // (because it could optimise in some cases but couldn't convert every WriteAction so needed to fall back).
     // The key to making it performant was to batch all the writes in one using `UPDATE WITH VALUES`
-    
+
 
     return _writeToItemsArray(writeActions, items, schema, ddl, user, options);
 }

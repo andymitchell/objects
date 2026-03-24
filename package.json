@@ -1,6 +1,6 @@
 {
-    "name": "@andyrmitchell/objects",
-    "version": "0.20.0",
+    "name": "@andymitchell/objects",
+    "version": "1.0.0",
     "description": "",
     "exports": {
         ".": {
@@ -39,6 +39,7 @@
         "url": "git+https://github.com/andymitchell/objects.git"
     },
     "publishConfig": {
+        "registry": "https://npm.pkg.github.com",
         "access": "public"
     },
     "scripts": {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { WriteAction, WriteResult } from "./types.ts";
-import type { WriteChanges, DDL } from "./writeToItemsArray/types.ts";
+import type { WriteChanges } from "./writeToItemsArray/types.ts";
+import type { DDL } from "../ddl/types.ts";
 import type { IUser } from "./auth/types.ts";
 import { getWriteFailures, getWriteSuccesses, getWriteErrors, assertWriteArrayScope } from "./helpers.ts";
 

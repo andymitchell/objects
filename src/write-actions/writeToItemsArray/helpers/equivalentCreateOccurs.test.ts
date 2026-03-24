@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { WriteAction } from "../../types.ts";
 import equivalentCreateOccurs from "./equivalentCreateOccurs.ts";
-import type { DDL } from "../types.ts";
+import type { DDL } from "../../../ddl/types.ts";
 
 describe('equivalentCreateOccurs', () => {
 

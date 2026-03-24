@@ -1,4 +1,4 @@
-import type { DDL, ListRules } from "../../types.ts";
+import type { DDL, ListRules } from "./types.ts";
 
 /**
  * Resolve DDL list rules for a given array property path.

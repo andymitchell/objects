@@ -3,7 +3,7 @@ import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertyS
 import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/zod.ts";
 import type { WriteAction } from "../../types.ts";
 import { isWriteActionArrayScopePayload } from "../../helpers.ts";
-import type { DDL } from "../types.ts";
+import type { DDL } from "../../../ddl/types.ts";
 import type { DotPropPathValidArrayValue } from "../../../dot-prop-paths/types.ts";
 
 

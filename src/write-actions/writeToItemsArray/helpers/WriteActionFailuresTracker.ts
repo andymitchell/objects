@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { WriteAction, WriteError, WriteErrorContext, WriteAffectedItem, WriteOutcomeFailed } from "../../types.ts";
-import type { ListRules } from "../types.ts";
+import type { ListRules } from "../../../ddl/types.ts";
 import deepEql from "deep-eql";
 import { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../../utils/getKeyValue.ts";
 import { convertSchemaToDotPropPathTree, type TreeNode } from "../../../dot-prop-paths/zod.ts";

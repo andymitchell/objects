@@ -13,6 +13,7 @@ export default defineConfig([
             'index-primary-key': 'src/primary-key/index.ts',
             'index-utils': 'src/utils/index.ts',
             'index-ownership': 'src/ownership/index.ts',
+            'index-ddl': 'src/ddl/index.ts',
         },
         publicDir: false,
         clean: true,

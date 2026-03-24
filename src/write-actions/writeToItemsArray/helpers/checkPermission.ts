@@ -1,6 +1,6 @@
 import type { Draft } from "immer";
 import type { IUser } from "../../auth/types.ts";
-import type { DDL } from "../types.ts";
+import type { DDL } from "../../../ddl/types.ts";
 import type { WriteError } from "../../types.ts";
 import { checkOwnership } from "../../../ownership/checkOwnership.ts";
 

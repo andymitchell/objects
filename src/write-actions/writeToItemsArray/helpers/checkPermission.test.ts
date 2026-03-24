@@ -1,5 +1,5 @@
 import type { IUser } from "../../auth/types.ts";
-import type { DDL } from "../types.ts";
+import type { DDL } from "../../../ddl/types.ts";
 import { checkWritePermission } from "./checkPermission.ts";
 
 type TestItem = {

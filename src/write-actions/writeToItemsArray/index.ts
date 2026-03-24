@@ -1,5 +1,5 @@
 import {writeToItemsArray, writeToItemsArrayPreserveInputType} from "./writeToItemsArray.ts";
-import type { WriteToItemsArrayOptions, DDL } from "./types.ts";
+import type { WriteToItemsArrayOptions } from "./types.ts";
 
 
 export {
@@ -7,6 +7,5 @@ export {
     writeToItemsArrayPreserveInputType
 };
 export type {
-    DDL,
     WriteToItemsArrayOptions
 };

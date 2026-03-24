@@ -56,9 +56,11 @@ export type {
     WriteChanges,
     WriteToItemsArrayChanges,
     WriteToItemsArrayResult,
-    DDL,
     WriteToItemsArrayOptions,
 } from './writeToItemsArray/types.ts';
+
+export type { DDL, DDLRoot, ListRules, ListRulesCore } from '../ddl/types.ts';
+export { resolveDdlListRules } from '../ddl/resolveDdlListRules.ts';
 
 export type { IUser } from "./auth/index.js";
 

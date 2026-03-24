@@ -38,6 +38,10 @@
         "./ownership": {
             "types": "./dist/index-ownership.d.ts",
             "default": "./dist/index-ownership.js"
+        },
+        "./ddl": {
+            "types": "./dist/index-ddl.d.ts",
+            "default": "./dist/index-ddl.js"
         }
     },
     "type": "module",

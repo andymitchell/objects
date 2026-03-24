@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { DDL } from "../types.ts";
+import type { DDL } from "../../../ddl/types.ts";
 import type { WriteAction } from "../../types.ts";
 import { isMatch } from "lodash-es";
 import {writeToItemsArray} from "../writeToItemsArray.ts";

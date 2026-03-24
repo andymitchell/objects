@@ -1,7 +1,7 @@
 import type { WriteError } from "../../../types.ts";
-import type { DDL, ListRules } from "../../types.ts";
+import type { DDL, ListRules } from "../../../../ddl/types.ts";
 import { deepEquals } from "./deepEquals.ts";
-import { resolveDdlListRules } from "./resolveDdlListRules.ts";
+import { resolveDdlListRules } from "../../../../ddl/resolveDdlListRules.ts";
 
 type AddToSetResult = { value: unknown[]; changed: boolean } | { error: WriteError };
 

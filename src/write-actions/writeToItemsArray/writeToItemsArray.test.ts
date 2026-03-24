@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { test, describe, expect } from 'vitest';
 import { assertWriteArrayScope } from "../helpers.ts";
-import type { DDL } from "./types.ts";
+import type { DDL } from "../../ddl/types.ts";
 import { produce } from "immer";
 import { writeToItemsArray } from "./writeToItemsArray.ts";
 import { standardTests, type AdapterFactory } from "../standardTests.ts";

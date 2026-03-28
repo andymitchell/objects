@@ -136,6 +136,21 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
 
                 sa = spreadJsonbArrays(this.sqlColumnName, path);
                 if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
+                // When the path continues past the last array to a scalar/object field
+                // (e.g. messages.rfc822msgid where messages is the array), extract the
+                // remaining field from the spread output.
+                if (treeNode.kind !== 'ZodArray') {
+                    const remainingSegments: string[] = [];
+                    for (let i = path.length - 1; i >= 0; i--) {
+                        if (path[i]!.kind === 'ZodArray') break;
+                        if (path[i]!.name) remainingSegments.unshift(path[i]!.name);
+                    }
+                    if (remainingSegments.length > 0) {
+                        const jsonbPath = remainingSegments.map(s => `'${s}'`).join('->');
+                        const output_column = `${sa.output_column}->${jsonbPath}`;
+                        sa = { ...sa, output_column, output_identifier: `${output_column} #>> '{}'` };
+                    }
+                }
                 const saResolved = sa;
                 // $in on array: at least one element must be in the list
                 if (isValueComparisonIn(filter)) {

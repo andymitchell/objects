@@ -38,6 +38,10 @@ export {
 export type {
     WriteAction,
     WritePayload,
+    WritePayloadCreate,
+    WritePayloadUpdate,
+    WritePayloadDelete,
+    WritePayloadArrayScope,
     WritePayloadAddToSet,
     WritePayloadPush,
     WritePayloadPull,

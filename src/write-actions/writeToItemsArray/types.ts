@@ -79,6 +79,6 @@ export type WriteToItemsArrayChanges<T extends Record<string, any>> = WriteChang
  * result.changes.final_items // always accessible
  * if (!result.ok) getWriteFailures(result)[0].errors[0].type;
  */
-export type WriteToItemsArrayResult<T extends Record<string, any>> = WriteResult<T> & {
+export type WriteToItemsArrayResult<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = WriteResult<T, W, WF> & {
     changes: WriteToItemsArrayChanges<T>;
 };

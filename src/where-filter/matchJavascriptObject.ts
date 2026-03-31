@@ -47,7 +47,7 @@ export type { ObjOrDraft };
  * const filter = { age: { $gte: 18 } };
  * matchJavascriptObject(user, filter); // true
  */
-const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<T>):boolean => {
+const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>):boolean => {
     if( !isPlainObject(object) ) {
         let json: string = process.env.NODE_ENV==='test'? safeJson(object) : 'redacted';
         throw new Error("matchJavascriptObject requires plain object. Received: "+json)
@@ -61,6 +61,7 @@ const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<
     
 }
 export default matchJavascriptObject;
+
 
 
 /**
@@ -80,7 +81,7 @@ export default matchJavascriptObject;
  * isAdult({ name: 'Alice', age: 30 }); // true
  * isAdult({ name: 'Bob', age: 15 });   // false
  */
-export const compileMatchJavascriptObject = <T extends Record<string, any>>(filter:WhereFilterDefinition<T>):MatchJavascriptObject<T> => {
+export const compileMatchJavascriptObject = <T extends Record<string, any>, F extends Record<string, any> = T>(filter:WhereFilterDefinition<F>):MatchJavascriptObject<T> => {
     return (object:ObjOrDraft<T>) => matchJavascriptObject(object, filter);
 }
 
@@ -98,8 +99,8 @@ export const compileMatchJavascriptObject = <T extends Record<string, any>>(filt
  * const filter = { age: { $gte: 18 } };
  * filterJavascriptObjects(users, filter); // [{ name: 'Alice', age: 30 }]
  */
-export function filterJavascriptObjects<T extends {} = {}>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<T>):ObjOrDraft<T>[] {
-    return objects.filter(x => matchJavascriptObject<T>(x, filter));
+export function filterJavascriptObjects<T extends {} = {}, F extends Record<string, any> = T extends Record<string, any> ? T : Record<string, any>>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<F>):ObjOrDraft<T>[] {
+    return objects.filter(x => matchJavascriptObject<T, F>(x, filter));
 }
 
 

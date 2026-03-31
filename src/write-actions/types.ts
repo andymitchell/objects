@@ -8,69 +8,69 @@ import type { TreeNode } from "../dot-prop-paths/zod.ts";
 
 
 
-export type WritePayloadCreate<T extends Record<string, any>> = {
+export type WritePayloadCreate<W extends Record<string, any>> = {
     type: 'create',
-    data: T
+    data: W
 }
-export type WritePayloadUpdate<T extends Record<string, any>> = {
+export type WritePayloadUpdate<W extends Record<string, any>, WF extends Record<string, any> = W> = {
     type: 'update',
-    data: Partial<Pick<T, NonObjectArrayProperty<T>>>, // Updating whole arrays is forbidden, use array_scope instead. Why? This would require the whole array to be 'set', even if its likely only a tiny part needs to change, and that makes it very hard for CRDTs to reconcile what to overwrite. One solution could be enable this by allowing it to 'diff' it against the client's current cached version to see what has changed, and convert it into array_scope actions internally. The downside, other than an additional layer of uncertainty of how a bug might sneak in (e.g. if cache is somehow not as expected at point of write), is it forces the application code to start editing arrays before passing it to an 'update' rather than directly describing the change... it's more verbose. (Also related: #VALUE_TO_DELETE_KEY).
-    where: WhereFilterDefinition<T>,
+    data: Partial<Pick<W, NonObjectArrayProperty<W>>>, // Updating whole arrays is forbidden, use array_scope instead. Why? This would require the whole array to be 'set', even if its likely only a tiny part needs to change, and that makes it very hard for CRDTs to reconcile what to overwrite. One solution could be enable this by allowing it to 'diff' it against the client's current cached version to see what has changed, and convert it into array_scope actions internally. The downside, other than an additional layer of uncertainty of how a bug might sneak in (e.g. if cache is somehow not as expected at point of write), is it forces the application code to start editing arrays before passing it to an 'update' rather than directly describing the change... it's more verbose. (Also related: #VALUE_TO_DELETE_KEY).
+    where: WhereFilterDefinition<WF>,
     method?: UpdatingMethod
 }
-export type WritePayloadArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>> = {
+export type WritePayloadArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     type: 'array_scope',
     scope: P,
     // IS IT FAILING TO SPOT TYPES? YOU MUST SPECIFY THE 'P' GENERIC IN THE TYPE, OR IT FAILS. IT CANNOT PROPERLY INFER FROM 'scope'. OR USE HELPER assertWriteArrayScope
     action: WritePayload<DotPropPathValidArrayValue<T, P>>,
-    where: WhereFilterDefinition<T>
+    where: WhereFilterDefinition<WF>
 }
-export type WritePayloadDelete<T extends Record<string, any>> = {
+export type WritePayloadDelete<WF extends Record<string, any>> = {
     type: 'delete',
-    where: WhereFilterDefinition<T>
+    where: WhereFilterDefinition<WF>
 }
 
 /** Mapped-type-to-union: one variant per array property. Discriminated on `path`. */
-export type WritePayloadAddToSet<T extends Record<string, any>> = {
-    [P in ArrayProperty<T>]: {
+export type WritePayloadAddToSet<W extends Record<string, any>, WF extends Record<string, any> = W> = {
+    [P in ArrayProperty<W>]: {
         type: 'add_to_set',
         path: P,
-        items: ArrayElement<T, P>[],
+        items: ArrayElement<W, P>[],
         unique_by: 'deep_equals' | 'pk',
-        where: WhereFilterDefinition<T>
+        where: WhereFilterDefinition<WF>
     }
-}[ArrayProperty<T>]
+}[ArrayProperty<W>]
 
-export type WritePayloadPush<T extends Record<string, any>> = {
-    [P in ArrayProperty<T>]: {
+export type WritePayloadPush<W extends Record<string, any>, WF extends Record<string, any> = W> = {
+    [P in ArrayProperty<W>]: {
         type: 'push',
         path: P,
-        items: ArrayElement<T, P>[],
-        where: WhereFilterDefinition<T>
+        items: ArrayElement<W, P>[],
+        where: WhereFilterDefinition<WF>
     }
-}[ArrayProperty<T>]
+}[ArrayProperty<W>]
 
 /** Pull: conditional items_where based on array element type.
  *  Object arrays → WhereFilterDefinition. Scalar arrays → value list (like $pullAll). */
-export type WritePayloadPull<T extends Record<string, any>> = {
-    [P in ArrayProperty<T>]: {
+export type WritePayloadPull<W extends Record<string, any>, WF extends Record<string, any> = W> = {
+    [P in ArrayProperty<W>]: {
         type: 'pull',
         path: P,
-        items_where: ArrayElement<T, P> extends Record<string, any>
-            ? WhereFilterDefinition<ArrayElement<T, P>>
-            : ArrayElement<T, P>[],
-        where: WhereFilterDefinition<T>
+        items_where: ArrayElement<W, P> extends Record<string, any>
+            ? WhereFilterDefinition<ArrayElement<W, P>>
+            : ArrayElement<W, P>[],
+        where: WhereFilterDefinition<WF>
     }
-}[ArrayProperty<T>]
+}[ArrayProperty<W>]
 
-export type WritePayloadInc<T extends Record<string, any>> = {
+export type WritePayloadInc<W extends Record<string, any>, WF extends Record<string, any> = W> = {
     type: 'inc',
-    path: NumberProperty<T>,
+    path: NumberProperty<W>,
     amount: number,
-    where: WhereFilterDefinition<T>
+    where: WhereFilterDefinition<WF>
 }
 
-export type WritePayload<T extends Record<string, any>> = WritePayloadCreate<T> | WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T> | WritePayloadAddToSet<T> | WritePayloadPush<T> | WritePayloadPull<T> | WritePayloadInc<T>;
+export type WritePayload<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = WritePayloadCreate<W> | WritePayloadUpdate<W, WF> | WritePayloadDelete<WF> | WritePayloadArrayScope<T, DotPropPathToObjectArraySpreadingArrays<T>, W, WF> | WritePayloadAddToSet<W, WF> | WritePayloadPush<W, WF> | WritePayloadPull<W, WF> | WritePayloadInc<W, WF>;
 /**
  * An instruction to modify an object, using CRUD-inspired verbs. 
  * 
@@ -90,11 +90,11 @@ export type WritePayload<T extends Record<string, any>> = WritePayloadCreate<T> 
  *  }
  * }
  */
-export type WriteAction<T extends Record<string, any>> = {
+export type WriteAction<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     type: 'write',
     ts: number,
     uuid: string,
-    payload: WritePayload<T>
+    payload: WritePayload<T, W, WF>
 }
 
 
@@ -171,9 +171,9 @@ export type WriteAffectedItem<T extends Record<string, any> = Record<string, any
  * @example
  * if (outcome.ok) outcome.affected_items?.[0]?.item_pk;
  */
-export type WriteOutcomeOk<T extends Record<string, any> = Record<string, any>> = {
+export type WriteOutcomeOk<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     ok: true;
-    action: WriteAction<T>;
+    action: WriteAction<T, W, WF>;
     affected_items?: WriteAffectedItem<T>[];
 };
 
@@ -183,9 +183,9 @@ export type WriteOutcomeOk<T extends Record<string, any> = Record<string, any>> 
  * @example
  * if (!outcome.ok) outcome.errors[0].type; // fully narrowed
  */
-export type WriteOutcomeFailed<T extends Record<string, any> = Record<string, any>> = {
+export type WriteOutcomeFailed<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     ok: false;
-    action: WriteAction<T>;
+    action: WriteAction<T, W, WF>;
     affected_items?: WriteAffectedItem<T>[];
     /** At least one error that caused the failure. */
     errors: WriteErrorContext<T>[];
@@ -203,8 +203,8 @@ export type WriteOutcomeFailed<T extends Record<string, any> = Record<string, an
  * @example
  * if (!outcome.ok) outcome.errors[0].type; // narrowed to WriteOutcomeFailed
  */
-export type WriteOutcome<T extends Record<string, any> = Record<string, any>> =
-    WriteOutcomeOk<T> | WriteOutcomeFailed<T>;
+export type WriteOutcome<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> =
+    WriteOutcomeOk<T, W, WF> | WriteOutcomeFailed<T, W, WF>;
 
 // ─── Top-Level Result ───
 
@@ -219,10 +219,10 @@ export type WriteOutcome<T extends Record<string, any> = Record<string, any>> =
  * const failures = getWriteFailures(result);
  * failures.forEach(f => f.errors[0].type);
  */
-export type WriteResult<T extends Record<string, any> = Record<string, any>> = {
+export type WriteResult<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     ok: boolean;
     /** All action outcomes in execution order. */
-    actions: WriteOutcome<T>[];
+    actions: WriteOutcome<T, W, WF>[];
     /** Lightweight summary; only present when `ok` is false. */
     error?: { message: string };
 };

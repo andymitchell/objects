@@ -3,7 +3,7 @@ import type { DotPropPathToObjectArraySpreadingArrays } from '../dot-prop-paths/
 
 export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WritePayloadUpdate to.... data: Nullable<Partial<T>>
 
-export function assertWriteArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T>>(action: WritePayloadArrayScope<T, P>):WritePayloadArrayScope<T,P> {
+export function assertWriteArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(action: WritePayloadArrayScope<T, P, W, WF>):WritePayloadArrayScope<T, P, W, WF> {
     return action;
 }
 
@@ -22,8 +22,8 @@ export function isUpdateOrDeleteWritePayload<T extends Record<string, any>>(x: u
  * const failures = getWriteFailures(result);
  * if (failures.length) failures[0].errors[0].type;
  */
-export function getWriteFailures<T extends Record<string, any>>(result: WriteResult<T>): WriteOutcomeFailed<T>[] {
-    return result.actions.filter((a): a is WriteOutcomeFailed<T> => !a.ok);
+export function getWriteFailures<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(result: WriteResult<T, W, WF>): WriteOutcomeFailed<T, W, WF>[] {
+    return result.actions.filter((a): a is WriteOutcomeFailed<T, W, WF> => !a.ok);
 }
 
 /**
@@ -33,8 +33,8 @@ export function getWriteFailures<T extends Record<string, any>>(result: WriteRes
  * const successes = getWriteSuccesses(result);
  * successes.forEach(s => console.log(s.action.uuid));
  */
-export function getWriteSuccesses<T extends Record<string, any>>(result: WriteResult<T>): WriteOutcomeOk<T>[] {
-    return result.actions.filter((a): a is WriteOutcomeOk<T> => a.ok);
+export function getWriteSuccesses<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(result: WriteResult<T, W, WF>): WriteOutcomeOk<T, W, WF>[] {
+    return result.actions.filter((a): a is WriteOutcomeOk<T, W, WF> => a.ok);
 }
 
 /**
@@ -44,6 +44,6 @@ export function getWriteSuccesses<T extends Record<string, any>>(result: WriteRe
  * const allErrors = getWriteErrors(result);
  * allErrors.forEach(e => console.log(e.type, e.item_pk));
  */
-export function getWriteErrors<T extends Record<string, any>>(result: WriteResult<T>): WriteErrorContext<T>[] {
+export function getWriteErrors<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(result: WriteResult<T, W, WF>): WriteErrorContext<T>[] {
     return getWriteFailures(result).flatMap(a => a.errors);
 }

@@ -105,11 +105,11 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
-export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, I extends T | Draft<T>>(writeActions: WriteAction<T>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<I> {
+export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T, I extends T | Draft<T> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<I, W, WF> {
     // This function works as overload for writeToItemsArray (instead of the 'PreserveInputType' suffix);
     // but with the cost of requiring the user to specify 2 generics instead of just 1 T.
     // So decided to give the consumer the choice.
-    return writeToItemsArray(writeActions, items as T[], schema, ddl, user, options) as WriteToItemsArrayResult<I>;
+    return writeToItemsArray(writeActions, items as T[], schema, ddl, user, options) as WriteToItemsArrayResult<I, W, WF>;
 }
 
 /**
@@ -142,16 +142,16 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  * 
  * @note 
  */
-export function writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<T>  {
+export function writeToItemsArray<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<T, W, WF>  {
 
     // Wondering if using this in a Read-Modify-Write process (e.g. read items from sql, modify with this, write back to table)
-    // is too slow and you should implement a custom WriteAction-to-SQL converter (or any other target)? 
+    // is too slow and you should implement a custom WriteAction-to-SQL converter (or any other target)?
     // In testing it only yielded about a 1.5x improvement, but with major dual-path complexity
     // (because it could optimise in some cases but couldn't convert every WriteAction so needed to fall back).
     // The key to making it performant was to batch all the writes in one using `UPDATE WITH VALUES`
 
-
-    return _writeToItemsArray(writeActions, items, schema, ddl, user, options);
+    // W/WF are compile-time only; internally we operate on T
+    return _writeToItemsArray(writeActions as WriteAction<T>[], items, schema, ddl, user, options) as WriteToItemsArrayResult<T, W, WF>;
 }
 function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions, scoped?:boolean): WriteToItemsArrayResult<T> {
 

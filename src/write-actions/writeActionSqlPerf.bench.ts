@@ -7,7 +7,7 @@
 
 import { PGlite } from '@electric-sql/pglite';
 import { z } from 'zod';
-import { postgresWhereClauseBuilder, PropertyMapSchema, type WhereFilterDefinition } from '../where-filter/index.ts';
+import { prepareWhereClauseForPg, PropertyTranslatorJsonbSchema, type WhereFilterDefinition } from '../where-filter/index.ts';
 
 // ─── DB Proxy (simulated network latency) ────────────────────────────────────
 
@@ -106,10 +106,10 @@ async function seedData(db: PGlite, count: number): Promise<void> {
 
 // ─── WHERE Clause Builder ────────────────────────────────────────────────────
 
-const propertyMap = new PropertyMapSchema(TestItemSchema, 'data');
+const propertyMap = new PropertyTranslatorJsonbSchema(TestItemSchema, 'data');
 
 function buildWhereClause(where: WhereFilterDefinition<TestItem>) {
-    const result = postgresWhereClauseBuilder(where, propertyMap);
+    const result = prepareWhereClauseForPg(where, propertyMap);
     if (!result.success) {
         throw new Error(`WHERE clause build failed: ${JSON.stringify(result.errors)}`);
     }
@@ -170,7 +170,7 @@ function buildUpdateSql(
     const whereArgs = clause.statement_arguments;
     const offsetWhereClause = clause.where_clause_statement.replace(
         /\$(\d+)/g,
-        (_, n) => `$${Number(n) + paramIdx - 1}`,
+        (_: string, n: string) => `$${Number(n) + paramIdx - 1}`,
     );
     params.push(...whereArgs);
 

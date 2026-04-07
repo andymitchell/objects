@@ -40,8 +40,6 @@ export function isValueComparisonRangeFlexi(x: unknown, alreadyProvedIsPlainObje
     return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
 }
 export function isValueComparisonFlexi(x:unknown, alreadyProvedIsPlainObject?:boolean): x is ValueComparisonFlexi {
-    
-    // TODO Support '$contains' for full accuracy
     return (alreadyProvedIsPlainObject || isPlainObject(x)) && ValueComparisonRangeOperators.some(op => op in (x as object));
 }
 export function isValueComparisonScalar(x:unknown): x is string | number | boolean {

@@ -1,12 +1,12 @@
 
 import { z } from "zod";
 import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "../../types.ts";
-import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
+import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/zod.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.ts";
-import { isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
+import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
 import { ValueComparisonRangeOperators } from "../../consts.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
@@ -148,9 +148,18 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                     const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
                     return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
-                // $all: array must contain all specified values
+                // $all: array must contain all specified values (scalars use =, objects use json_extract comparisons)
                 if (isArrayValueComparisonAll(filter)) {
                     const conditions = filter.$all.map(v => {
+                        if (isPlainObject(v)) {
+                            // Object element: check each key via json_extract on the spread element
+                            const keys = Object.keys(v as Record<string, unknown>);
+                            const keyConditions = keys.map(k => {
+                                const placeholder = this.generatePlaceholder((v as Record<string, unknown>)[k] as PreparedStatementArgumentOrObject, statementArguments);
+                                return `json_extract(${saResolved.output_column}, '$.${k}') = ${placeholder}`;
+                            });
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${keyConditions.join(' AND ')})`;
+                        }
                         const placeholder = this.generatePlaceholder(v, statementArguments);
                         return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
                     });
@@ -161,6 +170,16 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                     const jsonPath = '$.' + dotpropPath.split('.').join('.');
                     const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
                     return `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+                }
+                // $not + $size on array
+                if (isValueComparisonNot(filter) && isArrayValueComparisonSize(filter.$not)) {
+                    const jsonPath = '$.' + dotpropPath.split('.').join('.');
+                    const placeholder = this.generatePlaceholder(filter.$not.$size, statementArguments);
+                    const sizeSql = `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+                    if (this.nodeMap[dotpropPath]?.optional_or_nullable) {
+                        return `(json_type(${this.sqlColumnName}, '${jsonPath}') IS NULL OR NOT (${sizeSql}))`;
+                    }
+                    return `NOT (${sizeSql})`;
                 }
                 // $exists on array
                 if (isValueComparisonExists(filter)) {
@@ -179,48 +198,31 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 }
 
                 if (isArrayValueComparisonElemMatch(filter)) {
-                    // Check for scalar value comparisons first to avoid the ambiguity
-                    // where operator objects like {$gt: 5} pass isWhereFilterDefinition.
                     const elemVal = filter.$elemMatch;
-                    if (isValueComparisonScalar(elemVal) || isValueComparisonContains(elemVal) || isValueComparisonRange(elemVal)) {
-                        // Scalar value comparison
+                    // Object sub-filter: recurse with sub-PropertyTranslator scoped to array element
+                    if (isPlainObject(elemVal) && isWhereFilterDefinition(elemVal) && !isValueComparisonRange(elemVal) && !isValueComparisonEq(elemVal) && !isValueComparisonNe(elemVal) && !isValueComparisonIn(elemVal) && !isValueComparisonNin(elemVal) && !isValueComparisonNot(elemVal) && !isValueComparisonExists(elemVal) && !isValueComparisonType(elemVal) && !isValueComparisonRegex(elemVal) && !isArrayValueComparisonSize(elemVal)) {
+                        const subPropertyMap = new PropertyTranslatorSqliteJsonSchema(treeNode.schema!, sa.output_column, true);
+                        const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
+                        subClause = result;
+                    } else {
+                        // Scalar value comparison (includes $regex, $ne, $in, $eq, range, plain scalar, etc.)
                         const testArrayContainsString = typeof elemVal === 'string';
                         if (testArrayContainsString) {
-                            // For scalar string containment: EXISTS (SELECT 1 FROM json_each(...) WHERE value = ?)
                             return this.generateComparison(dotpropPath, elemVal, statementArguments, undefined, testArrayContainsString);
                         } else {
                             subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, sa.output_column);
                         }
-                    } else if (isWhereFilterDefinition(elemVal)) {
-                        // Object array: recurse with sub-PropertyTranslator scoped to array element schema
-                        const subPropertyMap = new PropertyTranslatorSqliteJsonSchema(treeNode.schema!, sa.output_column, true);
-                        const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
-                        subClause = result;
                     }
                 } else {
-                    // Compound filter: break it apart and each one must match something
+                    // Compound object filter on array: all conditions must match the same element
                     if (isPlainObject(filter)) {
-                        const keys = Object.keys(filter) as Array<keyof typeof filter>;
-                        let andClauses: string[] = [];
-
+                        // Logic operators ($and/$or/$nor) on array values outside $elemMatch are not valid
+                        if (isLogicFilter(filter as WhereFilterDefinition)) {
+                            throw new Error("Logic operators ($and/$or/$nor) on array values must use $elemMatch explicitly");
+                        }
                         const subPropertyMap = new PropertyTranslatorSqliteJsonSchema(treeNode.schema!, sa.output_column, true);
-
-                        keys.forEach(key => {
-                            const subFilter: WhereFilterDefinition = { [key]: filter[key] };
-                            const result = compileWhereFilterRecursive(subFilter, statementArguments, subPropertyMap, errors, rootFilter);
-                            andClauses = [...andClauses, result];
-                        });
-
-                        const countColumns = andClauses.map((x, index) => {
-                            const column_id = `sc${index}`;
-                            return {
-                                column_sql: `COUNT(DISTINCT CASE WHEN (${x}) THEN 1 END) AS ${column_id}`,
-                                column_id
-                            }
-                        })
-
-                        const compoundSql = `EXISTS (SELECT 1 FROM (SELECT ${countColumns.map(x => x.column_sql).join(',')} FROM ${sa.sql}) AS match_all WHERE ${countColumns.map(x => `${x.column_id} > 0`).join(` AND `)})`;
-                        return compoundSql;
+                        const result = compileWhereFilterRecursive(filter as WhereFilterDefinition, statementArguments, subPropertyMap, errors, rootFilter);
+                        return `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${result})`;
 
                     } else {
                         subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier);
@@ -238,7 +240,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
     /**
      * Emits a leaf-level SQL comparison for a single value.
-     * $contains → LIKE, range → >/</>=/<= , scalar → =, object/array → json()=json(?), undefined → IS NULL.
+     * $eq → =, range → >/</>=/<= , $regex → LIKE (best-effort), scalar → =, object/array → json()=json(?), undefined → IS NULL.
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
     protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
@@ -299,7 +301,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             const typeMap: Record<string, string> = {
                 'string': 'text',
                 'number': 'integer',  // json_type returns 'integer' or 'real'
-                'boolean': 'true',    // json_type returns 'true' or 'false'
+                'bool': 'true',       // json_type returns 'true' or 'false'
                 'object': 'object',
                 'array': 'array',
                 'null': 'null',
@@ -308,7 +310,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 const placeholder1 = this.generatePlaceholder('integer', statementArguments);
                 const placeholder2 = this.generatePlaceholder('real', statementArguments);
                 return `json_type(${this.sqlColumnName}, '${jsonPath}') IN (${placeholder1}, ${placeholder2})`;
-            } else if (filter.$type === 'boolean') {
+            } else if (filter.$type === 'bool') {
                 const placeholder1 = this.generatePlaceholder('true', statementArguments);
                 const placeholder2 = this.generatePlaceholder('false', statementArguments);
                 return `json_type(${this.sqlColumnName}, '${jsonPath}') IN (${placeholder1}, ${placeholder2})`;
@@ -318,24 +320,63 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 return `json_type(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
             }
         }
-        // $regex — SQLite has no native regex support
+        // $size (needed here for $not + $size to work via recursive generateComparison)
+        if (isArrayValueComparisonSize(filter)) {
+            const jsonPath = '$.' + dotpropPath.split('.').join('.');
+            const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
+            return `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+        }
+        // $regex — SQLite has no native regex; translate simple patterns to LIKE (best-effort).
+        // $options: 'i' is a no-op because SQLite LIKE is already ASCII case-insensitive.
         if (isValueComparisonRegex(filter)) {
-            if (errors && rootFilter) {
-                errors.push({
-                    kind: 'filter',
-                    sub_filter: { [dotpropPath]: filter } as any,
-                    root_filter: rootFilter as any,
-                    message: '$regex is not supported in SQLite'
-                });
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
+            const raw = filter.$regex;
+
+            // Detect complex regex features we cannot translate to LIKE
+            if (/[[\]+*?.|\\d\\w\\s\\b()]/.test(raw.replace(/\\\[/g, '').replace(/\\\]/g, ''))) {
+                if (errors && rootFilter) {
+                    errors.push({
+                        kind: 'filter',
+                        sub_filter: { [dotpropPath]: filter } as any,
+                        root_filter: rootFilter as any,
+                        message: '$regex pattern is too complex for SQLite LIKE translation'
+                    });
+                }
+                return 'FALSE';
             }
-            return 'FALSE';
+
+            const anchStart = raw.startsWith('^');
+            const anchEnd = raw.endsWith('$');
+            let body = raw;
+            if (anchStart) body = body.slice(1);
+            if (anchEnd) body = body.slice(0, -1);
+
+            // Escape LIKE special characters in the pattern body
+            body = body.replace(/%/g, '\\%').replace(/_/g, '\\_');
+
+            if (anchStart && anchEnd) {
+                // Exact match
+                const placeholder = this.generatePlaceholder(body, statementArguments);
+                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
+            } else if (anchStart) {
+                const placeholder = this.generatePlaceholder(`${body}%`, statementArguments);
+                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder} ESCAPE '\\'`);
+            } else if (anchEnd) {
+                const placeholder = this.generatePlaceholder(`%${body}`, statementArguments);
+                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder} ESCAPE '\\'`);
+            } else {
+                const placeholder = this.generatePlaceholder(`%${body}%`, statementArguments);
+                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder} ESCAPE '\\'`);
+            }
         }
 
-        if (isValueComparisonContains(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
-
-            const placeholder = this.generatePlaceholder(`%${filter.$contains}%`, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder}`);
+        if (isValueComparisonEq(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            if (filter.$eq === null) {
+                return `${sqlIdentifier} IS NULL`;
+            }
+            const placeholder = this.generatePlaceholder(filter.$eq, statementArguments);
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
         } else if (isValueComparisonRange(filter)) {
 
             const firstFilterValueType = typeof (Object.values(filter)[0]);

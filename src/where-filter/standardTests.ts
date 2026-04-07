@@ -374,7 +374,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('multiple logic operators on one object ($and + $nor) are ANDed: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { $and: [{ 'contact.name': 'Andy' }], $nor: [{ 'contact.name': 'Bob' }] } as any,
+                    { $and: [{ 'contact.name': 'Andy' }], $nor: [{ 'contact.name': 'Bob' }] },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -383,7 +383,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('multiple logic operators on one object ($and + $nor) are ANDed: fails when $nor matches', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { $and: [{ 'contact.name': 'Andy' }], $nor: [{ 'contact.name': 'Andy' }] } as any,
+                    { $and: [{ 'contact.name': 'Andy' }], $nor: [{ 'contact.name': 'Andy' }] },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -818,115 +818,99 @@ export function standardTests(testConfig: StandardTestConfig) {
             })
         });
 
-        describe('$contains', () => {
+        // $contains has been removed in favour of $regex (Mongo subset).
+        // All previous $contains tests are retained below as $regex equivalents.
 
-            test('substring present: passes', async () => {
+        describe('$regex', () => {
+            test('$regex: passes when pattern matches', async () => {
                 const result = await matchJavascriptObject(
-                    {
-                        contact: {
-                            name: 'Andy',
-                            age: 100
-                        }
-                    },
-                    {
-                        'contact.name': {
-                            $contains: 'And'
-                        }
-                    },
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $regex: 'And' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
 
-            test('substring absent: fails', async () => {
-                const result = await matchJavascriptObject(
-                    {
-                        contact: {
-                            name: 'Andy',
-                            age: 100
-                        }
-                    },
-                    {
-                        'contact.name': {
-                            $contains: 'Wrong'
-                        }
-                    },
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-
-            test('$contains on a number: does not match', async () => {
-                let result: boolean | undefined = false;
-
-                try {
-                    result = await matchJavascriptObject(
-                        {
-                            contact: {
-                                name: 'Andy',
-                                age: 100
-                            }
-                        },
-                        {
-                            'contact.age': {
-                                // @ts-ignore
-                                $contains: '100'
-                            }
-                        },
-                        ContactSchema
-                    );
-                } catch (e) {
-                    // matchJavascriptObject will throw a "A ValueComparisonContains only works on a string" error; but Postgres will just silently fail. So this test simply makes sure it doesn't pass.
-                }
-
-                expect(result).toBe(false);
-            });
-
-            test('$contains on a missing property: returns false without error', async () => {
-                const result = await matchJavascriptObject(
-                    {
-                        contact: {
-                            name: 'Andy',
-                            age: 100
-                        }
-                    },
-                    {
-                        // @ts-ignore
-                        'contact.unknown_property': {
-                            $contains: 'Wrong'
-                        }
-                    },
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-            test('$contains empty string matches any string', async () => {
+            test('$regex: fails when pattern does not match', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $contains: '' } },
+                    { 'contact.name': { $regex: 'Bob' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$regex anchored: passes', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $regex: '^And' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
 
-            test('$contains is case-sensitive (SQLite LIKE is case-insensitive for ASCII)', async () => {
+            test('$regex anchored: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $contains: 'andy' } },
+                    { 'contact.name': { $regex: '^ndy' } },
                     ContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, false, '$contains case-sensitivity: SQLite LIKE is case-insensitive for ASCII');
+                expectOrAcknowledgeUnsupported(result, false);
             });
 
+            test('$regex case-insensitive via $options: passes', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $regex: 'andy', $options: 'i' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$regex case-sensitive default: fails', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $regex: 'andy' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeDivergence(result, false, '$regex case-sensitivity: SQLite LIKE is case-insensitive for ASCII');
+            });
+
+            test('$regex on non-string field: returns false', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    // @ts-expect-error — intentional: $regex on number field
+                    { 'contact.age': { $regex: '30' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$regex on missing field: returns false', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    // @ts-expect-error — intentional: $regex on number field (age is optional number)
+                    { 'contact.age': { $regex: '.*' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$regex empty pattern matches any string', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $regex: '' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
         });
 
         describe('$ne (not equal)', () => {
             test('$ne string: passes when not equal', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $ne: 'Bob' } } as any,
+                    { 'contact.name': { $ne: 'Bob' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -935,7 +919,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$ne string: fails when equal', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $ne: 'Andy' } } as any,
+                    { 'contact.name': { $ne: 'Andy' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -944,7 +928,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$ne number: passes when not equal', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $ne: 25 } } as any,
+                    { 'contact.age': { $ne: 25 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -953,7 +937,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$ne number: fails when equal', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $ne: 30 } } as any,
+                    { 'contact.age': { $ne: 30 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -962,8 +946,65 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$ne on missing optional field: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $ne: 30 } } as any,
+                    { 'contact.age': { $ne: 30 } },
                     ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+        });
+
+        describe('$eq (explicit equality)', () => {
+            test('$eq string: passes when equal', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $eq: 'Andy' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$eq string: fails when not equal', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $eq: 'Bob' } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$eq number: passes when equal', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $eq: 30 } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$eq number: fails when not equal', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $eq: 25 } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$eq on missing optional field: fails', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.age': { $eq: 30 } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$eq null on null field: passes', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: null } },
+                    // @ts-expect-error — TODO: ValueComparisonEq conditional types don't resolve null for nullable fields
+                    { 'contact.age': { $eq: null } },
+                    NullableAgeContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
@@ -973,7 +1014,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in string: passes when value in list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $in: ['Andy', 'Bob'] } } as any,
+                    { 'contact.name': { $in: ['Andy', 'Bob'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -982,7 +1023,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in string: fails when value not in list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $in: ['Bob', 'Carol'] } } as any,
+                    { 'contact.name': { $in: ['Bob', 'Carol'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -991,7 +1032,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in number: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $in: [25, 30, 35] } } as any,
+                    { 'contact.age': { $in: [25, 30, 35] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1000,7 +1041,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in number: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $in: [25, 35] } } as any,
+                    { 'contact.age': { $in: [25, 35] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1009,7 +1050,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in with empty list: always fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $in: [] } } as any,
+                    { 'contact.name': { $in: [] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1020,7 +1061,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // SQL: `NULL IN (25, 30)` → UNKNOWN (falsy), must explicitly handle
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $in: [25, 30] } } as any,
+                    { 'contact.age': { $in: [25, 30] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1031,7 +1072,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin string: passes when value not in list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $nin: ['Bob', 'Carol'] } } as any,
+                    { 'contact.name': { $nin: ['Bob', 'Carol'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1040,7 +1081,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin string: fails when value in list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $nin: ['Andy', 'Bob'] } } as any,
+                    { 'contact.name': { $nin: ['Andy', 'Bob'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1049,7 +1090,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin number: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $nin: [25, 35] } } as any,
+                    { 'contact.age': { $nin: [25, 35] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1058,7 +1099,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin number: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $nin: [25, 30, 35] } } as any,
+                    { 'contact.age': { $nin: [25, 30, 35] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1067,7 +1108,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin with empty list: always passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $nin: [] } } as any,
+                    { 'contact.name': { $nin: [] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1078,7 +1119,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // SQL: `NULL NOT IN (25, 30)` → UNKNOWN (falsy), must use `IS NULL OR col NOT IN (...)`
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $nin: [25, 30] } } as any,
+                    { 'contact.age': { $nin: [25, 30] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1089,7 +1130,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $gt: passes when value does not exceed', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 20 } },
-                    { 'contact.age': { $not: { $gt: 25 } } } as any,
+                    { 'contact.age': { $not: { $gt: 25 } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1098,25 +1139,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $gt: fails when value exceeds', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $not: { $gt: 25 } } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-            test('$not with $contains: passes when substring absent', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $contains: 'Bob' } } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, true);
-            });
-
-            test('$not with $contains: fails when substring present', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $contains: 'And' } } } as any,
+                    { 'contact.age': { $not: { $gt: 25 } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1125,7 +1148,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not on missing optional field: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $not: { $gt: 0 } } } as any,
+                    { 'contact.age': { $not: { $gt: 0 } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1134,7 +1157,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $ne (double negation = equals): passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $ne: 'Andy' } } } as any,
+                    { 'contact.name': { $not: { $ne: 'Andy' } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1143,7 +1166,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $in: passes when not in list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $in: ['Bob', 'Carol'] } } } as any,
+                    { 'contact.name': { $not: { $in: ['Bob', 'Carol'] } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1152,7 +1175,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $in: fails when in list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $in: ['Andy', 'Bob'] } } } as any,
+                    { 'contact.name': { $not: { $in: ['Andy', 'Bob'] } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1161,7 +1184,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $regex: passes when pattern does not match', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $regex: '^Bob' } } } as any,
+                    { 'contact.name': { $not: { $regex: '^Bob' } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1170,7 +1193,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $regex: fails when pattern matches', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $regex: '^And' } } } as any,
+                    { 'contact.name': { $not: { $regex: '^And' } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1179,7 +1202,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $nin: passes when value is in excluded list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $nin: ['Andy', 'Bob'] } } } as any,
+                    { 'contact.name': { $not: { $nin: ['Andy', 'Bob'] } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1188,7 +1211,79 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$not with $nin: fails when value is not in excluded list', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $not: { $nin: ['Bob', 'Carol'] } } } as any,
+                    { 'contact.name': { $not: { $nin: ['Bob', 'Carol'] } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$not with $exists: passes when field is missing', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.age': { $not: { $exists: true } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$not with $exists: fails when field exists', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $not: { $exists: true } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$not with $type: passes when field is not a string', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $not: { $type: 'string' } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$not with $type: fails when field matches type', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $not: { $type: 'string' } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$not with $eq: passes when not equal (double negation)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $not: { $eq: 'Bob' } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$not with $eq: fails when equal', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.name': { $not: { $eq: 'Andy' } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$not with $size: passes when array is different length', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                    { 'contact.locations': { $not: { $size: 3 } } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$not with $size: fails when array matches length', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
+                    { 'contact.locations': { $not: { $size: 2 } } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1199,7 +1294,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$exists true on existing field: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $exists: true } } as any,
+                    { 'contact.age': { $exists: true } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1208,7 +1303,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$exists true on missing field: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $exists: true } } as any,
+                    { 'contact.age': { $exists: true } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1217,7 +1312,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$exists false on missing field: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $exists: false } } as any,
+                    { 'contact.age': { $exists: false } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1226,7 +1321,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$exists false on existing field: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $exists: false } } as any,
+                    { 'contact.age': { $exists: false } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1235,7 +1330,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$exists true on existing array: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London'] } },
-                    { 'contact.locations': { $exists: true } } as any,
+                    { 'contact.locations': { $exists: true } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1244,7 +1339,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$exists false on missing array: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.locations': { $exists: false } } as any,
+                    { 'contact.locations': { $exists: false } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1255,7 +1350,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type "string": passes on string field', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $type: 'string' } } as any,
+                    { 'contact.name': { $type: 'string' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1264,7 +1359,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type "string": fails on number field', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $type: 'string' } } as any,
+                    { 'contact.age': { $type: 'string' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1273,7 +1368,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type "number": passes on number field', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $type: 'number' } } as any,
+                    { 'contact.age': { $type: 'number' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1282,7 +1377,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type "number": fails on string field', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $type: 'number' } } as any,
+                    { 'contact.name': { $type: 'number' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1291,7 +1386,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type "array": passes on array field', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London'] } },
-                    { 'contact.locations': { $type: 'array' } } as any,
+                    { 'contact.locations': { $type: 'array' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1300,7 +1395,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type on missing field: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $type: 'number' } } as any,
+                    { 'contact.age': { $type: 'number' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -1311,7 +1406,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // SQL: jsonb_typeof / json_type returns SQL NULL for missing path, not 'null' string
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.age': { $type: 'null' } } as any,
+                    { 'contact.age': { $type: 'null' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeDivergence(result, true, '$type null on missing field: SQL returns SQL NULL not JSON null type');
@@ -1320,107 +1415,33 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$type "object": passes on object field', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact': { $type: 'object' } } as any,
+                    { 'contact': { $type: 'object' } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
 
-            test('$type "string" on array of strings: fails (proves branching bypass)', async () => {
-                // Spec: $type is evaluated before array/scalar branching.
-                // If checked AFTER branching, elements are strings → would incorrectly pass.
-                // Must return false because the property itself is an array, not a string.
+            test('$type "string" on array of strings: fails (checks field type, not element types)', async () => {
+                // Divergence from MongoDB: Mongo's $type checks array elements, so
+                // { $type: 'string' } would return true if any element is a string.
+                // Our implementation checks the field's own type (array ≠ string → false).
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London'] } },
-                    { 'contact.locations': { $type: 'string' } } as any,
+                    { 'contact.locations': { $type: 'string' } },
                     ContactSchema
                 );
-                expectOrAcknowledgeUnsupported(result, false);
+                expectOrAcknowledgeDivergence(result, false, '$type checks field type not element types; MongoDB would return true here');
             });
 
-            test('$type "boolean": passes on boolean field', async () => {
-                // SQLite quirk: json_type returns 'true'/'false' not 'boolean',
-                // so the SQLite engine must map these to match $type: 'boolean'.
+            test('$type "bool": passes on boolean field', async () => {
+                // SQLite quirk: json_type returns 'true'/'false' not 'bool',
+                // so the SQLite engine must map these to match $type: 'bool'.
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', isVIP: true } },
-                    { 'contact.isVIP': { $type: 'boolean' } } as any,
+                    { 'contact.isVIP': { $type: 'bool' } },
                     BooleanContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, true, '$type boolean: SQLite json_type returns true/false not boolean');
-            });
-        });
-
-        describe('$regex', () => {
-            test('$regex: passes when pattern matches', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $regex: 'And' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, true);
-            });
-
-            test('$regex: fails when pattern does not match', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $regex: 'Bob' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-            test('$regex anchored: passes', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $regex: '^And' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, true);
-            });
-
-            test('$regex anchored: fails', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $regex: '^ndy' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-            test('$regex case-insensitive via $options: passes', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $regex: 'andy', $options: 'i' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, true);
-            });
-
-            test('$regex case-sensitive default: fails', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.name': { $regex: 'andy' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-            test('$regex on non-string field: returns false', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy', age: 30 } },
-                    { 'contact.age': { $regex: '30' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
-            });
-
-            test('$regex on missing field: returns false', async () => {
-                const result = await matchJavascriptObject(
-                    { contact: { name: 'Andy' } },
-                    { 'contact.age': { $regex: '.*' } } as any,
-                    ContactSchema
-                );
-                expectOrAcknowledgeUnsupported(result, false);
+                expectOrAcknowledgeDivergence(result, true, '$type bool: SQLite json_type returns true/false not bool');
             });
         });
 
@@ -1430,7 +1451,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // SQL must translate this to IS NULL, not `= NULL` (which yields UNKNOWN).
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: null } },
-                    { 'contact.age': null } as any,
+                    // @ts-expect-error — TODO: ValueComparisonFlexi doesn't include null for nullable fields
+                    { 'contact.age': null },
                     NullableAgeContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -1537,9 +1559,31 @@ export function standardTests(testConfig: StandardTestConfig) {
 
         });
 
-        describe('Compound object filter (per-key OR across elements)', () => {
+        describe('Compound object filter on arrays (exact document match)', () => {
 
-            test('each key satisfied by different elements: passes', async () => {
+            // Mongo semantics: a single element must match ALL keys.
+            // Previously this was per-key-OR (different elements could satisfy different keys).
+
+            test('all keys satisfied by single element: passes', async () => {
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
+                        }
+                    },
+                    {
+                        'contact.locations': {
+                            city: 'London',
+                            country: 'UK'
+                        }
+                    },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('keys satisfied by different elements: fails (was passes under per-key-OR)', async () => {
                 const result = await matchJavascriptObject(
                     {
                         contact: {
@@ -1555,7 +1599,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     },
                     ContactSchema
                 );
-                expectOrAcknowledgeUnsupported(result, true);
+                expectOrAcknowledgeUnsupported(result, false);
             });
 
 
@@ -1578,11 +1622,32 @@ export function standardTests(testConfig: StandardTestConfig) {
                 expectOrAcknowledgeUnsupported(result, false);
             });
 
+            test('per-key-OR re-expressed via dot-prop spreading: passes (no expressiveness lost)', async () => {
+                // This is the Mongo-equivalent of the old per-key-OR behavior:
+                // { 'contact.locations.city': 'London', 'contact.locations.country': 'US' }
+                const result = await matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
+                        }
+                    },
+                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
+                    { 'contact.locations.city': 'London', 'contact.locations.country': 'US' },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
         });
 
-        describe('Logic filter on elements (atomic per element)', () => {
+        // Previously "Logic filter on elements (atomic per element)" — logic operators
+        // are no longer valid as direct array field values (not valid Mongo syntax).
+        // All tests retained, re-expressed with explicit $elemMatch wrapping.
 
-            describe('$and (atomic, like $elemMatch)', () => {
+        describe('$elemMatch with logic operators', () => {
+
+            describe('$elemMatch + $and', () => {
 
                 test('single element satisfies all $and criteria: passes', async () => {
                     const result = await matchJavascriptObject(
@@ -1594,21 +1659,18 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $and: [
-                                    {
-                                        'city': 'Brisbane'
-                                    },
-                                    {
-                                        'country': 'Aus'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $and: [
+                                        { 'city': 'Brisbane' },
+                                        { 'country': 'Aus' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, true);
                 });
-
 
                 test('no single element satisfies all $and criteria: fails', async () => {
                     const result = await matchJavascriptObject(
@@ -1620,21 +1682,18 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $and: [
-                                    {
-                                        'city': 'Brisbane'
-                                    },
-                                    {
-                                        'country': 'US'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $and: [
+                                        { 'city': 'Brisbane' },
+                                        { 'country': 'US' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, false);
                 });
-
 
                 test('$and with no element matching second criterion: fails', async () => {
                     const result = await matchJavascriptObject(
@@ -1646,10 +1705,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $and: [
-                                    { city: 'London' },
-                                    { country: 'Japan' }
-                                ]
+                                $elemMatch: {
+                                    $and: [
+                                        { city: 'London' },
+                                        { country: 'Japan' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
@@ -1659,7 +1720,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
             });
 
-            describe('$or on elements', () => {
+            describe('$elemMatch + $or', () => {
 
                 test('$or with matching element via sub-filter: passes', async () => {
                     const result = await matchJavascriptObject(
@@ -1671,21 +1732,18 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $or: [
-                                    {
-                                        'city': 'London'
-                                    },
-                                    {
-                                        'city': 'Tokyo'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $or: [
+                                        { 'city': 'London' },
+                                        { 'city': 'Tokyo' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, true);
                 });
-
 
                 test('$or with no matching element: fails', async () => {
                     const result = await matchJavascriptObject(
@@ -1697,14 +1755,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $or: [
-                                    {
-                                        'city': 'London'
-                                    },
-                                    {
-                                        'city': 'Tokyo'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $or: [
+                                        { 'city': 'London' },
+                                        { 'city': 'Tokyo' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
@@ -1712,7 +1768,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     expectOrAcknowledgeUnsupported(result, false);
                 });
 
-                test('explicit $or on elements: passes', async () => {
+                test('$or on elements: passes', async () => {
                     const result = await matchJavascriptObject(
                         {
                             contact: {
@@ -1722,14 +1778,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $or: [
-                                    {
-                                        'city': 'Brisbane'
-                                    },
-                                    {
-                                        'city': 'NYC'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $or: [
+                                        { 'city': 'Brisbane' },
+                                        { 'city': 'NYC' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
@@ -1737,8 +1791,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     expectOrAcknowledgeUnsupported(result, true);
                 });
 
-
-                test('explicit $or on elements with no match: fails', async () => {
+                test('$or on elements with no match: fails', async () => {
                     const result = await matchJavascriptObject(
                         {
                             contact: {
@@ -1748,14 +1801,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $or: [
-                                    {
-                                        'city': 'Tokyo'
-                                    },
-                                    {
-                                        'city': 'London'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $or: [
+                                        { 'city': 'Tokyo' },
+                                        { 'city': 'London' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
@@ -1765,7 +1816,7 @@ export function standardTests(testConfig: StandardTestConfig) {
 
             });
 
-            describe('$nor on elements', () => {
+            describe('$elemMatch + $nor', () => {
 
                 test('$nor with no element matching any sub-filter: passes', async () => {
                     const result = await matchJavascriptObject(
@@ -1777,14 +1828,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $nor: [
-                                    {
-                                        'city': 'London'
-                                    },
-                                    {
-                                        'city': 'Tokyo'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $nor: [
+                                        { 'city': 'London' },
+                                        { 'city': 'Tokyo' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
@@ -1792,8 +1841,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                     expectOrAcknowledgeUnsupported(result, true);
                 });
 
-
                 test('$nor partial match (some elements match, some do not): passes', async () => {
+                    // NYC element passes $nor (Brisbane not matched), so $elemMatch finds a match
                     const result = await matchJavascriptObject(
                         {
                             contact: {
@@ -1803,18 +1852,17 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $nor: [
-                                    {
-                                        'city': 'Brisbane'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $nor: [
+                                        { 'city': 'Brisbane' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, true);
                 });
-
 
                 test('$nor with all elements matching: fails', async () => {
                     const result = await matchJavascriptObject(
@@ -1826,14 +1874,12 @@ export function standardTests(testConfig: StandardTestConfig) {
                         },
                         {
                             'contact.locations': {
-                                $nor: [
-                                    {
-                                        'city': 'Brisbane'
-                                    },
-                                    {
-                                        'city': 'NYC'
-                                    }
-                                ]
+                                $elemMatch: {
+                                    $nor: [
+                                        { 'city': 'Brisbane' },
+                                        { 'city': 'NYC' }
+                                    ]
+                                }
                             }
                         },
                         ContactSchema
@@ -1940,7 +1986,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 });
 
 
-                test('implicit $and with $contains: passes', async () => {
+                test('implicit $and with $regex: passes', async () => {
                     const result = await matchJavascriptObject(
                         {
                             contact: {
@@ -1951,7 +1997,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                         {
                             'contact.locations': {
                                 $elemMatch: {
-                                    city: { $contains: 'Lon' },
+                                    city: { $regex: 'Lon' },
                                     country: 'UK'
                                 }
                             }
@@ -1962,7 +2008,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 });
 
 
-                test('implicit $and with $contains: fails', async () => {
+                test('implicit $and with $regex: fails', async () => {
                     const result = await matchJavascriptObject(
                         {
                             contact: {
@@ -1973,7 +2019,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                         {
                             'contact.locations': {
                                 $elemMatch: {
-                                    city: { $contains: 'NY' },
+                                    city: { $regex: 'NY' },
                                     country: 'UK'
                                 }
                             }
@@ -2125,19 +2171,19 @@ export function standardTests(testConfig: StandardTestConfig) {
                     expectOrAcknowledgeUnsupported(result, false);
                 });
 
-                test('scalar array + $contains operator: passes', async () => {
+                test('scalar array + $regex operator: passes', async () => {
                     const result = await matchJavascriptObject(
                         { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                        { 'contact.locations': { $elemMatch: { $contains: 'Lon' } } },
+                        { 'contact.locations': { $elemMatch: { $regex: 'Lon' } } },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, true);
                 });
 
-                test('scalar array + $contains operator: fails', async () => {
+                test('scalar array + $regex operator: fails', async () => {
                     const result = await matchJavascriptObject(
                         { contact: { name: 'Andy', locations: ['Paris', 'NYC'] } },
-                        { 'contact.locations': { $elemMatch: { $contains: 'Lon' } } },
+                        { 'contact.locations': { $elemMatch: { $regex: 'Lon' } } },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, false);
@@ -2201,10 +2247,10 @@ export function standardTests(testConfig: StandardTestConfig) {
                     expectOrAcknowledgeUnsupported(result, false);
                 });
 
-                test('object array + field filter with $contains: passes', async () => {
+                test('object array + field filter with $regex: passes', async () => {
                     const result = await matchJavascriptObject(
                         { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                        { 'contact.locations': { $elemMatch: { city: { $contains: 'Lon' } } } },
+                        { 'contact.locations': { $elemMatch: { city: { $regex: 'Lon' } } } },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, true);
@@ -2215,7 +2261,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 test('object array + nested range operator: passes', async () => {
                     const result = await matchJavascriptObject(
                         { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                        { 'contact.locations': { $elemMatch: { city: { $contains: 'Lon' }, country: 'UK' } } },
+                        { 'contact.locations': { $elemMatch: { city: { $regex: 'Lon' }, country: 'UK' } } },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, true);
@@ -2224,7 +2270,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 test('object array + nested range operator: fails (no single element matches both)', async () => {
                     const result = await matchJavascriptObject(
                         { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                        { 'contact.locations': { $elemMatch: { city: { $contains: 'NY' }, country: 'UK' } } },
+                        { 'contact.locations': { $elemMatch: { city: { $regex: 'NY' }, country: 'UK' } } },
                         ContactSchema
                     );
                     expectOrAcknowledgeUnsupported(result, false);
@@ -2267,7 +2313,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in on array field: passes when intersection non-empty', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $in: ['NYC', 'Tokyo'] } } as any,
+                    { 'contact.locations': { $in: ['NYC', 'Tokyo'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2276,7 +2322,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in on array field: fails when no intersection', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $in: ['Tokyo', 'Paris'] } } as any,
+                    { 'contact.locations': { $in: ['Tokyo', 'Paris'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2285,7 +2331,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$in with empty list on array: always fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $in: [] } } as any,
+                    { 'contact.locations': { $in: [] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2296,7 +2342,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin on array field: passes when no intersection', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $nin: ['Tokyo', 'Paris'] } } as any,
+                    { 'contact.locations': { $nin: ['Tokyo', 'Paris'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2305,7 +2351,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin on array field: fails when intersection exists', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $nin: ['NYC', 'Tokyo'] } } as any,
+                    { 'contact.locations': { $nin: ['NYC', 'Tokyo'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2314,7 +2360,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$nin with empty list on array: always passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $nin: [] } } as any,
+                    { 'contact.locations': { $nin: [] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2325,7 +2371,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$all: passes when array contains all values', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC', 'Tokyo'] } },
-                    { 'contact.locations': { $all: ['London', 'NYC'] } } as any,
+                    { 'contact.locations': { $all: ['London', 'NYC'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2334,7 +2380,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$all: fails when array missing a value', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $all: ['London', 'Tokyo'] } } as any,
+                    { 'contact.locations': { $all: ['London', 'Tokyo'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2343,7 +2389,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$all with single value: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $all: ['London'] } } as any,
+                    { 'contact.locations': { $all: ['London'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2352,60 +2398,50 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$all on empty array: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: [] } },
-                    { 'contact.locations': { $all: ['London'] } } as any,
+                    { 'contact.locations': { $all: ['London'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
             });
 
             test('$all with empty list: passes (every on empty = true)', async () => {
+                // Divergence from MongoDB: Mongo rejects $all with empty array or
+                // returns no matches. JS Array.every([]) = true, so we match everything.
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London'] } },
-                    { 'contact.locations': { $all: [] } } as any,
+                    { 'contact.locations': { $all: [] } },
                     ContactSchema
                 );
-                expectOrAcknowledgeUnsupported(result, true);
+                expectOrAcknowledgeDivergence(result, true, '$all with empty array: MongoDB rejects or returns no matches; JS every([]) = true');
             });
 
             test('$all order independence: passes regardless of order', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC', 'Tokyo'] } },
-                    { 'contact.locations': { $all: ['Tokyo', 'London'] } } as any,
+                    { 'contact.locations': { $all: ['Tokyo', 'London'] } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
 
             test('$all with compound object elements: passes when all objects present', async () => {
-                // $all schema currently restricts to scalar values (string | number).
-                // Object elements bypass isArrayValueComparisonAll and get treated as
-                // a compound object filter instead. This test verifies the behavior and
-                // acknowledges divergence for implementations that don't support it.
-                let result: boolean | undefined;
-                try {
-                    result = await matchJavascriptObject(
-                        { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                        { 'contact.locations': { $all: [{ city: 'London', country: 'UK' }] } } as any,
-                        ContactSchema
-                    );
-                } catch (e) {
-                    // Some implementations may throw for unsupported $all with objects
-                }
-                expectOrAcknowledgeDivergence(result ?? undefined, true, '$all with compound objects: schema restricts $all to scalar values');
+                // Mongo $all supports deep equality for object elements.
+                // Note: $all with { $elemMatch: ... } inside is NOT supported (documented limitation).
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                    { 'contact.locations': { $all: [{ city: 'London', country: 'UK' }] } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
             });
 
             test('$all with compound object elements: fails when object not present', async () => {
-                let result: boolean | undefined;
-                try {
-                    result = await matchJavascriptObject(
-                        { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
-                        { 'contact.locations': { $all: [{ city: 'Tokyo', country: 'JP' }] } } as any,
-                        ContactSchema
-                    );
-                } catch (e) {
-                    // Some implementations may throw for unsupported $all with objects
-                }
-                expectOrAcknowledgeDivergence(result ?? undefined, false, '$all with compound objects: schema restricts $all to scalar values');
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }] } },
+                    { 'contact.locations': { $all: [{ city: 'Tokyo', country: 'JP' }] } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
             });
         });
 
@@ -2413,7 +2449,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$size: passes when length matches', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $size: 2 } } as any,
+                    { 'contact.locations': { $size: 2 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2422,7 +2458,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$size: fails when length differs', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London', 'NYC'] } },
-                    { 'contact.locations': { $size: 3 } } as any,
+                    { 'contact.locations': { $size: 3 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2431,7 +2467,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$size 0 on empty array: passes', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: [] } },
-                    { 'contact.locations': { $size: 0 } } as any,
+                    { 'contact.locations': { $size: 0 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -2440,7 +2476,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$size 0 on non-empty array: fails', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', locations: ['London'] } },
-                    { 'contact.locations': { $size: 0 } } as any,
+                    { 'contact.locations': { $size: 0 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2452,7 +2488,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // incorrectly pass $size: 0 — must check for NULL first.
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.locations': { $size: 0 } } as any,
+                    { 'contact.locations': { $size: 0 } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -2693,9 +2729,10 @@ export function standardTests(testConfig: StandardTestConfig) {
         });
 
 
-        test('spread-nesting multi-criteria compound filter (within 1 array): passes', async () => {
-
-
+        test('spread-nesting multi-criteria compound filter (within 1 array): exact match semantics', async () => {
+            // Under exact document match (Mongo), no single grandchild has both
+            // grandchild_name='Rita' AND age=3 (Rita has age=2, Bob has age=3).
+            // Under old per-key-OR this passed; under Mongo semantics it fails.
             const result = await matchJavascriptObject<SpreadNested>(
                 {
                     parent_name: 'Bob',
@@ -2734,6 +2771,39 @@ export function standardTests(testConfig: StandardTestConfig) {
                 },
                 SpreadNestedSchema
             );
+            expectOrAcknowledgeUnsupported(result, false);
+        });
+
+        test('spread-nesting multi-criteria compound filter: passes when single element matches all', async () => {
+            const result = await matchJavascriptObject<SpreadNested>(
+                {
+                    parent_name: 'Bob',
+                    children: [
+                        {
+                            child_name: 'Sue',
+                            grandchildren: [
+                                { grandchild_name: 'Harold', age: 1 }
+                            ]
+                        },
+                        {
+                            child_name: 'Alice',
+                            grandchildren: [
+                                { grandchild_name: 'Rita', age: 2 },
+                                { grandchild_name: 'Bob', age: 3 }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    'children': {
+                        'grandchildren': {
+                            grandchild_name: 'Rita',
+                            age: 2
+                        }
+                    }
+                },
+                SpreadNestedSchema
+            );
             expectOrAcknowledgeUnsupported(result, true);
         });
 
@@ -2761,7 +2831,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 },
                 {
                     'children.grandchildren': { $size: 2 }
-                } as any,
+                },
                 SpreadNestedSchema
             );
             expectOrAcknowledgeDivergence(result, true, '$size on spread dot-prop: SQL may not compose $size correctly with array spreading');
@@ -3076,7 +3146,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 largeList.push('Andy');
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    { 'contact.name': { $in: largeList } } as any,
+                    { 'contact.name': { $in: largeList } },
                     ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -3120,7 +3190,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         describe('8a. Scalar element match on top-level string[]', () => {
 
             test('labelIds contains INBOX: thread1 passes, thread2 fails', async () => {
-                const filter = { labelIds: 'INBOX' } as any;
+                const filter = { labelIds: 'INBOX' };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, true);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3130,7 +3200,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
 
             test('labelIds contains DRAFTS: thread1 fails, thread2 passes', async () => {
-                const filter = { labelIds: 'DRAFTS' } as any;
+                const filter = { labelIds: 'DRAFTS' };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, false);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3140,7 +3210,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
 
             test('rfc822msgids contains abc@example.com: thread1 passes', async () => {
-                const filter = { rfc822msgids: 'abc@example.com' } as any;
+                const filter = { rfc822msgids: 'abc@example.com' };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, true);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3150,7 +3220,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
 
             test('rfc822msgids contains nonexistent: all fail', async () => {
-                const filter = { rfc822msgids: 'nonexistent@example.com' } as any;
+                const filter = { rfc822msgids: 'nonexistent@example.com' };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, false);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3164,7 +3234,7 @@ export function standardTests(testConfig: StandardTestConfig) {
         describe('8b. $elemMatch single condition on object array', () => {
 
             test('message with rfc822msgid abc: thread1 passes, thread2 fails', async () => {
-                const filter = { messages: { $elemMatch: { rfc822msgid: 'abc@example.com' } } } as any;
+                const filter = { messages: { $elemMatch: { rfc822msgid: 'abc@example.com' } } };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, true);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3172,7 +3242,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
 
             test('message with rfc822msgid xyz: thread1 fails, thread2 passes', async () => {
-                const filter = { messages: { $elemMatch: { rfc822msgid: 'xyz@example.com' } } } as any;
+                const filter = { messages: { $elemMatch: { rfc822msgid: 'xyz@example.com' } } };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, false);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3187,7 +3257,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // m1 has rfc822msgid 'abc@example.com' AND labelIds ['INBOX', 'Label_15']
                 const result = await matchJavascriptObject(
                     thread1,
-                    { messages: { $elemMatch: { rfc822msgid: 'abc@example.com', labelIds: 'INBOX' } } } as any,
+                    { messages: { $elemMatch: { rfc822msgid: 'abc@example.com', labelIds: 'INBOX' } } },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -3198,7 +3268,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // m2 has 'SENT' but NOT rfc822msgid 'abc@example.com'
                 const result = await matchJavascriptObject(
                     thread1,
-                    { messages: { $elemMatch: { rfc822msgid: 'abc@example.com', labelIds: 'SENT' } } } as any,
+                    { messages: { $elemMatch: { rfc822msgid: 'abc@example.com', labelIds: 'SENT' } } },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -3213,7 +3283,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // m2 has rfc822msgid 'def@example.com' but labelIds ['SENT'] (not Label_15)
                 const result = await matchJavascriptObject(
                     thread1,
-                    { messages: { $elemMatch: { labelIds: 'Label_15', rfc822msgid: 'def@example.com' } } } as any,
+                    { messages: { $elemMatch: { labelIds: 'Label_15', rfc822msgid: 'def@example.com' } } },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -3228,7 +3298,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     { labelIds: 'INBOX' },
                     { labelIds: 'DRAFTS' },
                     { rfc822msgids: 'xyz@example.com' }
-                ] } as any;
+                ] };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, true);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3245,7 +3315,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 const filter = { $or: [
                     { labelIds: 'STARRED' },
                     { messages: { $elemMatch: { rfc822msgid: 'abc@example.com' } } }
-                ] } as any;
+                ] };
                 const r1 = await matchJavascriptObject(thread1, filter, CachedGmailThreadSchema);
                 expectOrAcknowledgeUnsupported(r1, true);
                 const r2 = await matchJavascriptObject(thread2, filter, CachedGmailThreadSchema);
@@ -3261,7 +3331,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('scalar element match on empty labelIds: fails', async () => {
                 const result = await matchJavascriptObject(
                     emptyThread,
-                    { labelIds: 'INBOX' } as any,
+                    { labelIds: 'INBOX' },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -3270,7 +3340,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('$elemMatch on empty messages: fails', async () => {
                 const result = await matchJavascriptObject(
                     emptyThread,
-                    { messages: { $elemMatch: { rfc822msgid: 'any' } } } as any,
+                    { messages: { $elemMatch: { rfc822msgid: 'any' } } },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -3280,7 +3350,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 // m1 has INBOX, m2 has SENT — either individually satisfies the $or
                 const result = await matchJavascriptObject(
                     thread1,
-                    { messages: { $elemMatch: { $or: [{ labelIds: 'INBOX' }, { labelIds: 'SENT' }] } } } as any,
+                    { messages: { $elemMatch: { $or: [{ labelIds: 'INBOX' }, { labelIds: 'SENT' }] } } },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -3293,7 +3363,8 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('messages.rfc822msgid scalar match: thread1 passes', async () => {
                 const result = await matchJavascriptObject(
                     thread1,
-                    { 'messages.rfc822msgid': 'abc@example.com' } as any,
+                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
+                    { 'messages.rfc822msgid': 'abc@example.com' },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -3302,7 +3373,8 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('messages.rfc822msgid scalar match: thread2 fails', async () => {
                 const result = await matchJavascriptObject(
                     thread2,
-                    { 'messages.rfc822msgid': 'abc@example.com' } as any,
+                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
+                    { 'messages.rfc822msgid': 'abc@example.com' },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
@@ -3311,7 +3383,8 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('messages.labelIds double-nested spread: thread1 passes', async () => {
                 const result = await matchJavascriptObject(
                     thread1,
-                    { 'messages.labelIds': 'INBOX' } as any,
+                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
+                    { 'messages.labelIds': 'INBOX' },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
@@ -3320,7 +3393,8 @@ export function standardTests(testConfig: StandardTestConfig) {
             test('messages.labelIds double-nested spread: thread2 fails', async () => {
                 const result = await matchJavascriptObject(
                     thread2,
-                    { 'messages.labelIds': 'INBOX' } as any,
+                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
+                    { 'messages.labelIds': 'INBOX' },
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);

@@ -14,32 +14,35 @@ export type WhereFilterLogicOperatorsTyped = typeof WhereFilterLogicOperators[nu
 
 export type ValueComparisonRangeOperatorsTyped = typeof ValueComparisonRangeOperators[number];
 export type ValueComparisonRangeNumeric = Partial<Record<ValueComparisonRangeOperatorsTyped, number>>;
-export type ValueComparisonContains = { $contains: string };
 export type ValueComparisonRangeString = Partial<Record<ValueComparisonRangeOperatorsTyped, string>>;
-export type ValueComparisonString = ValueComparisonRangeString | ValueComparisonContains;
 export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never);
 export type ValueComparisonRangeFlexi<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never) | T;
+export type ValueComparisonEq<T = any> = { $eq: T extends string ? string : T extends number ? number : T extends boolean ? boolean : never };
 export type ValueComparisonNe<T = any> = { $ne: T extends string ? string : T extends number ? number : never };
 export type ValueComparisonIn<T = any> = { $in: (T extends string ? string : T extends number ? number : never)[] };
 export type ValueComparisonNin<T = any> = { $nin: (T extends string ? string : T extends number ? number : never)[] };
 export type ValueComparisonExists = { $exists: boolean };
-export type ValueComparisonType = { $type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' };
+export type ValueComparisonType = { $type: 'string' | 'number' | 'bool' | 'object' | 'array' | 'null' };
 export type ValueComparisonRegex = { $regex: string; $options?: string };
 export type ValueComparisonNot<T = any> = {
     $not: ValueComparisonRange<T>
-          | (T extends string ? ValueComparisonContains : never)
+          | ValueComparisonEq<T>
           | ValueComparisonNe<T>
           | ValueComparisonIn<T>
           | ValueComparisonNin<T>
           | (T extends string ? ValueComparisonRegex : never)
+          | ValueComparisonExists
+          | ValueComparisonType
+          | ArrayValueComparisonSize
 };
 
 export type ValueComparisonFlexi<T = any> =
     (T extends string
-        ? ValueComparisonString | ValueComparisonRegex
+        ? ValueComparisonRangeString | ValueComparisonRegex
         : T extends number
             ? ValueComparisonRangeNumeric
             : never)
+    | ValueComparisonEq<T>
     | ValueComparisonNe<T>
     | ValueComparisonIn<T>
     | ValueComparisonNin<T>
@@ -58,9 +61,9 @@ export type ArrayValueComparison<T = any, ISD extends number = 2> = ArrayValueCo
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
 
-type ArrayElementFilter<T = any, ISD extends number = 2> = (T extends Record<string, any>? WhereFilterCore<T, ISD> :
+type ArrayElementFilter<T = any, ISD extends number = 2> = (T extends Record<string, any>? PartialObjectFilter<T, ISD> :
     T extends string | number ? T :
-    never) | ArrayValueComparison<T, ISD>
+    never) | ArrayValueComparison<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType
 export type ArrayFilter<T extends [], ISD extends number = 2> = ArrayElementFilter<T[number], ISD> | T;
 
 export type PartialObjectFilter<T extends Record<string, any>, ISD extends number = 2> = Partial<{
@@ -133,9 +136,10 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * | **Exact scalar** | `'Andy'`, `100`, `true` | Strict equality (`===`) for string, number, boolean |
  * | **Deep object equality** | `{ name: 'Andy', age: 30 }` | Deep equality (all keys must match) |
  * | **Range operators** | `{ $gt: 10, $lte: 100 }` | `$gt`, `$lt`, `$gte`, `$lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic / JS code-point order, case-sensitive). |
- * | **$contains** | `{ $contains: 'And' }` | Substring match. String values only (throws on numbers). |
+ * | **$eq** | `{ $eq: 'Andy' }` | Explicit equality (`===`). `{ $eq: null }` matches null/missing. |
+ * | **$regex** | `{ $regex: 'And', $options: 'i' }` | Regex match. String values only. |
  *
- * **Nullish behaviour**: Range/$contains on `undefined`/`null` returns `false` (like SQL NULL).
+ * **Nullish behaviour**: Range/$regex on `undefined`/`null` returns `false` (like SQL NULL).
  *
  * **Type safety**: Range comparison throws if the filter type differs from the value type
  * (e.g. comparing a number value against a string filter).
@@ -157,22 +161,20 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * { 'contact.locations': 'London' }
  * ```
  *
- * ### Compound object filter (implicit per-key OR across elements)
- * Pass a plain object with property keys. **Each key is tested independently** — it only
- * needs *some* element to satisfy each key. Different keys may be satisfied by different elements.
+ * ### Compound object filter (exact document match — Mongo semantics)
+ * Pass a plain object with property keys. A **single element** must satisfy **all** keys.
  * ```ts
  * // locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
+ * { 'contact.locations': { city: 'London', country: 'UK' } }
+ * // → true: element 0 satisfies both keys
  * { 'contact.locations': { city: 'London', country: 'US' } }
- * // → true: 'London' found in element 0, 'US' found in element 1
+ * // → false: no single element has both city=London and country=US
  * ```
  *
- * ### Logic filter on array elements (atomic per element, like `$elemMatch`)
- * When using $and/$or/$nor inside an array filter, each element is tested atomically
- * against the full logic filter. The criteria must be satisfied within a single element.
+ * To match keys across different elements, use dot-prop spreading:
  * ```ts
- * // locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
- * { 'contact.locations': { $and: [{ city: 'London' }, { country: 'US' }] } }
- * // → false: no single element has both city=London and country=US
+ * { 'contact.locations.city': 'London', 'contact.locations.country': 'US' }
+ * // → true: city=London in element 0, country=US in element 1
  * ```
  *
  * ### `$elemMatch` (explicit single-element matching)
@@ -183,7 +185,7 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  *
  * // For scalar arrays — value is a scalar or value comparison:
  * { 'contact.locations': { $elemMatch: 2 } }
- * { 'contact.locations': { $elemMatch: { $contains: 'Lon' } } }
+ * { 'contact.locations': { $elemMatch: { $regex: 'Lon' } } }
  * ```
  *
  * ---
@@ -233,8 +235,8 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * const numericFilter = { 'person.age': { $gt: 30 } };
  *
  * @example
- * // Substring match
- * const containsFilter = { 'person.name': { $contains: 'And' } };
+ * // Regex match
+ * const regexFilter = { 'person.name': { $regex: 'And' } };
  *
  * @example
  * // $elemMatch on an array of objects

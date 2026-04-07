@@ -1,12 +1,12 @@
 
 import { z } from "zod";
 import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "../../types.ts";
-import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
+import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/zod.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.ts";
-import { isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
+import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
 import { ValueComparisonRangeOperators } from "../../consts.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
@@ -15,6 +15,12 @@ import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators
 import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
 
 
+
+/** Maps our $type names to Postgres jsonb_typeof() return values ('bool' → 'boolean'). */
+function mapTypeToPostgres(typeName: string): string {
+    if (typeName === 'bool') return 'boolean';
+    return typeName;
+}
 
 /**
  * Postgres JSONB implementation of IPropertyTranslator.
@@ -73,7 +79,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     /**
      * Generates a SQL fragment for a single dot-prop path and its filter value.
      * Two main branches: direct comparison (no arrays), or jsonb_array_elements spreading + EXISTS wrapping (arrays).
-     * Compound array filters use COUNT(DISTINCT CASE WHEN...) so different elements can satisfy different keys.
+     * Compound array filters require all conditions to match the same element (exact document match).
      */
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
         // Reset conversion errors for this call
@@ -164,9 +170,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
                     return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
-                // $all: array must contain all specified values
+                // $all: array must contain all specified values (scalars use =, objects use @> containment)
                 if (isArrayValueComparisonAll(filter)) {
                     const conditions = filter.$all.map(v => {
+                        if (isPlainObject(v)) {
+                            // Object element: use @> containment on the raw JSONB element
+                            const placeholder = this.generatePlaceholder(v, statementArguments);
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} @> ${placeholder}::jsonb)`;
+                        }
                         const placeholder = this.generatePlaceholder(v, statementArguments);
                         return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
                     });
@@ -174,7 +185,6 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 }
                 // $size: array has exactly N elements
                 if (isArrayValueComparisonSize(filter)) {
-                    // Use jsonb_array_length on the raw JSONB array path
                     const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
                     if (!sizeResult.success) {
                         this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
@@ -183,6 +193,22 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     const jsonbPath = sizeResult.expression;
                     const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
                     return `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
+                }
+                // $not + $size on array
+                if (isValueComparisonNot(filter) && isArrayValueComparisonSize(filter.$not)) {
+                    const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    if (!sizeResult.success) {
+                        this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
+                        return 'FALSE';
+                    }
+                    const jsonbPath = sizeResult.expression;
+                    const placeholder = this.generatePlaceholder(filter.$not.$size, statementArguments);
+                    const sizeSql = `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
+                    // For optional arrays: missing → $not matches (true)
+                    if (this.nodeMap[dotpropPath]?.optional_or_nullable) {
+                        return `(${jsonbPath} IS NULL OR NOT (${sizeSql}))`;
+                    }
+                    return `NOT (${sizeSql})`;
                 }
                 // $exists on array
                 if (isValueComparisonExists(filter)) {
@@ -203,22 +229,24 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     const parts = dotpropPath.split('.');
                     const jsonbPath = parts.map(p => `'${p}'`).join('->');
                     const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
-                    const placeholder = this.generatePlaceholder(filter.$type, statementArguments);
+                    const pgType = mapTypeToPostgres(filter.$type);
+                    const placeholder = this.generatePlaceholder(pgType, statementArguments);
                     return `jsonb_typeof(${rawJsonbExpr}) = ${placeholder}`;
                 }
 
                 if (isArrayValueComparisonElemMatch(filter)) {
-                    // Check for scalar value comparisons first to avoid the ambiguity
-                    // where operator objects like {$gt: 5} pass isWhereFilterDefinition.
                     const elemVal = filter.$elemMatch;
-                    if (isValueComparisonScalar(elemVal) || isValueComparisonContains(elemVal) || isValueComparisonRange(elemVal)) {
-                        // Scalar value comparison — output_identifier extracts text via #>> '{}',
-                        // but numeric comparisons need an explicit ::numeric cast.
+                    // Object sub-filter: recurse with sub-PropertyTranslator scoped to array element
+                    if (isPlainObject(elemVal) && isWhereFilterDefinition(elemVal) && !isValueComparisonRange(elemVal) && !isValueComparisonEq(elemVal) && !isValueComparisonNe(elemVal) && !isValueComparisonIn(elemVal) && !isValueComparisonNin(elemVal) && !isValueComparisonNot(elemVal) && !isValueComparisonExists(elemVal) && !isValueComparisonType(elemVal) && !isValueComparisonRegex(elemVal) && !isArrayValueComparisonSize(elemVal)) {
+                        const subPropertyMap = new PropertyTranslatorJsonbSchema(treeNode.schema!, sa.output_column, true);
+                        const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
+                        subClause = result;
+                    } else {
+                        // Scalar value comparison (includes $regex, $ne, $in, $eq, range, plain scalar, etc.)
                         const testArrayContainsString = typeof elemVal === 'string';
                         if (testArrayContainsString) {
                             return this.generateComparison(dotpropPath, elemVal, statementArguments, undefined, testArrayContainsString);
                         } else {
-                            // Determine if numeric cast is needed for range operators
                             let customId = sa.output_identifier;
                             if (isValueComparisonRange(elemVal)) {
                                 const firstVal = Object.values(elemVal)[0];
@@ -230,42 +258,17 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                             }
                             subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, customId);
                         }
-                    } else if (isWhereFilterDefinition(elemVal)) {
-                        // Object array: recurse with sub-PropertyTranslator
-                        const subPropertyMap = new PropertyTranslatorJsonbSchema(treeNode.schema!, sa.output_column, true);
-                        const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
-                        subClause = result;
                     }
                 } else {
-                    // Compound filter: break it apart and each one must match something
+                    // Compound object filter on array: all conditions must match the same element
                     if (isPlainObject(filter)) {
-                        const keys = Object.keys(filter) as Array<keyof typeof filter>;
-                        let andClauses: string[] = [];
-
+                        // Logic operators ($and/$or/$nor) on array values outside $elemMatch are not valid
+                        if (isLogicFilter(filter as WhereFilterDefinition)) {
+                            throw new Error("Logic operators ($and/$or/$nor) on array values must use $elemMatch explicitly");
+                        }
                         const subPropertyMap = new PropertyTranslatorJsonbSchema(treeNode.schema!, sa.output_column, true);
-
-                        keys.forEach(key => {
-                            const subFilter: WhereFilterDefinition = { [key]: filter[key] };
-                            const result = compileWhereFilterRecursive(subFilter, statementArguments, subPropertyMap, errors, rootFilter);
-                            andClauses = [
-                                ...andClauses,
-                                result
-                            ];
-                        });
-
-                        const countColumns = andClauses.map((x, index) => {
-                            const column_id = `sc${index}`;
-                            return {
-                                column_sql: `COUNT(DISTINCT CASE WHEN (${x}) THEN 1 END) AS ${column_id}`,
-                                column_id
-                            }
-                        })
-
-                        // This has to use another technique, because we want every AND to be represented once, but not necessarily on the same row
-                        // So we count the appearance of each AND, and are only satisfied if they're all present
-
-                        const compoundSql = `EXISTS (SELECT 1 FROM (SELECT ${countColumns.map(x => x.column_sql).join(',')} FROM ${sa.sql}) as match_all WHERE ${countColumns.map(x => `${x.column_id} > 0`).join(` AND `)})`;
-                        return compoundSql;
+                        const result = compileWhereFilterRecursive(filter as WhereFilterDefinition, statementArguments, subPropertyMap, errors, rootFilter);
+                        return `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${result})`;
 
                     } else {
                         subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier);
@@ -285,7 +288,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     }
 
     /**
-     * Emits a leaf-level SQL comparison for a single value ($contains → LIKE, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
+     * Emits a leaf-level SQL comparison for a single value ($eq → =, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
     protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
@@ -349,8 +352,20 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             const parts = dotpropPath.split('.');
             const jsonbPath = parts.map(p => `'${p}'`).join('->');
             const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
-            const placeholder = this.generatePlaceholder(filter.$type, statementArguments);
+            const pgType = mapTypeToPostgres(filter.$type);
+            const placeholder = this.generatePlaceholder(pgType, statementArguments);
             return `jsonb_typeof(${rawJsonbExpr}) = ${placeholder}`;
+        }
+        // $size (needed here for $not + $size to work via recursive generateComparison)
+        if (isArrayValueComparisonSize(filter)) {
+            const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+            if (!sizeResult.success) {
+                this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
+                return 'FALSE';
+            }
+            const jsonbPath = sizeResult.expression;
+            const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
+            return `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
         }
         // $regex
         if (isValueComparisonRegex(filter)) {
@@ -360,11 +375,13 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ${op} ${placeholder}`);
         }
 
-        if (isValueComparisonContains(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
-
-            const placeholder = this.generatePlaceholder(`%${filter.$contains}%`, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} LIKE ${placeholder}`);
+        if (isValueComparisonEq(filter)) {
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            if (filter.$eq === null) {
+                return `${sqlIdentifier} IS NULL`;
+            }
+            const placeholder = this.generatePlaceholder(filter.$eq, statementArguments);
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
         } else if (isValueComparisonRange(filter)) {
 
             // Range comparison can be string or filter, so we need to determinate what we're dealing with to set the SQL straight.

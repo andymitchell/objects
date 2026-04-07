@@ -2,7 +2,7 @@ import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPr
 import isPlainObject from "../utils/isPlainObject.js";
 import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ObjOrDraft, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
-import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonContains, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
+import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonRangeFlexi, isValueComparisonScalar } from "./typeguards.ts";
 import { ValueComparisonRangeOperators } from "./consts.ts";
 import { safeJson } from "./safeJson.ts";
@@ -158,6 +158,24 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
             return checkJsType(objectValue, dotpropFilter.$type);
         }
 
+        // Handle $not before array/scalar branching when inner operator needs pre-branch handling.
+        // Use untyped `innerRaw` to avoid TypeScript's progressive type narrowing
+        // exhausting the generic union to `never` (the generic T=any makes narrowing unreliable).
+        if (isValueComparisonNot(dotpropFilter)) {
+            if (objectValue === undefined || objectValue === null) return true; // MongoDB: $not matches missing
+            const innerRaw: unknown = dotpropFilter.$not;
+            if (isValueComparisonExists(innerRaw)) {
+                const exists = objectValue !== undefined && objectValue !== null;
+                return !(innerRaw.$exists ? exists : !exists);
+            }
+            if (isValueComparisonType(innerRaw)) {
+                return !checkJsType(objectValue, innerRaw.$type);
+            }
+            // @ts-expect-error — TypeScript narrows innerRaw to never after prior type guards exhaust the unknown union
+            if (isArrayValueComparisonSize(innerRaw)) { if (!Array.isArray(objectValue)) return true; return !(objectValue.length === innerRaw.$size); }
+            // For other $not inner operators, fall through to normal array/scalar branching
+        }
+
         if( Array.isArray(objectValue) ) {
             return compareArray(objectValue, dotpropFilter, [...debugPath, dotpropFilter]);
         } else {
@@ -178,7 +196,7 @@ function checkJsType(value: any, expectedType: string): boolean {
     switch (expectedType) {
         case 'string': return typeof value === 'string';
         case 'number': return typeof value === 'number';
-        case 'boolean': return typeof value === 'boolean';
+        case 'bool': return typeof value === 'boolean';
         case 'array': return Array.isArray(value);
         case 'object': return isPlainObject(value) && !Array.isArray(value);
         case 'null': return value === null;
@@ -219,6 +237,18 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
         // $not — negate inner comparison
         if (isValueComparisonNot(filterValue, true)) {
             if (value === undefined || value === null) return true; // MongoDB: $not matches missing
+            const innerRaw: unknown = filterValue.$not;
+            if (isValueComparisonExists(innerRaw)) {
+                const exists = value !== undefined && value !== null;
+                return !(innerRaw.$exists ? exists : !exists);
+            }
+            if (isValueComparisonType(innerRaw)) {
+                return !checkJsType(value, innerRaw.$type);
+            }
+            if (isArrayValueComparisonSize(innerRaw)) {
+                if (!Array.isArray(value)) return true;
+                return !(value.length === innerRaw.$size);
+            }
             return !compareValue(value, filterValue.$not);
         }
         // $regex
@@ -229,13 +259,14 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
         }
         // $exists and $type are handled before compareValue in _matchJavascriptObject
 
-        if( isValueComparisonContains(filterValue, true) ) {
-            if( typeof value==='string' ) {
-                return value.indexOf(filterValue.$contains)>-1;
-            } else if( value!==undefined ) {
-                throw new Error("A ValueComparisonContains only works on a string");
-            }
-        } else if( isValueComparisonRangeFlexi(filterValue, true) ) {
+        // $eq — explicit equality
+        if (isValueComparisonEq(filterValue, true)) {
+            if (filterValue.$eq === null) return value === null || value === undefined;
+            if (value === undefined || value === null) return false;
+            return value === filterValue.$eq;
+        }
+
+        if( isValueComparisonRangeFlexi(filterValue, true) ) {
             if( typeof value === 'number' || typeof value === 'string' ) {
                 return ValueComparisonRangeOperators.filter(x => x in filterValue).every(x => {
                     const filterValueForX = filterValue[x];
@@ -256,7 +287,7 @@ function compareValue(value: any, filterValue: ValueComparisonFlexi):boolean {
                 // like SQL, we want to test against empty/null and simply return false
                 return false;
             } else {
-                throw new Error("A ValueComparisonContains ($gt, $lt, etc.) only works on a number or string");
+                throw new Error("A range comparison ($gt, $lt, etc.) only works on a number or string");
             }
         } else {
             return deepEql(value, filterValue);
@@ -303,18 +334,13 @@ function compareArray(value: any[], filterValue: ArrayFilter<any>, debugPath:Whe
             }
         });
     } else {
-        // it's a compound. every filter item must be satisfied by at least one element of the array 
+        // Compound object filter on array: exact document match (Mongo semantics).
+        // A single element must satisfy ALL keys.
         if( isPlainObject(filterValue) ) {
-            // split it apart across its keys, where each must be satisfied
-            const keys = Object.keys(filterValue) as Array<keyof typeof filterValue>;
-
-            const result = keys.every(key => {
-
-            
-                const subFilter:WhereFilterDefinition = {[key]: filterValue[key]};
-                return value.some(x => _matchJavascriptObject(x, subFilter, [...debugPath, subFilter]))
+            return value.some(element => {
+                if (!isPlainObject(element)) return false;
+                return _matchJavascriptObject(element, filterValue, [...debugPath, filterValue]);
             });
-            return result;
         } else {
             const result = value.indexOf(filterValue)>-1;
             return result;

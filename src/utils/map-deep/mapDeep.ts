@@ -1,5 +1,5 @@
 import isPlainObject from '../isPlainObject.ts';
-import type { MapDeepInputRule, MapDeepValueRule } from './types.ts';
+import type { MapDeepInputRule } from './types.ts';
 
 /**
  * Immutably transform deeply nested values in a JSON-serializable object using declarative rules.
@@ -8,6 +8,10 @@ import type { MapDeepInputRule, MapDeepValueRule } from './types.ts';
  * For the common case (single replace-value, no target), a specialised fast-path
  * closure is compiled that matches raw hand-written COW performance.
  *
+ * Returns `T` by default. For key-modifying rules (`rename-property`, `remove-property`)
+ * that change the object shape, specify `R` explicitly:
+ * `mapDeep<Input, Output>(obj, rules)`
+ *
  * @example
  * ```ts
  * const result = mapDeep(config, [
@@ -15,8 +19,7 @@ import type { MapDeepInputRule, MapDeepValueRule } from './types.ts';
  * ]);
  * ```
  */
-export function mapDeep<T>(obj: T, rules: MapDeepValueRule[]): T;
-export function mapDeep<T, R = unknown>(obj: T, rules: MapDeepInputRule[]): R;
+export function mapDeep<T, R = T>(obj: T, rules: MapDeepInputRule[]): R;
 export function mapDeep(obj: unknown, rules: MapDeepInputRule[]): unknown {
     if (rules.length === 0) return obj;
     const walker = compileWalker(rules);

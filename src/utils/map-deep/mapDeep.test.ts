@@ -550,15 +550,15 @@ describe('mapDeep', () => {
             expect(_check).toBeDefined();
         });
 
-        test('key-modifying rules return R defaulting to unknown', () => {
+        test('key-modifying rules return T by default', () => {
             const obj = { name: 'value' };
             const rules: MapDeepInputRule[] = [
                 { action: 'remove-property', target: { key: 'name' } }
             ];
             const result = mapDeep(obj, rules);
-            // result is unknown — can't access .name without narrowing
-            // @ts-expect-error — unknown does not have .name
-            void result.name;
+            // R defaults to T — caller specifies R explicitly when shape changes
+            const _check: typeof obj = result;
+            expect(_check).toBeDefined();
         });
 
         test('caller can specify R for key-modifying rules', () => {

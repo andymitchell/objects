@@ -5,6 +5,9 @@ import type { MapDeepInputRule, MapDeepValueRule } from './types.ts';
  * Immutably transform deeply nested values in a JSON-serializable object using declarative rules.
  * Uses inline copy-on-write — only allocates new objects/arrays along dirty paths.
  *
+ * For the common case (single replace-value, no target), a specialised fast-path
+ * closure is compiled that matches raw hand-written COW performance.
+ *
  * @example
  * ```ts
  * const result = mapDeep(config, [
@@ -16,14 +19,14 @@ export function mapDeep<T>(obj: T, rules: MapDeepValueRule[]): T;
 export function mapDeep<T, R = unknown>(obj: T, rules: MapDeepInputRule[]): R;
 export function mapDeep(obj: unknown, rules: MapDeepInputRule[]): unknown {
     if (rules.length === 0) return obj;
-
-    const compiled = compileRules(rules);
-    return walk(obj, '', undefined, compiled);
+    const walker = compileWalker(rules);
+    return walker(obj);
 }
 
 // --- Internal types ---
 
 type TargetMatcher = (key: string, path: string | undefined) => boolean;
+type Walker = (node: unknown) => unknown;
 
 type CompiledValueRule = {
     action: 'replace-value';
@@ -47,21 +50,17 @@ type CompiledKeyRule = {
     matcher: TargetMatcher;
 };
 
-type CompiledRules = {
-    valueRules: CompiledValueRule[];
-    keyRules: CompiledKeyRule[];
-    needsPath: boolean;
-};
+// --- Dangerous key set for prototype pollution prevention ---
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 // --- Rule compilation ---
 
-/** Why: convert serializable rules into efficient closures once, before traversal. */
-function compileRules(rules: MapDeepInputRule[]): CompiledRules {
+/** Why: returns a self-contained walker closure — no struct passed per recursive call. */
+function compileWalker(rules: MapDeepInputRule[]): Walker {
     const valueRules: CompiledValueRule[] = [];
     const keyRules: CompiledKeyRule[] = [];
     let needsPath = false;
 
-    // First pass: detect if any rule uses dotprop_path
     for (const rule of rules) {
         if ('target' in rule && rule.target && 'dotprop_path' in rule.target && rule.target.dotprop_path) {
             needsPath = true;
@@ -69,7 +68,6 @@ function compileRules(rules: MapDeepInputRule[]): CompiledRules {
         }
     }
 
-    // Second pass: compile all rules with matchers
     for (const rule of rules) {
         const matcher = buildMatcher(rule);
 
@@ -94,7 +92,7 @@ function compileRules(rules: MapDeepInputRule[]): CompiledRules {
             keyRules.push({
                 action: 'rename-property',
                 rename_to: rule.rename_to,
-                matcher: matcher ?? ((_k) => false), // Required<Target> ensures matcher exists
+                matcher: matcher ?? ((_k) => false),
             });
         } else if (rule.action === 'remove-property') {
             keyRules.push({
@@ -105,7 +103,123 @@ function compileRules(rules: MapDeepInputRule[]): CompiledRules {
         }
     }
 
-    return { valueRules, keyRules, needsPath };
+    // --- Fast path: single replace-value, no target, no key rules ---
+    if (
+        valueRules.length === 1 &&
+        keyRules.length === 0 &&
+        valueRules[0]!.action === 'replace-value' &&
+        valueRules[0]!.matcher === null
+    ) {
+        const current = valueRules[0]!.current;
+        const replace = valueRules[0]!.replace;
+        // Return a specialised closure that inlines the === check
+        return function fastWalk(node: unknown): unknown {
+            if (node === current) return replace;
+            if (node === null || typeof node !== 'object') return node;
+
+            if (Array.isArray(node)) {
+                let copy: unknown[] | undefined;
+                for (let i = 0; i < node.length; i++) {
+                    const child = node[i];
+                    const mapped = fastWalk(child);
+                    if (mapped !== child) {
+                        if (!copy) copy = node.slice();
+                        copy[i] = mapped;
+                    }
+                }
+                return copy ?? node;
+            }
+
+            if (!isPlainObject(node)) return node;
+
+            let copy: Record<string, unknown> | undefined;
+            const keys = Object.keys(node);
+            for (const key of keys) {
+                const child = node[key];
+                const mapped = fastWalk(child);
+                if (mapped !== child) {
+                    if (!copy) copy = { ...node };
+                    copy[key] = mapped;
+                }
+            }
+            return copy ?? node;
+        };
+    }
+
+    // --- General path: closure captures compiled rules ---
+    return function generalWalk(node: unknown): unknown {
+        return walk(node, '', undefined);
+    };
+
+    function walk(node: unknown, key: string, path: string | undefined): unknown {
+        if (node === null || typeof node !== 'object') {
+            return applyValueRules(node, key, path, valueRules);
+        }
+
+        if (Array.isArray(node)) {
+            let copy: unknown[] | undefined;
+            for (let i = 0; i < node.length; i++) {
+                const child = node[i];
+                const childPath = needsPath ? (path ? `${path}.${i}` : `${i}`) : undefined;
+                const mapped = walk(child, String(i), childPath);
+                if (mapped !== child) {
+                    if (!copy) copy = node.slice();
+                    copy[i] = mapped;
+                }
+            }
+            return copy ?? node;
+        }
+
+        if (!isPlainObject(node)) return node;
+
+        let copy: Record<string, unknown> | undefined;
+        const keys = Object.keys(node);
+
+        const firedKeyRules: Set<CompiledKeyRule> | undefined =
+            keyRules.length > 0 ? new Set() : undefined;
+
+        for (const objKey of keys) {
+            const childPath = needsPath ? (path ? `${path}.${objKey}` : objKey) : undefined;
+
+            let effectiveKey = objKey;
+            let removed = false;
+
+            if (firedKeyRules) {
+                for (const keyRule of keyRules) {
+                    if (firedKeyRules.has(keyRule) && !(keyRule.action === 'remove-property' && keyRule.all)) continue;
+                    if (!keyRule.matcher(objKey, childPath)) continue;
+
+                    if (keyRule.action === 'remove-property') {
+                        removed = true;
+                        if (!copy) copy = { ...node };
+                        delete copy[objKey];
+                        if (!keyRule.all) firedKeyRules.add(keyRule);
+                        break;
+                    } else if (keyRule.action === 'rename-property') {
+                        if (DANGEROUS_KEYS.has(keyRule.rename_to)) break;
+                        effectiveKey = keyRule.rename_to;
+                        firedKeyRules.add(keyRule);
+                        break;
+                    }
+                }
+            }
+
+            if (removed) continue;
+
+            const child = node[objKey];
+            const mapped = walk(child, effectiveKey, childPath);
+
+            if (effectiveKey !== objKey || mapped !== child) {
+                if (!copy) copy = { ...node };
+                if (effectiveKey !== objKey) {
+                    delete copy[objKey];
+                }
+                copy[effectiveKey] = mapped;
+            }
+        }
+
+        return copy ?? node;
+    }
 }
 
 /** Why: build a target matcher closure from a rule's target field. */
@@ -132,92 +246,6 @@ function buildMatcher(rule: MapDeepInputRule): TargetMatcher | null {
     return null;
 }
 
-// --- Dangerous key set for prototype pollution prevention ---
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-// --- COW recursive walker ---
-
-/** Why: the core traversal — applies all compiled rules with copy-on-write semantics. */
-function walk(node: unknown, key: string, path: string | undefined, compiled: CompiledRules): unknown {
-    // Leaf: apply value rules
-    if (node === null || typeof node !== 'object') {
-        return applyValueRules(node, key, path, compiled.valueRules);
-    }
-
-    // Array: COW iterate
-    if (Array.isArray(node)) {
-        let copy: unknown[] | undefined;
-        for (let i = 0; i < node.length; i++) {
-            const child = node[i];
-            const childPath = compiled.needsPath ? (path ? `${path}.${i}` : `${i}`) : undefined;
-            const mapped = walk(child, String(i), childPath, compiled);
-            if (mapped !== child) {
-                if (!copy) copy = node.slice();
-                copy[i] = mapped;
-            }
-        }
-        return copy ?? node;
-    }
-
-    // Non-plain objects (Date, RegExp, class instances): pass through by reference
-    if (!isPlainObject(node)) {
-        return node;
-    }
-
-    // Plain object: apply key rules + recurse values
-    let copy: Record<string, unknown> | undefined;
-    const keys = Object.keys(node);
-
-    // Track which key rules have already fired in this object (first-match semantics)
-    const firedKeyRules: Set<CompiledKeyRule> | undefined =
-        compiled.keyRules.length > 0 ? new Set() : undefined;
-
-    for (const objKey of keys) {
-        const childPath = compiled.needsPath ? (path ? `${path}.${objKey}` : objKey) : undefined;
-
-        // Key rules: check rename/remove (first-match per rule per object)
-        let effectiveKey = objKey;
-        let removed = false;
-
-        if (firedKeyRules) {
-            for (const keyRule of compiled.keyRules) {
-                // Skip rules that already fired (first-match), unless remove with all: true
-                if (firedKeyRules.has(keyRule) && !(keyRule.action === 'remove-property' && keyRule.all)) continue;
-                if (!keyRule.matcher(objKey, childPath)) continue;
-
-                if (keyRule.action === 'remove-property') {
-                    removed = true;
-                    if (!copy) copy = { ...node };
-                    delete copy[objKey];
-                    if (!keyRule.all) firedKeyRules.add(keyRule);
-                    break; // first matching rule wins for this key
-                } else if (keyRule.action === 'rename-property') {
-                    if (DANGEROUS_KEYS.has(keyRule.rename_to)) break; // block prototype pollution
-                    effectiveKey = keyRule.rename_to;
-                    firedKeyRules.add(keyRule);
-                    break; // first matching rule wins for this key
-                }
-            }
-        }
-
-        if (removed) continue;
-
-        // Recurse into value
-        const child = node[objKey];
-        const mapped = walk(child, effectiveKey, childPath, compiled);
-
-        if (effectiveKey !== objKey || mapped !== child) {
-            if (!copy) copy = { ...node };
-            if (effectiveKey !== objKey) {
-                delete copy[objKey];
-            }
-            copy[effectiveKey] = mapped;
-        }
-    }
-
-    return copy ?? node;
-}
-
 /** Why: apply all value rules to a leaf node in sequence. */
 function applyValueRules(
     value: unknown,
@@ -228,7 +256,6 @@ function applyValueRules(
     let result = value;
 
     for (const rule of valueRules) {
-        // Check target matcher
         if (rule.matcher && !rule.matcher(key, path)) continue;
 
         if (rule.action === 'replace-value') {

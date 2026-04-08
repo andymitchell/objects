@@ -8,7 +8,7 @@ import type { MapDeepInputRule } from './types.ts';
  * For the common case (single replace-value, no target), a specialised fast-path
  * closure is compiled that matches raw hand-written COW performance.
  *
- * Returns `T` by default. For key-modifying rules (`rename-property`, `remove-property`)
+ * Returns `T` by default. For key-modifying rules (`rename-key`, `remove-key`)
  * that change the object shape, specify `R` explicitly:
  * `mapDeep<Input, Output>(obj, rules)`
  *
@@ -44,11 +44,11 @@ type CompiledValueRule = {
 };
 
 type CompiledKeyRule = {
-    action: 'rename-property';
+    action: 'rename-key';
     rename_to: string;
     matcher: TargetMatcher;
 } | {
-    action: 'remove-property';
+    action: 'remove-key';
     all: boolean;
     matcher: TargetMatcher;
 };
@@ -91,15 +91,15 @@ function compileWalker(rules: MapDeepInputRule[]): Walker {
                 replace: rule.replace,
                 matcher,
             });
-        } else if (rule.action === 'rename-property') {
+        } else if (rule.action === 'rename-key') {
             keyRules.push({
-                action: 'rename-property',
+                action: 'rename-key',
                 rename_to: rule.rename_to,
                 matcher: matcher ?? ((_k) => false),
             });
-        } else if (rule.action === 'remove-property') {
+        } else if (rule.action === 'remove-key') {
             keyRules.push({
-                action: 'remove-property',
+                action: 'remove-key',
                 all: rule.all ?? false,
                 matcher: matcher ?? ((_k) => false),
             });
@@ -189,16 +189,16 @@ function compileWalker(rules: MapDeepInputRule[]): Walker {
 
             if (firedKeyRules) {
                 for (const keyRule of keyRules) {
-                    if (firedKeyRules.has(keyRule) && !(keyRule.action === 'remove-property' && keyRule.all)) continue;
+                    if (firedKeyRules.has(keyRule) && !(keyRule.action === 'remove-key' && keyRule.all)) continue;
                     if (!keyRule.matcher(objKey, childPath)) continue;
 
-                    if (keyRule.action === 'remove-property') {
+                    if (keyRule.action === 'remove-key') {
                         removed = true;
                         if (!copy) copy = { ...node };
                         delete copy[objKey];
                         if (!keyRule.all) firedKeyRules.add(keyRule);
                         break;
-                    } else if (keyRule.action === 'rename-property') {
+                    } else if (keyRule.action === 'rename-key') {
                         if (DANGEROUS_KEYS.has(keyRule.rename_to)) break;
                         effectiveKey = keyRule.rename_to;
                         firedKeyRules.add(keyRule);

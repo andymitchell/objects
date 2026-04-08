@@ -37,7 +37,7 @@ export type Target = {
  * - `replace-value` is fastest — uses `===` identity check per leaf.
  * - RegExp rules are compiled once before traversal.
  *
- * Key rules (`rename-property`, `remove-property`) use first-match semantics:
+ * Key rules (`rename-key`, `remove-key`) use first-match semantics:
  * when multiple keys in the same object match, only the first encountered key is affected.
  */
 export type MapDeepInputRule = Target & {
@@ -58,13 +58,13 @@ Target & {
 } |
 Required<Target> & {
     /** Rename the first matching object key. Overwrites if the new key already exists. */
-    action: 'rename-property',
+    action: 'rename-key',
     /** The new key name. */
     rename_to: string
 } |
 Required<Target> & {
     /** Remove the first matching object key and its value. Set `all` to remove every match. */
-    action: 'remove-property',
+    action: 'remove-key',
     /** When true, removes all matching keys instead of just the first. Default: false. */
     all?: boolean
 }

@@ -273,12 +273,12 @@ describe('mapDeep', () => {
 
     });
 
-    describe('rename-property', () => {
+    describe('rename-key', () => {
 
         test('renames an exact-match key at top level', () => {
             const obj = { old_name: 1, other: 2 };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { key: 'old_name' }, rename_to: 'new_name' }
+                { action: 'rename-key', target: { key: 'old_name' }, rename_to: 'new_name' }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ new_name: 1, other: 2 });
@@ -287,7 +287,7 @@ describe('mapDeep', () => {
         test('renames a nested key', () => {
             const obj = { config: { old_name: 'value' } };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { key: 'old_name' }, rename_to: 'new_name' }
+                { action: 'rename-key', target: { key: 'old_name' }, rename_to: 'new_name' }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ config: { new_name: 'value' } });
@@ -296,7 +296,7 @@ describe('mapDeep', () => {
         test('preserves subtree under renamed key', () => {
             const obj = { old_name: { deep: { nested: 'value' }, arr: [1, 2] } };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { key: 'old_name' }, rename_to: 'new_name' }
+                { action: 'rename-key', target: { key: 'old_name' }, rename_to: 'new_name' }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ new_name: { deep: { nested: 'value' }, arr: [1, 2] } });
@@ -305,7 +305,7 @@ describe('mapDeep', () => {
         test('first-match only — second matching key in same object untouched', () => {
             const obj = { name_a: 1, name_b: 2, other: 3 };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { search_key: 'name_' }, rename_to: 'renamed' }
+                { action: 'rename-key', target: { search_key: 'name_' }, rename_to: 'renamed' }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             // First matching key (name_a) is renamed, name_b is untouched
@@ -317,7 +317,7 @@ describe('mapDeep', () => {
         test('with dotprop_path — renames only at specified path', () => {
             const obj = { a: { name: 'value' }, b: { name: 'value' } };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { dotprop_path: 'a.name' }, rename_to: 'label' }
+                { action: 'rename-key', target: { dotprop_path: 'a.name' }, rename_to: 'label' }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ a: { label: 'value' }, b: { name: 'value' } });
@@ -325,12 +325,12 @@ describe('mapDeep', () => {
 
     });
 
-    describe('remove-property', () => {
+    describe('remove-key', () => {
 
         test('removes a key from top level', () => {
             const obj = { keep: 1, remove: 2 };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { key: 'remove' } }
+                { action: 'remove-key', target: { key: 'remove' } }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ keep: 1 });
@@ -339,7 +339,7 @@ describe('mapDeep', () => {
         test('removes a nested key and its subtree', () => {
             const obj = { a: { keep: 1, debug: { verbose: true, data: [1, 2, 3] } } };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { key: 'debug' } }
+                { action: 'remove-key', target: { key: 'debug' } }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ a: { keep: 1 } });
@@ -348,7 +348,7 @@ describe('mapDeep', () => {
         test('first-match only by default', () => {
             const obj = { meta_a: 1, meta_b: 2, other: 3 };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { search_key: 'meta_' } }
+                { action: 'remove-key', target: { search_key: 'meta_' } }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             // Only first matching key removed
@@ -360,7 +360,7 @@ describe('mapDeep', () => {
         test('all: true removes every matching key', () => {
             const obj = { meta_a: 1, meta_b: 2, other: 3 };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { search_key: 'meta_' }, all: true }
+                { action: 'remove-key', target: { search_key: 'meta_' }, all: true }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ other: 3 });
@@ -369,7 +369,7 @@ describe('mapDeep', () => {
         test('with dotprop_path — removes only at specified path', () => {
             const obj = { a: { debug: 1 }, b: { debug: 2 } };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { dotprop_path: 'a.debug' } }
+                { action: 'remove-key', target: { dotprop_path: 'a.debug' } }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ a: {}, b: { debug: 2 } });
@@ -392,7 +392,7 @@ describe('mapDeep', () => {
         test('rename then replace-value on renamed key', () => {
             const obj = { old: 'value' };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { key: 'old' }, rename_to: 'new' },
+                { action: 'rename-key', target: { key: 'old' }, rename_to: 'new' },
                 { action: 'replace-value', current: 'value', replace: 'updated', target: { key: 'new' } },
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
@@ -402,7 +402,7 @@ describe('mapDeep', () => {
         test('remove then replace-value works on remaining tree', () => {
             const obj = { remove_me: 'x', keep: 'old' };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { key: 'remove_me' } },
+                { action: 'remove-key', target: { key: 'remove_me' } },
                 { action: 'replace-value', current: 'old', replace: 'new' },
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
@@ -434,7 +434,7 @@ describe('mapDeep', () => {
         test('key rules never fire on array elements', () => {
             const obj = { items: ['a', 'b', 'c'] };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { key: '0' } },
+                { action: 'remove-key', target: { key: '0' } },
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             // Array should be unchanged — key rules don't apply to arrays
@@ -462,7 +462,7 @@ describe('mapDeep', () => {
             for (const dangerous of ['__proto__', 'constructor', 'prototype']) {
                 const obj = { safe_key: 'value' };
                 const rules: MapDeepInputRule[] = [
-                    { action: 'rename-property', target: { key: 'safe_key' }, rename_to: dangerous }
+                    { action: 'rename-key', target: { key: 'safe_key' }, rename_to: dangerous }
                 ];
                 const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
                 // Rename should be blocked — original key preserved
@@ -474,7 +474,7 @@ describe('mapDeep', () => {
         test('rename causing key collision overwrites existing key', () => {
             const obj = { a: 1, b: 2 };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { key: 'a' }, rename_to: 'b' }
+                { action: 'rename-key', target: { key: 'a' }, rename_to: 'b' }
             ];
             const result = mapDeep<typeof obj, Record<string, unknown>>(obj, rules);
             expect(result).toEqual({ b: 1 });
@@ -553,7 +553,7 @@ describe('mapDeep', () => {
         test('key-modifying rules return T by default', () => {
             const obj = { name: 'value' };
             const rules: MapDeepInputRule[] = [
-                { action: 'remove-property', target: { key: 'name' } }
+                { action: 'remove-key', target: { key: 'name' } }
             ];
             const result = mapDeep(obj, rules);
             // R defaults to T — caller specifies R explicitly when shape changes
@@ -566,7 +566,7 @@ describe('mapDeep', () => {
             type Output = { new_key: string; keep: number };
             const obj: Input = { old_key: 'value', keep: 1 };
             const rules: MapDeepInputRule[] = [
-                { action: 'rename-property', target: { key: 'old_key' }, rename_to: 'new_key' }
+                { action: 'rename-key', target: { key: 'old_key' }, rename_to: 'new_key' }
             ];
             const result = mapDeep<Input, Output>(obj, rules);
             // Compile-time: result is Output

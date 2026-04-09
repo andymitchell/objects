@@ -1,15 +1,16 @@
 
 import type { WhereFilterDefinition } from "../types.ts";
 import type { ValueComparisonRangeOperators } from "../consts.ts";
-import type { DotPropPathConversionError, PreparedStatementArgument } from "../../utils/sql/types.ts";
+import type { DotPropPathConversionError, PreparedStatementArgument, SqlDialect } from "../../utils/sql/types.ts";
 
 // Re-export base SQL types from canonical location
-export type { PreparedStatementArgument, PreparedStatementArgumentOrObject } from '../../utils/sql/types.ts';
+export type { PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect } from '../../utils/sql/types.ts';
 export { isPreparedStatementArgument } from '../../utils/sql/types.ts';
 
 /**
  * Dialect-specific abstraction for converting a single dot-prop path + filter value into SQL.
- * Implementations know how to map WhereFilterDefinition leaf values to dialect-specific SQL fragments.
+ * Implementations know how to map WhereFilterDefinition leaf values to dialect-specific SQL fragments,
+ * and declare the SQL dialect they target via the `dialect` field so callers can verify the pairing.
  *
  * ```
  * compileWhereFilter(filter, translator)
@@ -19,10 +20,13 @@ export { isPreparedStatementArgument } from '../../utils/sql/types.ts';
  *
  * @example
  * class MyTranslator implements IPropertyTranslator<MyType> {
+ *   readonly dialect = 'pg' as const;
  *   generateSql(path, filter, args, errors, root) { return `col->>'${path}' = $1`; }
  * }
  */
 export interface IPropertyTranslator<T extends Record<string, any>> {
+    /** SQL dialect this translator emits — used by `prepareWhereClause` to detect mismatched pairings. */
+    readonly dialect: SqlDialect;
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string;
 }
 
@@ -41,8 +45,16 @@ export type WhereClausePathError = {
     message: string;
 };
 
+/** Error when a translator's declared dialect does not match the dialect requested by the caller. */
+export type WhereClauseDialectMismatchError = {
+    kind: 'dialect_mismatch';
+    expected: SqlDialect;
+    actual: SqlDialect;
+    message: string;
+};
+
 /** Discriminated union of where-clause compilation errors. All variants carry `.message` for uniform access. */
-export type WhereClauseError = WhereClauseFilterError | WhereClausePathError;
+export type WhereClauseError = WhereClauseFilterError | WhereClausePathError | WhereClauseDialectMismatchError;
 
 /**
  * Discriminated union result from SQL where-clause builders.

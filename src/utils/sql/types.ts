@@ -1,6 +1,9 @@
 export type PreparedStatementArgument = string | number | boolean | null;
 export type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
 
+/** SQL dialect for query generation. */
+export type SqlDialect = 'pg' | 'sqlite';
+
 /** Discriminant for structured path conversion errors. */
 export type DotPropPathConversionErrorType =
     | 'unknown_path'

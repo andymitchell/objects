@@ -6,25 +6,27 @@ import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComp
 
 // SQL re-exports
 import {
+    prepareWhereClause,
     prepareWhereClauseForPg,
-    PropertyTranslatorJsonbSchema,
-    PropertyTranslatorJsonb,
+    PropertyTranslatorPgJsonbSchema,
+    PropertyTranslatorPgJsonb,
     prepareWhereClauseForSqlite,
     PropertyTranslatorSqliteJsonSchema,
     PropertyTranslatorSqliteJson,
     convertDotPropPathToPostgresJsonPath,
     convertDotPropPathToSqliteJsonPath,
 } from './sql/index.ts';
-import type { IPropertyTranslator, PreparedWhereClauseStatement, PreparedWhereClauseResult, WhereClauseError } from './sql/index.ts';
+import type { IPropertyTranslator, PreparedWhereClauseStatement, PreparedWhereClauseResult, SqlDialect, WhereClauseError } from './sql/index.ts';
 
 export {
     matchJavascriptObject,
     filterJavascriptObjects,
     compileMatchJavascriptObject,
+    prepareWhereClause,
     prepareWhereClauseForPg,
     prepareWhereClauseForSqlite,
-    PropertyTranslatorJsonbSchema,
-    PropertyTranslatorJsonb,
+    PropertyTranslatorPgJsonbSchema,
+    PropertyTranslatorPgJsonb,
     PropertyTranslatorSqliteJsonSchema,
     PropertyTranslatorSqliteJson,
     WhereFilterSchema,
@@ -46,4 +48,5 @@ export type {
     WhereClauseError,
     ValueComparisonFlexi,
     IPropertyTranslator,
+    SqlDialect,
 };

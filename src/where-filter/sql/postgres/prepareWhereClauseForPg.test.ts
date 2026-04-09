@@ -1,4 +1,4 @@
-import { prepareWhereClauseForPg, PropertyTranslatorJsonbSchema } from "./index.ts";
+import { prepareWhereClauseForPg, PropertyTranslatorPgJsonbSchema } from "./index.ts";
 import type { PreparedWhereClauseResult } from "../types.ts";
 
 import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
@@ -29,7 +29,7 @@ describe('postgres where clause builder', () => {
 
         return await runner.sequentialTest(async (runner, db, schemaName, schemaScope) => {
 
-            const pm = new PropertyTranslatorJsonbSchema(schema, 'recordColumn');
+            const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
 
             await db.exec(`CREATE TABLE IF NOT EXISTS ${schemaScope('test_table_123')} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
 

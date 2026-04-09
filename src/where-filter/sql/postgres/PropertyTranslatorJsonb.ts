@@ -10,7 +10,7 @@ import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "
 import { ValueComparisonRangeOperators } from "../../consts.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
-import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
+import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect, WhereClauseError } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
 import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
 
@@ -28,6 +28,7 @@ function mapTypeToPostgres(typeName: string): string {
  * array spreading via jsonb_array_elements, and parameterised placeholders.
  */
 class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string, any>> implements IPropertyTranslator<T> {
+    readonly dialect: SqlDialect = 'pg';
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;
@@ -238,7 +239,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     const elemVal = filter.$elemMatch;
                     // Object sub-filter: recurse with sub-PropertyTranslator scoped to array element
                     if (isPlainObject(elemVal) && isWhereFilterDefinition(elemVal) && !isValueComparisonRange(elemVal) && !isValueComparisonEq(elemVal) && !isValueComparisonNe(elemVal) && !isValueComparisonIn(elemVal) && !isValueComparisonNin(elemVal) && !isValueComparisonNot(elemVal) && !isValueComparisonExists(elemVal) && !isValueComparisonType(elemVal) && !isValueComparisonRegex(elemVal) && !isArrayValueComparisonSize(elemVal)) {
-                        const subPropertyMap = new PropertyTranslatorJsonbSchema(treeNode.schema!, sa.output_column, true);
+                        const subPropertyMap = new PropertyTranslatorPgJsonbSchema(treeNode.schema!, sa.output_column, true);
                         const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
                         subClause = result;
                     } else {
@@ -266,7 +267,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                         if (isLogicFilter(filter as WhereFilterDefinition)) {
                             throw new Error("Logic operators ($and/$or/$nor) on array values must use $elemMatch explicitly");
                         }
-                        const subPropertyMap = new PropertyTranslatorJsonbSchema(treeNode.schema!, sa.output_column, true);
+                        const subPropertyMap = new PropertyTranslatorPgJsonbSchema(treeNode.schema!, sa.output_column, true);
                         const result = compileWhereFilterRecursive(filter as WhereFilterDefinition, statementArguments, subPropertyMap, errors, rootFilter);
                         return `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${result})`;
 
@@ -442,9 +443,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
  * PropertyTranslator for Postgres JSONB that derives its TreeNodeMap from a Zod schema automatically.
  *
  * @example
- * const pm = new PropertyTranslatorJsonbSchema(ContactSchema, 'recordColumn');
+ * const pm = new PropertyTranslatorPgJsonbSchema(ContactSchema, 'recordColumn');
  */
-export class PropertyTranslatorJsonbSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyTranslatorJsonb<T> implements IPropertyTranslator<T> {
+export class PropertyTranslatorPgJsonbSchema<T extends Record<string, any> = Record<string, any>> extends BasePropertyTranslatorJsonb<T> implements IPropertyTranslator<T> {
     constructor(schema: z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?: boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
@@ -453,7 +454,7 @@ export class PropertyTranslatorJsonbSchema<T extends Record<string, any> = Recor
 /**
  * PropertyTranslator for Postgres JSONB that accepts a pre-built TreeNodeMap directly (when schema introspection is already done).
  */
-export class PropertyTranslatorJsonb<T extends Record<string, any> = Record<string, any>> extends BasePropertyTranslatorJsonb<T> implements IPropertyTranslator<T> {
+export class PropertyTranslatorPgJsonb<T extends Record<string, any> = Record<string, any>> extends BasePropertyTranslatorJsonb<T> implements IPropertyTranslator<T> {
 
     constructor(nodeMap: TreeNodeMap, sqlColumnName: string, doNotSpreadArray?: boolean) {
         super(nodeMap, sqlColumnName, doNotSpreadArray);

@@ -7,7 +7,7 @@
 
 import { PGlite } from '@electric-sql/pglite';
 import { z } from 'zod';
-import { prepareWhereClauseForPg, PropertyTranslatorJsonbSchema, type WhereFilterDefinition } from '../where-filter/index.ts';
+import { prepareWhereClauseForPg, PropertyTranslatorPgJsonbSchema, type WhereFilterDefinition } from '../where-filter/index.ts';
 
 // ─── DB Proxy (simulated network latency) ────────────────────────────────────
 
@@ -106,7 +106,7 @@ async function seedData(db: PGlite, count: number): Promise<void> {
 
 // ─── WHERE Clause Builder ────────────────────────────────────────────────────
 
-const propertyMap = new PropertyTranslatorJsonbSchema(TestItemSchema, 'data');
+const propertyMap = new PropertyTranslatorPgJsonbSchema(TestItemSchema, 'data');
 
 function buildWhereClause(where: WhereFilterDefinition<TestItem>) {
     const result = prepareWhereClauseForPg(where, propertyMap);

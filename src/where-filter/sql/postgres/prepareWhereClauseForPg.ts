@@ -10,7 +10,7 @@ import type { IPropertyTranslator, PreparedWhereClauseResult } from "../types.ts
  * Internally validates the filter, walks the filter tree, and delegates leaf comparisons to a PropertyTranslator.
  *
  * @example
- * const pm = new PropertyTranslatorJsonbSchema(myZodSchema, 'data');
+ * const pm = new PropertyTranslatorPgJsonbSchema(myZodSchema, 'data');
  * const result = prepareWhereClauseForPg({ name: 'Andy' }, pm);
  * if (result.success) { use(result.where_clause_statement, result.statement_arguments); }
  */

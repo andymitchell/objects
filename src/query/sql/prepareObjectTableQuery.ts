@@ -1,5 +1,5 @@
 import type { WhereFilterDefinition } from '../../where-filter/types.ts';
-import { prepareWhereClauseForPg, PropertyTranslatorJsonbSchema } from '../../where-filter/sql/postgres/index.ts';
+import { prepareWhereClauseForPg, PropertyTranslatorPgJsonbSchema } from '../../where-filter/sql/postgres/index.ts';
 import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from '../../where-filter/sql/sqlite/index.ts';
 import type { PreparedWhereClauseStatement } from '../../where-filter/sql/types.ts';
 import type { DotPropPathConversionResult } from '../../utils/sql/types.ts';
@@ -116,7 +116,7 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
             filterStatement = filter;
         } else {
             const filterResult = dialect === 'pg'
-                ? prepareWhereClauseForPg(filter, new PropertyTranslatorJsonbSchema(table.schema, table.objectColumnName))
+                ? prepareWhereClauseForPg(filter, new PropertyTranslatorPgJsonbSchema(table.schema, table.objectColumnName))
                 : prepareWhereClauseForSqlite(filter, new PropertyTranslatorSqliteJsonSchema(table.schema, table.objectColumnName));
 
             if (!filterResult.success) {

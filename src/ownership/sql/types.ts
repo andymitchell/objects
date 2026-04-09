@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import type { PreparedStatementArgument } from "../../utils/sql/types.ts";
 
-export type SqlDialect = 'pg' | 'sqlite';
+export type { SqlDialect } from "../../utils/sql/types.ts";
 
 export type OwnershipTableInfo<T extends Record<string, any> = Record<string, any>> =
     | { mode: 'object_column', columnName: string, schema: z.ZodSchema<T> }

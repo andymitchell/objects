@@ -10,7 +10,7 @@ import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "
 import { ValueComparisonRangeOperators } from "../../consts.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
-import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, WhereClauseError } from "../types.ts";
+import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect, WhereClauseError } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
 import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
 
@@ -21,6 +21,7 @@ import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
  * json_each for array spreading, and ? positional placeholders.
  */
 class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<string, any>> implements IPropertyTranslator<T> {
+    readonly dialect: SqlDialect = 'sqlite';
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;

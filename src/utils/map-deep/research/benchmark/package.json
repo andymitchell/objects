@@ -1,0 +1,11 @@
+{
+  "name": "map-deep-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "npx tsx bench.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

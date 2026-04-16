@@ -2,7 +2,9 @@
 export type {
     SortEntry,
     SortDefinition,
+    SortAndSliceBase,
     SortAndSlice,
+    SortAndSliceCursor,
     QueryError,
     SortAndSliceObjectsResult,
     PrimaryKeyValue,
@@ -15,7 +17,7 @@ export type {
 } from './types.ts';
 
 // Schemas
-export { SortEntrySchema, SortDefinitionSchema, SortAndSliceSchema } from './schemas.ts';
+export { SortEntrySchema, SortDefinitionSchema, SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema } from './schemas.ts';
 
 // JS Runtime
 export { sortAndSliceObjects } from './sortAndSliceObjects.ts';

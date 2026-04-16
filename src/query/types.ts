@@ -3,7 +3,7 @@ import type { DotPropPathsUnion } from "../dot-prop-paths/types.ts";
 import type { PrimaryKeyValue } from '../utils/getKeyValue.ts';
 import type { PreparedStatementArgument } from '../utils/sql/types.ts';
 import type { PreparedWhereClauseStatement } from '../where-filter/sql/types.ts';
-import type { SortAndSliceSchema, SortDefinitionSchema, SortEntrySchema } from './schemas.ts';
+import type { SortAndSliceSchema, SortAndSliceBaseSchema, SortAndSliceCursorSchema, SortDefinitionSchema, SortEntrySchema } from './schemas.ts';
 import { isTypeEqual } from "@andyrmitchell/utils";
 
 // Re-export for consumer convenience
@@ -33,6 +33,24 @@ export type SortEntry<T> = { key: DotPropPathsUnion<T>; direction: 1 | -1 };
  * @note Dot-prop keys work with relational tables too — they just have no depth (e.g. `'created_at'`).
  */
 export type SortDefinition<T> = Array<SortEntry<T>>;
+
+/**
+ * Shared query fields available in all pagination modes: sort and limit.
+ * Constraint for ICollection's 5th generic (`S extends SortAndSliceBase<T>`),
+ * guaranteeing `sort` and `limit` are always accessible regardless of pagination mode.
+ *
+ * @see SortAndSlice — offset/after_pk pagination (databases, in-memory)
+ * @see SortAndSliceCursor — opaque cursor pagination (API bridges)
+ *
+ * @example
+ * function processQuery<S extends SortAndSliceBase<T>>(query: S) {
+ *   if (query.limit) { ... }  // always available
+ * }
+ */
+export type SortAndSliceBase<T> = {
+    sort?: SortDefinition<T>;
+    limit?: number;
+}
 
 /**
  * Unified query configuration for sorting and paginating a collection. Accepted by all query
@@ -68,11 +86,34 @@ export type SortDefinition<T> = Array<SortEntry<T>>;
  *
  * @note When using `after_pk` cursor pagination in SQL, the generated subquery count grows
  * O(N²) with the number of sort keys. Recommend ≤3 sort keys with `after_pk`.
+ *
+ * @see SortAndSliceBase — shared sort + limit fields (constraint for ICollection's 5th generic)
+ * @see SortAndSliceCursor — opaque cursor mode for API bridges
  */
-export type SortAndSlice<T> = {
-    sort?: SortDefinition<T>;
-    limit?: number;
-} & ({ offset?: number; after_pk?: never } | { offset?: never; after_pk?: PrimaryKeyValue });
+export type SortAndSlice<T> = SortAndSliceBase<T> & (
+    | { offset?: number; after_pk?: never }
+    | { offset?: never; after_pk?: PrimaryKeyValue }
+);
+
+/**
+ * Opaque-cursor pagination mode for API bridges (Gmail, Stripe, Notion) where the
+ * next-page token is a string returned by the provider, not computable by the caller.
+ * Extends {@link SortAndSliceBase} — `sort` and `limit` are always available.
+ *
+ * On the first call, omit `cursor`. On subsequent calls, pass the `next_page_cursor`
+ * from the previous response.
+ *
+ * @example
+ * // First page
+ * const page1: SortAndSliceCursor<Thread> = { limit: 20 };
+ *
+ * @example
+ * // Next page
+ * const page2: SortAndSliceCursor<Thread> = { limit: 20, cursor: response.next_page_cursor };
+ */
+export type SortAndSliceCursor<T> = SortAndSliceBase<T> & {
+    cursor?: string;
+}
 
 /** Error from query validation or building. */
 export type QueryError = { type: string; message: string };
@@ -198,4 +239,17 @@ isTypeEqual<SortAndSliceSchemaInferred, {
     limit?: number | undefined;
     offset?: number | undefined;
     after_pk?: string | number | undefined;
+}>(true);
+
+// SortAndSliceBase: schema infers the shared base fields (sort + limit).
+isTypeEqual<z.infer<typeof SortAndSliceBaseSchema>, {
+    sort?: Array<{ key: string; direction: 1 | -1 }> | undefined;
+    limit?: number | undefined;
+}>(true);
+
+// SortAndSliceCursor: schema infers base fields + cursor.
+isTypeEqual<z.infer<typeof SortAndSliceCursorSchema>, {
+    sort?: Array<{ key: string; direction: 1 | -1 }> | undefined;
+    limit?: number | undefined;
+    cursor?: string | undefined;
 }>(true);

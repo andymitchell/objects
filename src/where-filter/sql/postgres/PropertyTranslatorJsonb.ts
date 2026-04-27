@@ -205,11 +205,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     const jsonbPath = sizeResult.expression;
                     const placeholder = this.generatePlaceholder(filter.$not.$size, statementArguments);
                     const sizeSql = `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
-                    // For optional arrays: missing → $not matches (true)
-                    if (this.nodeMap[dotpropPath]?.optional_or_nullable) {
-                        return `(${jsonbPath} IS NULL OR NOT (${sizeSql}))`;
-                    }
-                    return `NOT (${sizeSql})`;
+                    return `(${jsonbPath} IS NULL OR NOT (${sizeSql}))`;
                 }
                 // $exists on array
                 if (isValueComparisonExists(filter)) {
@@ -294,21 +290,24 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      */
     protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
 
+        /**
+         * Forces leaf comparisons to a definite TRUE/FALSE so any enclosing NOT
+         * (from $nor or a parent $not) doesn't propagate NULL under SQL 3VL.
+         * Unconditional: PG folds `IS NOT NULL` against NOT NULL columns.
+         */
         const optionalWrapper = (sqlIdentifier: string, query: string) => {
             if (!this.nodeMap[dotpropPath]) return query;
-            if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
-                return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
-            }
-            return query;
+            return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
         }
 
-        /** Wrapper for optional fields where missing matches (e.g. $ne, $nin, $not). */
+        /**
+         * Wraps Mongo "matches missing" operators ($ne / $nin / $not) with `(IS NULL OR <q>)`.
+         * Unconditional so semantics agree with matchJavascriptObject regardless of schema
+         * annotation; PG folds the guard against NOT NULL columns.
+         */
         const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
             if (!this.nodeMap[dotpropPath]) return query;
-            if (this.nodeMap[dotpropPath]!.optional_or_nullable) {
-                return `(${sqlIdentifier} IS NULL OR ${query})`;
-            }
-            return query;
+            return `(${sqlIdentifier} IS NULL OR ${query})`;
         }
 
         // $ne

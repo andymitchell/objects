@@ -1,6 +1,7 @@
 import { writeToItemsArray, writeToItemsArrayPreserveInputType } from "./writeToItemsArray/index.ts";
 import { isIUser } from "./auth/index.js";
 import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
+import { getWrittenPaths } from "./getWrittenPaths.ts";
 import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
 
 // ─── Functions ───
@@ -16,6 +17,7 @@ export {
     getWriteFailures,
     getWriteSuccesses,
     getWriteErrors,
+    getWrittenPaths,
 }
 
 // ─── Schemas ───

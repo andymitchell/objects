@@ -2,7 +2,7 @@
 import matchJavascriptObject, { compileMatchJavascriptObject, filterJavascriptObjects } from './matchJavascriptObject.ts';
 import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
 import { isLogicFilter, isPartialObjectFilter } from './typeguards.ts';
-import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep } from './types.ts';
+import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, PartialObjectFilterStrict, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep } from './types.ts';
 
 // SQL re-exports
 import {
@@ -43,6 +43,7 @@ export type {
     WhereFilterDefinitionDeep,
     LogicFilter,
     PartialObjectFilter,
+    PartialObjectFilterStrict,
     PreparedWhereClauseStatement,
     PreparedWhereClauseResult,
     WhereClauseError,

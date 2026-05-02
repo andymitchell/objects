@@ -73,6 +73,69 @@ export type PartialObjectFilter<T extends Record<string, any>, ISD extends numbe
 }>;
 
 
+// ---- Strict variant: rejects logic operators at every depth ----
+// Mirrors the WhereFilterCore → ArrayValueComparisonElemMatch → ArrayValueComparison
+// → ArrayElementFilter → ArrayFilter → PartialObjectFilter chain, but every
+// recursion target is the strict variant so $and/$or/$nor cannot appear anywhere.
+
+type ArrayValueComparisonElemMatchStrict<T = any, ISD extends number = 2> = {
+    $elemMatch: T extends Record<string, any> ? PartialObjectFilterStrict<T, ISD> : ValueComparisonFlexi<T>
+};
+
+type ArrayValueComparisonStrict<T = any, ISD extends number = 2> =
+    ArrayValueComparisonElemMatchStrict<T, ISD> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
+
+type ArrayElementFilterStrict<T = any, ISD extends number = 2> =
+    (T extends Record<string, any> ? PartialObjectFilterStrict<T, ISD> :
+        T extends string | number ? T :
+        never) | ArrayValueComparisonStrict<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType;
+
+type ArrayFilterStrict<T extends [], ISD extends number = 2> = ArrayElementFilterStrict<T[number], ISD> | T;
+
+/**
+ * Like {@link PartialObjectFilter}, but rejects the logic operators
+ * (`$and` / `$or` / `$nor`) at every depth — including inside `$elemMatch` and
+ * inside compound-object-filter-on-array.
+ *
+ * Why: for consumers whose downstream matcher does not register compound
+ * operators (notably CASL's default `createMongoAbility`, where top-level
+ * boolean operators silently never match — the worst failure mode for an
+ * access-control library). Use this in place of `PartialObjectFilter` /
+ * `WhereFilterDefinition` when you need a compile error rather than a
+ * silent runtime no-op.
+ *
+ * Field-level operators (`$in`, `$nin`, `$gt`, `$elemMatch`, etc.) are still
+ * allowed — only the compound-logic shapes are excluded.
+ *
+ * @example
+ * // OK — field operators only
+ * const ok: PartialObjectFilterStrict<Doc> = { name: 'Andy', age: { $gte: 18 } };
+ *
+ * @example
+ * // OK — $elemMatch with field operators inside
+ * const ok2: PartialObjectFilterStrict<Doc> = {
+ *     contacts: { $elemMatch: { city: 'London', country: 'UK' } }
+ * };
+ *
+ * @example
+ * // Compile error — top-level $or
+ * // @ts-expect-error — $or rejected by PartialObjectFilterStrict
+ * const bad1: PartialObjectFilterStrict<Doc> = { $or: [{ name: 'Andy' }] };
+ *
+ * @example
+ * // Compile error — $or nested in $elemMatch
+ * // @ts-expect-error — $or inside $elemMatch rejected by PartialObjectFilterStrict
+ * const bad2: PartialObjectFilterStrict<Doc> = {
+ *     contacts: { $elemMatch: { $or: [{ city: 'London' }] } }
+ * };
+ */
+export type PartialObjectFilterStrict<T extends Record<string, any>, ISD extends number = 2> = Partial<{
+    [P in DotPropPathsIncArrayUnion<T, ISD>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
+        ? ArrayFilterStrict<PathValueIncDiscrimatedUnions<T, P>, ISD>
+        : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>>
+}>;
+
+
 
 export type MatchJavascriptObject<T extends Record<string, any> = Record<string, any>> = (object:ObjOrDraft<T>) => boolean;
 export type MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>) => boolean;

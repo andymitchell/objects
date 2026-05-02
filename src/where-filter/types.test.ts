@@ -1,6 +1,6 @@
 
 import { isLogicFilter, isPartialObjectFilter } from "./typeguards.ts";
-import { type WhereFilterDefinition } from "./types.ts"
+import { type PartialObjectFilter, type PartialObjectFilterStrict, type WhereFilterDefinition } from "./types.ts"
 
 type TestObj = {
     name: string;
@@ -932,3 +932,138 @@ describe('WhereFilterDefinition types', () => {
         })
     })
 })
+
+
+describe('PartialObjectFilterStrict types', () => {
+    type Doc = {
+        name: string;
+        age: number;
+        contact: { city: string; zip: number };
+        addresses: { street: string; primary: boolean }[];
+        tags: string[];
+    };
+
+    describe('accepts the same field-level shapes as PartialObjectFilter', () => {
+        it('top-level scalar equality', () => {
+            const a: PartialObjectFilterStrict<Doc> = { name: 'Andy' };
+        });
+
+        it('range operators on a scalar field', () => {
+            const a: PartialObjectFilterStrict<Doc> = { age: { $gte: 18, $lte: 65 } };
+        });
+
+        it('$in / $nin / $exists / $regex on appropriate fields', () => {
+            const a: PartialObjectFilterStrict<Doc> = { name: { $in: ['Andy', 'Bob'] } };
+            const b: PartialObjectFilterStrict<Doc> = { age: { $nin: [0] } };
+            const c: PartialObjectFilterStrict<Doc> = { name: { $exists: true } };
+            const d: PartialObjectFilterStrict<Doc> = { name: { $regex: '^And' } };
+        });
+
+        it('$elemMatch on object array with field operators inside', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                addresses: { $elemMatch: { street: 'Main' } }
+            };
+            const b: PartialObjectFilterStrict<Doc> = {
+                addresses: { $elemMatch: { street: 'Main', primary: true } }
+            };
+        });
+
+        it('$elemMatch on scalar array with value comparison inside', () => {
+            const a: PartialObjectFilterStrict<Doc> = { tags: { $elemMatch: 'foo' } };
+            const b: PartialObjectFilterStrict<Doc> = { tags: { $elemMatch: { $regex: 'fo' } } };
+        });
+
+        it('$all and $size on array fields', () => {
+            const a: PartialObjectFilterStrict<Doc> = { tags: { $all: ['a', 'b'] } };
+            const b: PartialObjectFilterStrict<Doc> = { tags: { $size: 2 } };
+        });
+
+        it('nested dot-prop path', () => {
+            const a: PartialObjectFilterStrict<Doc> = { 'contact.city': 'London' };
+        });
+    });
+
+    describe('rejects logic operators at the top level', () => {
+        it('rejects top-level $or', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                // @ts-expect-error — $or rejected by PartialObjectFilterStrict
+                $or: [{ name: 'Andy' }, { age: 30 }]
+            };
+        });
+
+        it('rejects top-level $and', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                // @ts-expect-error — $and rejected by PartialObjectFilterStrict
+                $and: [{ name: 'Andy' }, { age: 30 }]
+            };
+        });
+
+        it('rejects top-level $nor', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                // @ts-expect-error — $nor rejected by PartialObjectFilterStrict
+                $nor: [{ name: 'Andy' }]
+            };
+        });
+    });
+
+    describe('rejects logic operators nested inside $elemMatch (recursion contract)', () => {
+        it('rejects $or inside $elemMatch on object array', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                addresses: {
+                    $elemMatch: {
+                        // @ts-expect-error — $or inside $elemMatch rejected by PartialObjectFilterStrict
+                        $or: [{ street: 'Main' }, { primary: true }]
+                    }
+                }
+            };
+        });
+
+        it('rejects $and inside $elemMatch on object array', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                addresses: {
+                    $elemMatch: {
+                        // @ts-expect-error — $and inside $elemMatch rejected by PartialObjectFilterStrict
+                        $and: [{ street: 'Main' }, { primary: true }]
+                    }
+                }
+            };
+        });
+
+        it('rejects $nor inside $elemMatch on object array', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                addresses: {
+                    $elemMatch: {
+                        // @ts-expect-error — $nor inside $elemMatch rejected by PartialObjectFilterStrict
+                        $nor: [{ primary: false }]
+                    }
+                }
+            };
+        });
+    });
+
+    describe('Regression guard — PartialObjectFilter (loose) still accepts logic inside $elemMatch', () => {
+        // If the loose variant ever stops accepting nested logic-in-$elemMatch,
+        // 11+ existing tests in standardTests.ts break. This pin catches that
+        // accidental tightening — flips to compile error if PartialObjectFilter
+        // is changed to recurse into a non-LogicFilter type.
+        it('PartialObjectFilter accepts $or inside $elemMatch (loose contract preserved)', () => {
+            const a: PartialObjectFilter<Doc> = {
+                addresses: {
+                    $elemMatch: {
+                        $or: [{ street: 'Main' }, { primary: true }]
+                    }
+                }
+            };
+        });
+
+        it('PartialObjectFilter accepts $and inside $elemMatch (loose contract preserved)', () => {
+            const a: PartialObjectFilter<Doc> = {
+                addresses: {
+                    $elemMatch: {
+                        $and: [{ street: 'Main' }, { primary: true }]
+                    }
+                }
+            };
+        });
+    });
+});

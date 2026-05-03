@@ -1,9 +1,29 @@
-import type { SortAndSlice } from './types.ts';
+import { describe as vitestDescribe } from 'vitest';
+
+import type { DDL } from '../ddl/types.ts';
+import type { SortAndSlice, SortDefinition } from './types.ts';
+import {
+    type NullableItem,
+    type NumericItem,
+    type StandardTestItem,
+    type TiedItem,
+    type UndefinedItem,
+    STANDARD_TEST_DDL,
+    nestedItems,
+    nullableItems,
+    numericItems,
+    tenItems,
+    tiedItems,
+    undefinedItems,
+} from './standardTestFixtures.ts';
 
 /**
  * Uniform execute signature for standard tests.
  * All adapters (runtime, object-table SQL, column-table SQL) implement this.
- * Returns `undefined` to signal "not supported by this adapter" — the test skips.
+ * Returns `undefined` to signal "not supported by this adapter at runtime" — the
+ * test skips. Static skipping based on declared `sortable_keys` is preferred
+ * (see `StandardTestConfig.ddl`); this `undefined` path is the runtime fallback
+ * for cases the static declaration can't capture (e.g. direction-restricted impls).
  */
 export type Execute<T extends Record<string, any>> = (
     items: T[],
@@ -11,63 +31,29 @@ export type Execute<T extends Record<string, any>> = (
     primaryKey: keyof T & string
 ) => Promise<T[] | undefined>;
 
-type StandardTestConfig = {
+type StandardTestConfig<T extends Record<string, any> = StandardTestItem> = {
     it: typeof import('vitest').it;
     expect: typeof import('vitest').expect;
-    execute: Execute<any>;
+    execute: Execute<T>;
     implementationName?: string;
+    /**
+     * The DDL the implementation built with. Used to read `lists['.'].sortable_keys`
+     * for per-test gating: tests whose sort keys aren't in the allowlist register as
+     * `it.skip` rather than running.
+     *
+     * Omit to use `STANDARD_TEST_DDL` (= arbitrary — every test runs). Provide a DDL
+     * with restricted `sortable_keys` to declare a limited set; e.g. Gmail bridge
+     * passes `sortable_keys: []` so all sort tests skip statically.
+     */
+    ddl?: DDL<T>;
+    /**
+     * Optional `describe` override. Defaults to vitest's `describe`. Useful for
+     * meta-tests that want to inspect what `standardTests` registers without
+     * polluting the real test tree (pass a stub that invokes the callback but
+     * doesn't register a group).
+     */
+    describe?: typeof import('vitest').describe;
 };
-
-// --- Fixtures ---
-
-type NumericItem = { id: string; age: number; name: string; category: string; date: string };
-type NullableItem = { id: string; value: number | null };
-type UndefinedItem = { id: string; value?: number };
-type NestedItem = { id: string; sender: { name: string } };
-type TiedItem = { id: string; score: number };
-
-const numericItems: NumericItem[] = [
-    { id: 'a', age: 30, name: 'Charlie', category: 'B', date: '2024-01-03' },
-    { id: 'b', age: 10, name: 'Alice', category: 'A', date: '2024-01-01' },
-    { id: 'c', age: 20, name: 'Bob', category: 'A', date: '2024-01-02' },
-    { id: 'd', age: 40, name: 'Diana', category: 'B', date: '2024-01-04' },
-    { id: 'e', age: 25, name: 'Eve', category: 'A', date: '2024-01-05' },
-];
-
-const nullableItems: NullableItem[] = [
-    { id: '1', value: 5 },
-    { id: '2', value: null },
-    { id: '3', value: 3 },
-    { id: '4', value: null },
-];
-
-const undefinedItems: UndefinedItem[] = [
-    { id: '1', value: 5 },
-    { id: '2' },
-    { id: '3', value: 3 },
-    { id: '4' },
-];
-
-const nestedItems: NestedItem[] = [
-    { id: 'x', sender: { name: 'Zara' } },
-    { id: 'y', sender: { name: 'Alice' } },
-    { id: 'z', sender: { name: 'Mike' } },
-];
-
-const tiedItems: TiedItem[] = [
-    { id: 'c', score: 10 },
-    { id: 'a', score: 10 },
-    { id: 'b', score: 10 },
-];
-
-// 10 items for limit/offset/cursor tests, using PK ASC as default sort
-const tenItems: NumericItem[] = Array.from({ length: 10 }, (_, i) => ({
-    id: String(i).padStart(2, '0'),
-    age: (i + 1) * 10,
-    name: `Name${i}`,
-    category: i % 2 === 0 ? 'even' : 'odd',
-    date: `2024-01-${String(i + 1).padStart(2, '0')}`,
-}));
 
 /**
  * Shared behavioral tests for sort-and-slice functionality.
@@ -75,18 +61,40 @@ const tenItems: NumericItem[] = Array.from({ length: 10 }, (_, i) => ({
  *
  * @example
  * standardTests({ it, expect, execute: myAdapter, implementationName: 'runtime' });
+ *
+ * @example
+ * // Restrict to single sort key — multi-key tests will be skipped statically.
+ * standardTests({
+ *     it, expect, execute,
+ *     ddl: { ...STANDARD_TEST_DDL, lists: { '.': { primary_key: 'id', sortable_keys: ['age'] } } },
+ * });
  */
-export function standardTests(config: StandardTestConfig) {
+export function standardTests<T extends Record<string, any> = StandardTestItem>(config: StandardTestConfig<T>) {
     const { it, expect, execute } = config;
+    const describe = config.describe ?? vitestDescribe;
     const implementationName = config.implementationName ?? 'unknown';
 
-    /** Helper: run execute, skip if undefined (unsupported). */
-    async function run<T extends Record<string, any>>(
-        items: T[],
-        sortAndSlice: SortAndSlice<T>,
-        pk: keyof T & string
-    ): Promise<T[] | 'skipped'> {
-        const result = await execute(items, sortAndSlice, pk);
+    const sortableKeys = (config.ddl ?? (STANDARD_TEST_DDL as unknown as DDL<T>)).lists['.'].sortable_keys;
+    const allowedKeys = sortableKeys ? new Set<string>(sortableKeys) : undefined;
+
+    /**
+     * Per-test gate. When the impl declares `sortable_keys`, tests whose sort uses
+     * keys outside the allowlist register as `it.skip`. Tests with no sort (empty/undefined)
+     * always run.
+     */
+    const itIfSupported = (sort: SortDefinition<any> | undefined) => {
+        if (!allowedKeys) return it;
+        if (!sort || sort.length === 0) return it;
+        return sort.every(e => allowedKeys.has(e.key as string)) ? it : it.skip;
+    };
+
+    /** Helper: run execute, skip if undefined (unsupported at runtime — fallback to static skip). */
+    async function run<U extends Record<string, any>>(
+        items: U[],
+        sortAndSlice: SortAndSlice<U>,
+        pk: keyof U & string
+    ): Promise<U[] | 'skipped'> {
+        const result = await (execute as unknown as Execute<U>)(items, sortAndSlice, pk);
         if (result === undefined) {
             console.warn(`[ACKNOWLEDGED UNSUPPORTED: ${implementationName}] test skipped`);
             return 'skipped';
@@ -96,37 +104,42 @@ export function standardTests(config: StandardTestConfig) {
 
     // Default sort: PK ASC — ensures deterministic results for non-sort-specific tests
     const defaultSort = { sort: [{ key: 'id' as const, direction: 1 as const }] };
+    const sortAge: SortDefinition<any> = [{ key: 'age', direction: 1 }];
+    const sortName: SortDefinition<any> = [{ key: 'name', direction: -1 }];
+    const sortCategoryName: SortDefinition<any> = [{ key: 'category', direction: 1 }, { key: 'name', direction: 1 }];
+    const sortCategoryDate: SortDefinition<any> = [{ key: 'category', direction: 1 }, { key: 'date', direction: -1 }];
+    const sortValue: SortDefinition<any> = [{ key: 'value', direction: 1 }];
+    const sortValueDesc: SortDefinition<any> = [{ key: 'value', direction: -1 }];
+    const sortScore: SortDefinition<any> = [{ key: 'score', direction: 1 }];
+    const sortNested: SortDefinition<any> = [{ key: 'sender.name', direction: 1 }];
+    const sortId: SortDefinition<any> = defaultSort.sort;
 
     describe('Sorting', () => {
 
         describe('Single Key', () => {
-            it('sorts ascending by a numeric field', async () => {
-                const result = await run(numericItems, { sort: [{ key: 'age', direction: 1 }] }, 'id');
+            itIfSupported(sortAge)('sorts ascending by a numeric field', async () => {
+                const result = await run(numericItems, { sort: sortAge }, 'id');
                 if (result === 'skipped') return;
                 expect(result.map(i => i.age)).toEqual([10, 20, 25, 30, 40]);
             });
 
-            it('sorts descending by a string field', async () => {
-                const result = await run(numericItems, { sort: [{ key: 'name', direction: -1 }] }, 'id');
+            itIfSupported(sortName)('sorts descending by a string field', async () => {
+                const result = await run(numericItems, { sort: sortName }, 'id');
                 if (result === 'skipped') return;
                 expect(result.map(i => i.name)).toEqual(['Eve', 'Diana', 'Charlie', 'Bob', 'Alice']);
             });
         });
 
         describe('Multi-Key', () => {
-            it('uses secondary key to break ties on primary', async () => {
-                const result = await run(numericItems, {
-                    sort: [{ key: 'category', direction: 1 }, { key: 'name', direction: 1 }]
-                }, 'id');
+            itIfSupported(sortCategoryName)('uses secondary key to break ties on primary', async () => {
+                const result = await run(numericItems, { sort: sortCategoryName }, 'id');
                 if (result === 'skipped') return;
                 // A: Alice, Bob, Eve; B: Charlie, Diana
                 expect(result.map(i => i.name)).toEqual(['Alice', 'Bob', 'Eve', 'Charlie', 'Diana']);
             });
 
-            it('respects independent direction per key', async () => {
-                const result = await run(numericItems, {
-                    sort: [{ key: 'category', direction: 1 }, { key: 'date', direction: -1 }]
-                }, 'id');
+            itIfSupported(sortCategoryDate)('respects independent direction per key', async () => {
+                const result = await run(numericItems, { sort: sortCategoryDate }, 'id');
                 if (result === 'skipped') return;
                 // A: dates desc (Eve 01-05, Bob 01-02, Alice 01-01); B: dates desc (Diana 01-04, Charlie 01-03)
                 expect(result.map(i => i.id)).toEqual(['e', 'c', 'b', 'd', 'a']);
@@ -134,20 +147,20 @@ export function standardTests(config: StandardTestConfig) {
         });
 
         describe('Null / Undefined Values', () => {
-            it('places null sort values after all non-null (ascending)', async () => {
+            itIfSupported(sortValue)('places null sort values after all non-null (ascending)', async () => {
                 const result = await run(
                     nullableItems,
-                    { sort: [{ key: 'value', direction: 1 }] } as SortAndSlice<NullableItem>,
+                    { sort: sortValue } as SortAndSlice<NullableItem>,
                     'id'
                 );
                 if (result === 'skipped') return;
                 expect(result.map(i => i.value)).toEqual([3, 5, null, null]);
             });
 
-            it('places undefined sort values after all non-null (ascending)', async () => {
+            itIfSupported(sortValue)('places undefined sort values after all non-null (ascending)', async () => {
                 const result = await run(
                     undefinedItems,
-                    { sort: [{ key: 'value', direction: 1 }] } as SortAndSlice<UndefinedItem>,
+                    { sort: sortValue } as SortAndSlice<UndefinedItem>,
                     'id'
                 );
                 if (result === 'skipped') return;
@@ -159,10 +172,10 @@ export function standardTests(config: StandardTestConfig) {
                 expect(values[3]).toBeUndefined();
             });
 
-            it('null-last applies regardless of sort direction', async () => {
+            itIfSupported(sortValueDesc)('null-last applies regardless of sort direction', async () => {
                 const result = await run(
                     nullableItems,
-                    { sort: [{ key: 'value', direction: -1 }] } as SortAndSlice<NullableItem>,
+                    { sort: sortValueDesc } as SortAndSlice<NullableItem>,
                     'id'
                 );
                 if (result === 'skipped') return;
@@ -171,8 +184,8 @@ export function standardTests(config: StandardTestConfig) {
         });
 
         describe('PK Tiebreaker', () => {
-            it('deterministic order when all sort values are identical', async () => {
-                const result = await run(tiedItems, { sort: [{ key: 'score', direction: 1 }] }, 'id');
+            itIfSupported(sortScore)('deterministic order when all sort values are identical', async () => {
+                const result = await run(tiedItems, { sort: sortScore }, 'id');
                 if (result === 'skipped') return;
                 // All score=10, PK tiebreaker ASC: a, b, c
                 expect(result.map(i => i.id)).toEqual(['a', 'b', 'c']);
@@ -180,10 +193,10 @@ export function standardTests(config: StandardTestConfig) {
         });
 
         describe('Nested Properties', () => {
-            it('sorts by a dot-prop path into nested objects', async () => {
+            itIfSupported(sortNested)('sorts by a dot-prop path into nested objects', async () => {
                 const result = await run(
                     nestedItems,
-                    { sort: [{ key: 'sender.name' as any, direction: 1 }] },
+                    { sort: sortNested as any },
                     'id'
                 );
                 if (result === 'skipped') return;
@@ -195,20 +208,20 @@ export function standardTests(config: StandardTestConfig) {
     // All limit/offset/cursor tests use default sort (PK ASC) for determinism
 
     describe('Limit', () => {
-        it('returns at most N items', async () => {
+        itIfSupported(sortId)('returns at most N items', async () => {
             const result = await run(tenItems, { ...defaultSort, limit: 3 }, 'id');
             if (result === 'skipped') return;
             expect(result).toHaveLength(3);
             expect(result.map(i => i.id)).toEqual(['00', '01', '02']);
         });
 
-        it('returns all when limit exceeds array length', async () => {
+        itIfSupported(sortId)('returns all when limit exceeds array length', async () => {
             const result = await run(numericItems, { ...defaultSort, limit: 100 }, 'id');
             if (result === 'skipped') return;
             expect(result).toHaveLength(numericItems.length);
         });
 
-        it('returns empty when limit is zero', async () => {
+        itIfSupported(sortId)('returns empty when limit is zero', async () => {
             const result = await run(numericItems, { ...defaultSort, limit: 0 }, 'id');
             if (result === 'skipped') return;
             expect(result).toEqual([]);
@@ -216,19 +229,19 @@ export function standardTests(config: StandardTestConfig) {
     });
 
     describe('Offset Pagination', () => {
-        it('skips the first N items', async () => {
+        itIfSupported(sortId)('skips the first N items', async () => {
             const result = await run(tenItems, { ...defaultSort, offset: 7 }, 'id');
             if (result === 'skipped') return;
             expect(result.map(i => i.id)).toEqual(['07', '08', '09']);
         });
 
-        it('returns empty when offset exceeds length', async () => {
+        itIfSupported(sortId)('returns empty when offset exceeds length', async () => {
             const result = await run(numericItems, { ...defaultSort, offset: 100 }, 'id');
             if (result === 'skipped') return;
             expect(result).toEqual([]);
         });
 
-        it('combines offset and limit correctly', async () => {
+        itIfSupported(sortId)('combines offset and limit correctly', async () => {
             const result = await run(tenItems, { ...defaultSort, offset: 3, limit: 2 }, 'id');
             if (result === 'skipped') return;
             expect(result.map(i => i.id)).toEqual(['03', '04']);
@@ -238,45 +251,45 @@ export function standardTests(config: StandardTestConfig) {
     describe('Cursor Pagination (after_pk)', () => {
 
         describe('Basic Cursor', () => {
-            it('returns items after the cursor, excluding the cursor itself', async () => {
+            itIfSupported(sortId)('returns items after the cursor, excluding the cursor itself', async () => {
                 const items = tenItems.slice(0, 5); // 00..04
-                const result = await run(items, { sort: [{ key: 'id', direction: 1 }], after_pk: '01' }, 'id');
+                const result = await run(items, { sort: sortId, after_pk: '01' }, 'id');
                 if (result === 'skipped') return;
                 expect(result.map(i => i.id)).toEqual(['02', '03', '04']);
             });
 
-            it('returns items after cursor with limit', async () => {
+            itIfSupported(sortId)('returns items after cursor with limit', async () => {
                 const items = tenItems.slice(0, 5);
-                const result = await run(items, { sort: [{ key: 'id', direction: 1 }], after_pk: '01', limit: 2 }, 'id');
+                const result = await run(items, { sort: sortId, after_pk: '01', limit: 2 }, 'id');
                 if (result === 'skipped') return;
                 expect(result.map(i => i.id)).toEqual(['02', '03']);
             });
 
-            it('returns empty when cursor is last item', async () => {
+            itIfSupported(sortId)('returns empty when cursor is last item', async () => {
                 const items = tenItems.slice(0, 3);
-                const result = await run(items, { sort: [{ key: 'id', direction: 1 }], after_pk: '02' }, 'id');
+                const result = await run(items, { sort: sortId, after_pk: '02' }, 'id');
                 if (result === 'skipped') return;
                 expect(result).toEqual([]);
             });
 
-            it('returns all except first when cursor is first item', async () => {
+            itIfSupported(sortId)('returns all except first when cursor is first item', async () => {
                 const items = tenItems.slice(0, 3);
-                const result = await run(items, { sort: [{ key: 'id', direction: 1 }], after_pk: '00' }, 'id');
+                const result = await run(items, { sort: sortId, after_pk: '00' }, 'id');
                 if (result === 'skipped') return;
                 expect(result.map(i => i.id)).toEqual(['01', '02']);
             });
         });
 
         describe('Stale / Missing Cursor', () => {
-            it('returns empty when after_pk matches no item', async () => {
-                const result = await run(numericItems, { sort: [{ key: 'id', direction: 1 }], after_pk: 'nonexistent' }, 'id');
+            itIfSupported(sortId)('returns empty when after_pk matches no item', async () => {
+                const result = await run(numericItems, { sort: sortId, after_pk: 'nonexistent' }, 'id');
                 if (result === 'skipped') return;
                 expect(result).toEqual([]);
             });
         });
 
         describe('Sequential Pagination Completeness', () => {
-            it('paginating through entire dataset yields every item exactly once', async () => {
+            itIfSupported(sortId)('paginating through entire dataset yields every item exactly once', async () => {
                 const pageSize = 3;
                 const allCollected: NumericItem[] = [];
                 let afterPk: string | undefined;
@@ -297,7 +310,7 @@ export function standardTests(config: StandardTestConfig) {
                 expect(allCollected.map(i => i.id)).toEqual(tenItems.map(i => i.id).sort());
             });
 
-            it('completeness holds when items have duplicate sort values', async () => {
+            itIfSupported(sortScore)('completeness holds when items have duplicate sort values', async () => {
                 // Items with many duplicate sort values
                 const dupeItems: TiedItem[] = [
                     { id: 'a', score: 1 },
@@ -330,21 +343,22 @@ export function standardTests(config: StandardTestConfig) {
     });
 
     describe('Composition', () => {
-        it('applies sort before limit', async () => {
+        itIfSupported(sortAge)('applies sort before limit', async () => {
             // Unsorted input, sort ASC by age, limit 2 → should get the 2 youngest
-            const result = await run(numericItems, { sort: [{ key: 'age', direction: 1 }], limit: 2 }, 'id');
+            const result = await run(numericItems, { sort: sortAge, limit: 2 }, 'id');
             if (result === 'skipped') return;
             expect(result.map(i => i.age)).toEqual([10, 20]);
         });
 
-        it('applies sort before offset', async () => {
-            const result = await run(numericItems, { sort: [{ key: 'age', direction: 1 }], offset: 2 }, 'id');
+        itIfSupported(sortAge)('applies sort before offset', async () => {
+            const result = await run(numericItems, { sort: sortAge, offset: 2 }, 'id');
             if (result === 'skipped') return;
             // Sorted by age: 10,20,25,30,40 → offset 2 → 25,30,40
             expect(result.map(i => i.age)).toEqual([25, 30, 40]);
         });
 
-        it('returns all items unchanged when SortAndSlice is empty', async () => {
+        // No sort — always runs regardless of `sortable_keys`.
+        itIfSupported(undefined)('returns all items unchanged when SortAndSlice is empty', async () => {
             const result = await run(numericItems, {}, 'id');
             if (result === 'skipped') return;
             // All items present (order may vary)
@@ -353,7 +367,8 @@ export function standardTests(config: StandardTestConfig) {
             expect(ids).toEqual(['a', 'b', 'c', 'd', 'e']);
         });
 
-        it('returns at most N items when only limit is set (no sort)', async () => {
+        // No sort — always runs regardless of `sortable_keys`.
+        itIfSupported(undefined)('returns at most N items when only limit is set (no sort)', async () => {
             const result = await run(tenItems, { limit: 3 }, 'id');
             if (result === 'skipped') return;
             expect(result).toHaveLength(3);
@@ -361,7 +376,7 @@ export function standardTests(config: StandardTestConfig) {
     });
 
     describe('Invariants', () => {
-        it('calling twice with same input returns identical result', async () => {
+        itIfSupported(sortId)('calling twice with same input returns identical result', async () => {
             const sortAndSlice: SortAndSlice<NumericItem> = { ...defaultSort, limit: 3 };
             const r1 = await run(numericItems, sortAndSlice, 'id');
             const r2 = await run(numericItems, sortAndSlice, 'id');
@@ -369,14 +384,14 @@ export function standardTests(config: StandardTestConfig) {
             expect(r1).toEqual(r2);
         });
 
-        it('limit N result is a prefix of limit N+1 result', async () => {
+        itIfSupported(sortId)('limit N result is a prefix of limit N+1 result', async () => {
             const rN = await run(tenItems, { ...defaultSort, limit: 3 }, 'id');
             const rN1 = await run(tenItems, { ...defaultSort, limit: 4 }, 'id');
             if (rN === 'skipped' || rN1 === 'skipped') return;
             expect(rN1.slice(0, 3)).toEqual(rN);
         });
 
-        it('offset pages are complementary with limit', async () => {
+        itIfSupported(sortId)('offset pages are complementary with limit', async () => {
             const page1 = await run(tenItems, { ...defaultSort, offset: 0, limit: 4 }, 'id');
             const page2 = await run(tenItems, { ...defaultSort, offset: 4, limit: 3 }, 'id');
             const combined = await run(tenItems, { ...defaultSort, limit: 7 }, 'id');
@@ -386,15 +401,15 @@ export function standardTests(config: StandardTestConfig) {
     });
 
     describe('Edge Cases', () => {
-        it('handles empty input array', async () => {
+        itIfSupported(sortId)('handles empty input array', async () => {
             const result = await run([] as NumericItem[], { ...defaultSort }, 'id');
             if (result === 'skipped') return;
             expect(result).toEqual([]);
         });
 
-        it('handles single-item array', async () => {
+        itIfSupported(sortAge)('handles single-item array', async () => {
             const single = [numericItems[0]!];
-            const result = await run(single, { sort: [{ key: 'age', direction: 1 }] }, 'id');
+            const result = await run(single, { sort: sortAge }, 'id');
             if (result === 'skipped') return;
             expect(result).toEqual(single);
         });

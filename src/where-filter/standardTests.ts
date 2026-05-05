@@ -1344,6 +1344,26 @@ export function standardTests(testConfig: StandardTestConfig) {
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
+
+            test('$exists true on field with explicit null: passes (null is a present value)', async () => {
+                // null is a present value (Mongo agrees), distinct from a missing key.
+                // SQL impls often confuse JSON null with SQL NULL and would return false.
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: null } },
+                    { 'contact.age': { $exists: true } },
+                    NullableAgeContactSchema
+                );
+                expectOrAcknowledgeDivergence(result, true, '$exists on JSON null: SQL impls may return false if conflating with SQL NULL');
+            });
+
+            test('$exists false on field with explicit null: fails (null is a present value)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: null } },
+                    { 'contact.age': { $exists: false } },
+                    NullableAgeContactSchema
+                );
+                expectOrAcknowledgeDivergence(result, false, '$exists false on JSON null: SQL impls may return true if conflating with SQL NULL');
+            });
         });
 
         describe('$type', () => {
@@ -1454,6 +1474,56 @@ export function standardTests(testConfig: StandardTestConfig) {
                     // @ts-expect-error — TODO: ValueComparisonFlexi doesn't include null for nullable fields
                     { 'contact.age': null },
                     NullableAgeContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+        });
+
+        describe('Numeric edge values (NaN, Infinity, -0)', () => {
+            test('NaN equality never matches (NaN !== NaN in JS)', async () => {
+                // An impl using Object.is or a deep-equals lib would silently return true.
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: NaN } },
+                    { 'contact.age': { $eq: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeDivergence(result, false, 'NaN: SQL impls store NaN as NULL or reject it; behaviour varies');
+            });
+
+            test('NaN range comparison never matches (all NaN comparisons return false)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: NaN } },
+                    { 'contact.age': { $gt: 0 } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$exists true on NaN field: passes (NaN is a present value)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: NaN } },
+                    { 'contact.age': { $exists: true } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeDivergence(result, true, '$exists on NaN: SQL impls may store NaN as NULL, causing $exists to return false');
+            });
+
+            test('Infinity exceeds any finite bound', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: Infinity } },
+                    { 'contact.age': { $gt: 1e308 } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeDivergence(result, true, 'Infinity: SQLite/Postgres represent Infinity differently or not at all');
+            });
+
+            test('-0 equals +0 under $eq (JS strict equality)', async () => {
+                // -0 === 0 is true in JS. Object.is(−0, 0) is false — pin so an impl
+                // that switches matchers doesn't silently change semantics.
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: -0 } },
+                    { 'contact.age': { $eq: 0 } },
+                    ContactSchema
                 );
                 expectOrAcknowledgeUnsupported(result, true);
             });
@@ -2992,6 +3062,36 @@ export function standardTests(testConfig: StandardTestConfig) {
             expectOrAcknowledgeUnsupported(result, true);
         });
 
+        test('empty string \'\' matches empty-string filter (distinct present value)', async () => {
+            // '' is a valid distinct value. An impl that coerces '' to "missing"
+            // silently breaks form-validation queries.
+            const result = await matchJavascriptObject(
+                { contact: { name: '' } },
+                { 'contact.name': '' },
+                ContactSchema
+            );
+            expectOrAcknowledgeUnsupported(result, true);
+        });
+
+        test('missing field does not match empty-string filter', async () => {
+            // Pins the '' !== undefined boundary.
+            const result = await matchJavascriptObject(
+                { contact: { name: 'Andy' } },
+                { 'contact.emailAddress': '' },
+                ContactSchema
+            );
+            expectOrAcknowledgeUnsupported(result, false);
+        });
+
+        test('$exists true matches a field whose value is empty string (\'\' is present)', async () => {
+            const result = await matchJavascriptObject(
+                { contact: { name: '', emailAddress: '' } },
+                { 'contact.emailAddress': { $exists: true } },
+                ContactSchema
+            );
+            expectOrAcknowledgeUnsupported(result, true);
+        });
+
     });
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3398,6 +3498,95 @@ export function standardTests(testConfig: StandardTestConfig) {
                     CachedGmailThreadSchema
                 );
                 expectOrAcknowledgeUnsupported(result, false);
+            });
+
+        });
+
+    });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 9. Logical equivalences (property tests)
+    // ═══════════════════════════════════════════════════════════════════
+
+    describe('9. Logical equivalences (property tests)', () => {
+
+        const dataset: Array<z.infer<typeof ContactSchema>> = [
+            { contact: { name: 'Andy', age: 30 } },
+            { contact: { name: 'Bob', age: 50 } },
+            { contact: { name: 'Andy', age: 50 } },
+            { contact: { name: 'Carol' } },
+        ];
+
+        /** Run two filters over the same dataset and assert identical booleans per item. */
+        async function assertEquivalent(
+            a: WhereFilterDefinition<z.infer<typeof ContactSchema>>,
+            b: WhereFilterDefinition<z.infer<typeof ContactSchema>>,
+        ) {
+            for (const item of dataset) {
+                const ra = await matchJavascriptObject(item, a, ContactSchema);
+                const rb = await matchJavascriptObject(item, b, ContactSchema);
+                if (ra === undefined || rb === undefined) continue;
+                expect(ra).toBe(rb);
+            }
+        }
+
+        describe('De Morgan\'s laws', () => {
+
+            test('NOT (A AND B) ≡ (NOT A) OR (NOT B)', async () => {
+                // Catches an impl that mis-distributes $nor over $and: such an impl
+                // passes every example-based section-1 test yet diverges on combined queries.
+                const A: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.name': 'Andy' };
+                const B: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.age': 30 };
+                const lhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { $nor: [{ $and: [A, B] }] };
+                const rhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { $or: [{ $nor: [A] }, { $nor: [B] }] };
+                await assertEquivalent(lhs, rhs);
+            });
+
+            test('NOT (A OR B) ≡ (NOT A) AND (NOT B)', async () => {
+                // Pins the multi-element-array semantics of $nor.
+                const A: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.name': 'Andy' };
+                const B: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.age': 30 };
+                const lhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { $nor: [A, B] };
+                const rhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { $and: [{ $nor: [A] }, { $nor: [B] }] };
+                await assertEquivalent(lhs, rhs);
+            });
+
+        });
+
+        describe('Double negation', () => {
+
+            test('field-level: $not($not(X)) ≡ X (when field is present)', async () => {
+                // $not nesting appears in machine-generated queries (e.g. an access-policy
+                // compiler that wraps every clause). An impl that early-returns on the inner
+                // $not instead of fully recursing fails this and silently mis-evaluates.
+                //
+                // Restricted to present-field data: under MongoDB semantics, field-level $not
+                // also matches missing fields (see existing test '$not on missing optional
+                // field: passes'). That rule breaks the bare double-negation tautology when
+                // the field can be missing — the bug-catching intent is preserved on data
+                // where the field is present.
+                const presentFieldData: Array<z.infer<typeof ContactSchema>> = [
+                    { contact: { name: 'Andy', age: 30 } },
+                    { contact: { name: 'Bob', age: 20 } },
+                    { contact: { name: 'Carol', age: 25 } },
+                ];
+                // @ts-expect-error — type union for $not's argument doesn't include
+                // ValueComparisonNot, so nested $not is not modelled at the type level.
+                // Runtime supports it; this test pins the runtime behaviour.
+                const lhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.age': { $not: { $not: { $gt: 25 } } } };
+                const rhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.age': { $gt: 25 } };
+                for (const item of presentFieldData) {
+                    const ra = await matchJavascriptObject(item, lhs, ContactSchema);
+                    const rb = await matchJavascriptObject(item, rhs, ContactSchema);
+                    if (ra === undefined || rb === undefined) continue;
+                    expect(ra).toBe(rb);
+                }
+            });
+
+            test('top-level: $nor[$nor[X]] ≡ X', async () => {
+                const X: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { 'contact.name': 'Andy' };
+                const lhs: WhereFilterDefinition<z.infer<typeof ContactSchema>> = { $nor: [{ $nor: [X] }] };
+                await assertEquivalent(lhs, X);
             });
 
         });

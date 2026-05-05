@@ -266,6 +266,10 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
         // $ne
         if (isValueComparisonNe(filter)) {
+            // MongoDB: NaN equals nothing, so $ne: NaN matches every value (and Mongo's "ne matches missing" rule also applies). See MONGO-DIVERGENCES.md §7.
+            if (typeof filter.$ne === 'number' && Number.isNaN(filter.$ne)) {
+                return '1=1';
+            }
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
             const placeholder = this.generatePlaceholder(filter.$ne, statementArguments);
             return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} != ${placeholder}`);
@@ -375,6 +379,10 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         }
 
         if (isValueComparisonEq(filter)) {
+            // MongoDB: nothing equals NaN. See MONGO-DIVERGENCES.md §7.
+            if (typeof filter.$eq === 'number' && Number.isNaN(filter.$eq)) {
+                return '1=0';
+            }
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
             if (filter.$eq === null) {
                 return `${sqlIdentifier} IS NULL`;
@@ -389,7 +397,12 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             const operators = ValueComparisonRangeOperators
                 .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
                 .map(x => {
-                    const placeholder = this.generatePlaceholder(filter[x]!, statementArguments);
+                    const v = filter[x]!;
+                    // MongoDB: every comparison with NaN returns false. See MONGO-DIVERGENCES.md §7.
+                    if (typeof v === 'number' && Number.isNaN(v)) {
+                        return '1=0';
+                    }
+                    const placeholder = this.generatePlaceholder(v, statementArguments);
                     return ValueComparisonRangeOperatorsSqlFunctions[x](sqlIdentifier, placeholder);
                 });
             const result = optionalWrapper(sqlIdentifier, operators.length > 1 ? `(${operators.join(' AND ')})` : operators[0]!);

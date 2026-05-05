@@ -81,3 +81,22 @@ These are not missing features (subset gaps). These are cases where the same syn
 **Rationale**: Correctly composing `$size` with array spreading in SQL is complex. This is documented as a known divergence.
 
 **Test**: `$size on spread dot-prop path: passes when leaf array matches`
+
+---
+
+## 7. NaN, Infinity, -Infinity in stored data become JSON null
+
+**MongoDB**: BSON natively supports NaN, Infinity, and -Infinity as Doubles; they survive insert→query round-trips. `{age: {$gt: 1e308}}` matches Infinity; `{age: {$exists: true}}` matches NaN.
+
+**WhereFilterDefinition (JS)**: NaN/Infinity preserved in-memory; conforms with MongoDB.
+
+**WhereFilterDefinition (SQL — Postgres + SQLite)**: JSON spec (RFC 7159) excludes NaN and Infinity. `JSON.stringify(NaN)` returns `"null"`; same for `Infinity`/`-Infinity`. Consumer code that serializes via `JSON.stringify` before insert (the standard path) loses the distinction at the boundary, and the SQL impl cannot recover the original semantic.
+
+**Specific impacts**:
+- `{age: {$exists: true}}` on stored NaN/Infinity: returns `true` — matches MongoDB outcome by coincidence (JSON null is treated as present after the `$exists` fix).
+- `{age: {$gt: 1e308}}` on stored Infinity: returns `false` — diverges from MongoDB (stored value is JSON null; `null > 1e308` is `NULL` in SQL).
+- Filter-side `{$eq|$ne|$gt|$lt|$gte|$lte: NaN}`: matches MongoDB. The SQL builders short-circuit `NaN` filter values to constant SQL booleans (`1=0` / `1=1`) without binding `NaN` as a parameter.
+
+**Rationale**: Conforming would require encoding NaN/Infinity as JSON sentinel objects (e.g. `{"$$nan":true}`, `{"$$inf":"+"}`) and wrapping every numeric SQL comparison in `CASE WHEN` to detect them. Cost: ~2–3× SQL text per numeric op + a breaking storage-format change (existing JSON-`null` data is ambiguous about whether it was originally null vs NaN/Infinity, and stays as null forever). NaN/Infinity in stored data are typically code smells; consumers should reject them at input via `z.number().finite()` rather than expecting the SQL impl to preserve them.
+
+**Tests**: see "Numeric edge values (NaN, Infinity, -0)" sub-block in `standardTests.ts`.

@@ -1501,12 +1501,13 @@ export function standardTests(testConfig: StandardTestConfig) {
         describe('Numeric edge values (NaN, Infinity, -0)', () => {
             test('NaN equality never matches (NaN !== NaN in JS)', async () => {
                 // An impl using Object.is or a deep-equals lib would silently return true.
+                // SQL impls short-circuit filter-side NaN to `1=0` (Mongo-aligned) — see MONGO-DIVERGENCES.md §7.
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: NaN } },
                     { 'contact.age': { $eq: NaN } },
                     ContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, false, 'NaN: SQL impls store NaN as NULL or reject it; behaviour varies');
+                expectOrAcknowledgeUnsupported(result, false);
             });
 
             test('NaN range comparison never matches (all NaN comparisons return false)', async () => {
@@ -1518,13 +1519,92 @@ export function standardTests(testConfig: StandardTestConfig) {
                 expectOrAcknowledgeUnsupported(result, false);
             });
 
-            test('$exists true on NaN field: passes (NaN is a present value)', async () => {
+            test('$exists: true on stored NaN: passes (NaN serializes to JSON null, which $exists treats as present)', async () => {
+                // Outcome conforms with MongoDB even though the storage representation differs:
+                // JSON.stringify drops NaN to null, but the $exists fix treats JSON null as present.
+                // See MONGO-DIVERGENCES.md §7.
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: NaN } },
                     { 'contact.age': { $exists: true } },
                     ContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, true, '$exists on NaN: SQL impls may store NaN as NULL, causing $exists to return false');
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            // Filter-side NaN — proves SQL builders short-circuit `NaN` filter values to constant SQL
+            // booleans (1=0 / 1=1) instead of binding NaN as a parameter (driver-dependent behaviour).
+            // All assertions below are uniform across JS, SQLite, and Postgres after the Phase 1 fix.
+
+            test('$eq: NaN against finite value: never matches (Mongo: nothing equals NaN)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $eq: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$eq: NaN against missing field: never matches', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.age': { $eq: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$ne: NaN matches any present value (NaN equals nothing, so != is always true)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $ne: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$ne: NaN matches missing field (Mongo: $ne also matches missing)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    { 'contact.age': { $ne: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+
+            test('$gt: NaN never matches (all NaN comparisons are false)', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $gt: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$lt: NaN never matches', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $lt: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$gte: NaN never matches', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $gte: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$lte: NaN never matches', async () => {
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: 30 } },
+                    { 'contact.age': { $lte: NaN } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
             });
 
             test('Infinity exceeds any finite bound', async () => {
@@ -1533,7 +1613,31 @@ export function standardTests(testConfig: StandardTestConfig) {
                     { 'contact.age': { $gt: 1e308 } },
                     ContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, true, 'Infinity: SQLite/Postgres represent Infinity differently or not at all');
+                expectOrAcknowledgeDivergence(result, true, 'Infinity in stored data: see MONGO-DIVERGENCES.md §7 — JSON spec excludes Infinity, lost at JSON.stringify boundary');
+            });
+
+            // Companion tests for the documented Infinity divergence (MONGO-DIVERGENCES.md §7).
+            // These cases happen to conform across JS and SQL even though the stored representation
+            // differs — pin them so a future change to either path can't silently regress.
+
+            test('$eq: 0 against stored Infinity: never matches (Mongo + SQL agree, by accident in SQL)', async () => {
+                // Mongo: Infinity !== 0 → false. JS: false. SQL: Infinity → JSON null at storage; null = 0 is NULL → false.
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: Infinity } },
+                    { 'contact.age': { $eq: 0 } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+
+            test('$exists: true on stored Infinity: matches (Infinity → JSON null, treated as present)', async () => {
+                // Mongo: true (Infinity is present). JS: true (Infinity !== undefined). SQL: true (JSON null is present after $exists fix).
+                const result = await matchJavascriptObject(
+                    { contact: { name: 'Andy', age: Infinity } },
+                    { 'contact.age': { $exists: true } },
+                    ContactSchema
+                );
+                expectOrAcknowledgeUnsupported(result, true);
             });
 
             test('-0 equals +0 under $eq (JS strict equality)', async () => {

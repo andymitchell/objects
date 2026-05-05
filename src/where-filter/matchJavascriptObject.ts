@@ -144,12 +144,13 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
             }
         }
 
-        // Handle $exists before array/scalar branching — it checks the value itself
+        // Handle $exists before array/scalar branching — it checks the value itself.
+        // MongoDB-aligned: explicit `null` is a present value (distinct from a missing key).
         if (isValueComparisonExists(dotpropFilter)) {
             if (dotpropFilter.$exists) {
-                return objectValue !== undefined && objectValue !== null;
+                return objectValue !== undefined;
             } else {
-                return objectValue === undefined || objectValue === null;
+                return objectValue === undefined;
             }
         }
 

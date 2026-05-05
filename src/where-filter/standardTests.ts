@@ -99,7 +99,25 @@ export function standardTests(testConfig: StandardTestConfig) {
         expect(result).toBe(expected);
     }
 
-    /** For known cross-implementation divergences where the result differs but isn't wrong. */
+    /**
+     * Acknowledge a known, **documented** cross-implementation divergence from MongoDB semantics.
+     *
+     * **Precondition:** every divergence asserted via this helper MUST have a corresponding
+     * entry in `MONGO-DIVERGENCES.md` (sibling to the impl). That file is the single source
+     * of truth for intentional departures from MongoDB semantics — it lists, per divergence:
+     * the MongoDB behaviour, this impl's behaviour, the rationale, and a link to the test.
+     *
+     * If a test surfaces an unexpected cross-impl difference, the correct fix is either:
+     *   (a) decide the divergence is intentional, document it in `MONGO-DIVERGENCES.md`, then
+     *       use this helper with the entry's title/section in `reason`; or
+     *   (b) align the impl with MongoDB.
+     *
+     * Do **not** silently absorb a difference by wrapping with this helper without a
+     * documentation entry — that hides the rationale and lets undocumented behaviour drift.
+     *
+     * The `reason` argument should reference the `MONGO-DIVERGENCES.md` entry (section number
+     * or canonical title) so the link survives test triage.
+     */
     function expectOrAcknowledgeDivergence(
         result: boolean | undefined,
         expected: boolean,
@@ -1346,14 +1364,15 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
 
             test('$exists true on field with explicit null: passes (null is a present value)', async () => {
-                // null is a present value (Mongo agrees), distinct from a missing key.
-                // SQL impls often confuse JSON null with SQL NULL and would return false.
+                // MongoDB-aligned: null is a present value, distinct from a missing key.
+                // JS uses `!== undefined`; SQL builders use jsonb_typeof / json_type to
+                // preserve the JSON-null vs missing-path distinction.
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: null } },
                     { 'contact.age': { $exists: true } },
                     NullableAgeContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, true, '$exists on JSON null: SQL impls may return false if conflating with SQL NULL');
+                expectOrAcknowledgeUnsupported(result, true);
             });
 
             test('$exists false on field with explicit null: fails (null is a present value)', async () => {
@@ -1362,7 +1381,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     { 'contact.age': { $exists: false } },
                     NullableAgeContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, false, '$exists false on JSON null: SQL impls may return true if conflating with SQL NULL');
+                expectOrAcknowledgeUnsupported(result, false);
             });
         });
 

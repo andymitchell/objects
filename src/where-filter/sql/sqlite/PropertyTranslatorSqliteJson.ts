@@ -288,13 +288,15 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter);
             return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
         }
-        // $exists
+        // $exists — use json_type to distinguish JSON null (a present value) from a
+        // missing path. The text-extracted identifier returns SQL NULL for both,
+        // conflating them. Mirrors the array-path handling above.
         if (isValueComparisonExists(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const jsonPath = '$.' + dotpropPath.split('.').join('.');
             if (filter.$exists) {
-                return `${sqlIdentifier} IS NOT NULL`;
+                return `json_type(${this.sqlColumnName}, '${jsonPath}') IS NOT NULL`;
             } else {
-                return `${sqlIdentifier} IS NULL`;
+                return `json_type(${this.sqlColumnName}, '${jsonPath}') IS NULL`;
             }
         }
         // $type

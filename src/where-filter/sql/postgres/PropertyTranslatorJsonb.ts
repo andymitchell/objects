@@ -336,13 +336,17 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter);
             return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
         }
-        // $exists
+        // $exists — use jsonb_typeof on the raw jsonb value (-> not ->>) so JSON null
+        // (a present value) is distinguished from a missing path. `->>` text-extracts
+        // and returns SQL NULL for both, conflating them.
         if (isValueComparisonExists(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+            const parts = dotpropPath.split('.');
+            const jsonbPath = parts.map(p => `'${p}'`).join('->');
+            const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
             if (filter.$exists) {
-                return `${sqlIdentifier} IS NOT NULL`;
+                return `jsonb_typeof(${rawJsonbExpr}) IS NOT NULL`;
             } else {
-                return `${sqlIdentifier} IS NULL`;
+                return `jsonb_typeof(${rawJsonbExpr}) IS NULL`;
             }
         }
         // $type

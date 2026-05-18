@@ -2,7 +2,7 @@ import { writeToItemsArray, writeToItemsArrayPreserveInputType } from "./writeTo
 import { isIUser } from "./auth/index.js";
 import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
 import { getWrittenPaths } from "./getWrittenPaths.ts";
-import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
+import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteOutcomeOkCoreSchema, WriteOutcomeFailedCoreSchema, WriteOutcomeCoreSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteOutcomeOkCoreSchema, makeWriteOutcomeFailedCoreSchema, makeWriteOutcomeCoreSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
 
 // ─── Functions ───
 export {
@@ -27,12 +27,18 @@ export {
     WriteOutcomeSchema,
     WriteOutcomeOkSchema,
     WriteOutcomeFailedSchema,
+    WriteOutcomeCoreSchema,
+    WriteOutcomeOkCoreSchema,
+    WriteOutcomeFailedCoreSchema,
     WriteAffectedItemSchema,
     WriteActionSchema,
     makeWriteActionSchema,
     makeWriteOutcomeSchema,
     makeWriteOutcomeOkSchema,
     makeWriteOutcomeFailedSchema,
+    makeWriteOutcomeCoreSchema,
+    makeWriteOutcomeOkCoreSchema,
+    makeWriteOutcomeFailedCoreSchema,
     makeWriteResultSchema,
 }
 
@@ -55,6 +61,9 @@ export type {
     WriteOutcomeOk,
     WriteOutcomeFailed,
     WriteOutcome,
+    WriteOutcomeOkCore,
+    WriteOutcomeFailedCore,
+    WriteOutcomeCore,
     WriteResult,
 } from "./types.ts";
 

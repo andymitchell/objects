@@ -165,28 +165,33 @@ export type WriteAffectedItem<T extends Record<string, any> = Record<string, any
 
 // ─── Per-Action Outcomes (discriminated union on `ok`) ───
 
+// ── *Core variants ──
+// The per-action atoms WITHOUT `affected_items` — for boundaries that must not reveal which
+// items a write touched (e.g. a proxied or serialised write response). The full variants
+// below compose `affected_items` back on, so the two never drift.
+
 /**
- * A write action that completed successfully.
+ * A write action that completed successfully — without `affected_items`.
+ * The boundary-safe atom; `WriteOutcomeOk` composes `affected_items` back on.
  *
  * @example
- * if (outcome.ok) outcome.affected_items?.[0]?.item_pk;
+ * if (outcome.ok) outcome.action.uuid;
  */
-export type WriteOutcomeOk<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
+export type WriteOutcomeOkCore<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     ok: true;
     action: WriteAction<T, W, WF>;
-    affected_items?: WriteAffectedItem<T>[];
 };
 
 /**
- * A write action that failed. `errors` is always present with at least one entry.
+ * A write action that failed — without `affected_items`. `errors` is always present with at least one entry.
+ * The boundary-safe atom; `WriteOutcomeFailed` composes `affected_items` back on.
  *
  * @example
  * if (!outcome.ok) outcome.errors[0].type; // fully narrowed
  */
-export type WriteOutcomeFailed<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
+export type WriteOutcomeFailedCore<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> = {
     ok: false;
     action: WriteAction<T, W, WF>;
-    affected_items?: WriteAffectedItem<T>[];
     /** At least one error that caused the failure. */
     errors: WriteErrorContext<T>[];
     /** True if the action can never succeed (e.g. schema violation, permission denied). */
@@ -196,6 +201,36 @@ export type WriteOutcomeFailed<T extends Record<string, any> = Record<string, an
     /** An earlier action failed, blocking this one. */
     blocked_by_action_uuid?: string;
 };
+
+/**
+ * Outcome of a single write action — without `affected_items`. Discriminated union on `ok`.
+ * The boundary-safe atom; `WriteOutcome` composes `affected_items` back on.
+ *
+ * @example
+ * if (!outcome.ok) outcome.errors[0].type; // narrowed to WriteOutcomeFailedCore
+ */
+export type WriteOutcomeCore<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> =
+    WriteOutcomeOkCore<T, W, WF> | WriteOutcomeFailedCore<T, W, WF>;
+
+// ── Full variants (Core + `affected_items`) ──
+
+/**
+ * A write action that completed successfully.
+ *
+ * @example
+ * if (outcome.ok) outcome.affected_items?.[0]?.item_pk;
+ */
+export type WriteOutcomeOk<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> =
+    WriteOutcomeOkCore<T, W, WF> & { affected_items?: WriteAffectedItem<T>[] };
+
+/**
+ * A write action that failed. `errors` is always present with at least one entry.
+ *
+ * @example
+ * if (!outcome.ok) outcome.errors[0].type; // fully narrowed
+ */
+export type WriteOutcomeFailed<T extends Record<string, any> = Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T> =
+    WriteOutcomeFailedCore<T, W, WF> & { affected_items?: WriteAffectedItem<T>[] };
 
 /**
  * Outcome of a single write action. Discriminated union on `ok`.

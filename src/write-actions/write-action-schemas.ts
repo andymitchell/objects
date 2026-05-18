@@ -1,7 +1,7 @@
 import z from "zod";
 import { UpdatingMethodSchema, WhereFilterSchema } from "../where-filter/schemas.ts";
 import { isTypeEqual } from "@andyrmitchell/utils";
-import type { WriteAction, WriteError, WriteErrorContext, WriteAffectedItem, WriteOutcomeOk, WriteOutcomeFailed, WriteOutcome, WriteResult, WritePayloadArrayScope, WritePayloadUpdate } from "./types.ts";
+import type { WriteAction, WriteError, WriteErrorContext, WriteAffectedItem, WriteOutcomeOk, WriteOutcomeFailed, WriteOutcome, WriteOutcomeOkCore, WriteOutcomeFailedCore, WriteOutcomeCore, WriteResult, WritePayloadArrayScope, WritePayloadUpdate } from "./types.ts";
 import { getZodSchemaAtSchemaDotPropPath, TreeNodeSchema } from "../dot-prop-paths/zod.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 
@@ -163,12 +163,43 @@ export const WriteAffectedItemSchema = z.object({
 });
 isTypeEqual<z.infer<typeof WriteAffectedItemSchema>, WriteAffectedItem<any>>(true);
 
-// ─── WriteOutcome (discriminated union on `ok`) ───
+// ─── WriteOutcome*Core (per-action atoms, no `affected_items`) ───
 
-export function makeWriteOutcomeOkSchema<T extends Record<string, any> = Record<string, any>>() {
+export function makeWriteOutcomeOkCoreSchema<T extends Record<string, any> = Record<string, any>>() {
     return z.object({
         ok: z.literal(true),
         action: makeWriteActionSchema<T>(),
+    });
+}
+export const WriteOutcomeOkCoreSchema = makeWriteOutcomeOkCoreSchema<any>();
+isTypeEqual<z.infer<typeof WriteOutcomeOkCoreSchema>, WriteOutcomeOkCore<any>>(true);
+
+export function makeWriteOutcomeFailedCoreSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.object({
+        ok: z.literal(false),
+        action: makeWriteActionSchema<T>(),
+        errors: z.array(makeWriteErrorContextSchema<T>()),
+        unrecoverable: z.boolean().optional(),
+        back_off_until_ts: z.number().optional(),
+        blocked_by_action_uuid: z.string().optional(),
+    });
+}
+export const WriteOutcomeFailedCoreSchema = makeWriteOutcomeFailedCoreSchema<any>();
+isTypeEqual<z.infer<typeof WriteOutcomeFailedCoreSchema>, WriteOutcomeFailedCore<any>>(true);
+
+export function makeWriteOutcomeCoreSchema<T extends Record<string, any> = Record<string, any>>() {
+    return z.discriminatedUnion('ok', [
+        makeWriteOutcomeOkCoreSchema<T>(),
+        makeWriteOutcomeFailedCoreSchema<T>(),
+    ]);
+}
+export const WriteOutcomeCoreSchema = makeWriteOutcomeCoreSchema<any>();
+isTypeEqual<z.infer<typeof WriteOutcomeCoreSchema>, WriteOutcomeCore<any>>(true);
+
+// ─── WriteOutcome (Core + `affected_items`; discriminated union on `ok`) ───
+
+export function makeWriteOutcomeOkSchema<T extends Record<string, any> = Record<string, any>>() {
+    return makeWriteOutcomeOkCoreSchema<T>().extend({
         affected_items: z.array(WriteAffectedItemSchema as z.ZodType<WriteAffectedItem<T>>).optional(),
     });
 }
@@ -176,14 +207,8 @@ export const WriteOutcomeOkSchema = makeWriteOutcomeOkSchema<any>();
 isTypeEqual<z.infer<typeof WriteOutcomeOkSchema>, WriteOutcomeOk<any>>(true);
 
 export function makeWriteOutcomeFailedSchema<T extends Record<string, any> = Record<string, any>>() {
-    return z.object({
-        ok: z.literal(false),
-        action: makeWriteActionSchema<T>(),
+    return makeWriteOutcomeFailedCoreSchema<T>().extend({
         affected_items: z.array(WriteAffectedItemSchema as z.ZodType<WriteAffectedItem<T>>).optional(),
-        errors: z.array(makeWriteErrorContextSchema<T>()),
-        unrecoverable: z.boolean().optional(),
-        back_off_until_ts: z.number().optional(),
-        blocked_by_action_uuid: z.string().optional(),
     });
 }
 export const WriteOutcomeFailedSchema = makeWriteOutcomeFailedSchema<any>();

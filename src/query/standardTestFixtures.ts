@@ -121,6 +121,7 @@ export const STANDARD_TEST_DDL: DDL<StandardTestItem> = {
     lists: {
         '.': {
             primary_key: 'id',
+            default_ordering_key: { key: 'id', direction: 1 },
         },
     },
 };

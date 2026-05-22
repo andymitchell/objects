@@ -64,7 +64,7 @@ describe('standardTests gating via DDL.sortable_keys', () => {
     describe('sortable_keys: ["age"]', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', sortable_keys: ['age'] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: ['age'] } },
         });
 
         it('runs tests using `age`', () => {
@@ -102,7 +102,7 @@ describe('standardTests gating via DDL.sortable_keys', () => {
     describe('sortable_keys: [] (no user sort accepted)', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', sortable_keys: [] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: [] } },
         });
 
         it('runs no-sort tests', () => {
@@ -121,7 +121,7 @@ describe('standardTests gating via DDL.sortable_keys', () => {
     describe('multi-key allowlist: ["category", "name", "date"]', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', sortable_keys: ['category', 'name', 'date'] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: ['category', 'name', 'date'] } },
         });
 
         it('runs multi-key tests when both keys are allowed', () => {
@@ -138,7 +138,7 @@ describe('standardTests gating via DDL.sortable_keys', () => {
     describe('dot-prop allowlist: ["sender.name"]', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', sortable_keys: ['sender.name'] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: ['sender.name'] } },
         });
 
         it('matches dot-prop nested keys exactly', () => {

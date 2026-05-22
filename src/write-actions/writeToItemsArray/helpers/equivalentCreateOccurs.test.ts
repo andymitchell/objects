@@ -16,7 +16,8 @@ describe('equivalentCreateOccurs', () => {
         version: 1,
         lists: {
             '.': {
-                primary_key: 'id'
+                primary_key: 'id',
+                default_ordering_key: { key: 'id', direction: 1 }
             }
         },
         ownership: {

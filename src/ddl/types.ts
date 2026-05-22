@@ -58,11 +58,21 @@ type DDLRoot<T extends Record<string, any> = Record<string, any>> = {
 export type ListRules<T extends Record<string, any> = Record<string, any>> =
   ListRulesCore<T>;
 
+/**
+ * Rules for a DDL's root `"."` list, the whole-collection scope.
+ *
+ * Extends `ListRules` to make `default_ordering_key` mandatory: a collection's
+ * natural order must be explicitly declared, never assumed (see
+ * `dec-sorting-default-ordering-required`).
+ */
+export type RootListRules<T extends Record<string, any> = Record<string, any>> =
+  ListRules<T> & Required<Pick<ListRules<T>, "default_ordering_key">>;
+
 export type DDL<T extends Record<string, any>> = IfAny<
   T,
   {
     lists: {
-      ".": ListRules<any>;
+      ".": RootListRules<any>;
     };
   } & DDLRoot<T>,
   {
@@ -71,7 +81,7 @@ export type DDL<T extends Record<string, any>> = IfAny<
         EnsureRecord<DotPropPathValidArrayValue<T, K>>
       >;
     } & {
-      ".": ListRules<T>;
+      ".": RootListRules<T>;
     };
   } & DDLRoot<T>
 >;

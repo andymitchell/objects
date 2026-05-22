@@ -55,7 +55,7 @@ type Flat = z.infer<typeof FlatSchema>;
 const flatDdl: DDL<Flat> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id' },
+        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
     },
     ownership: { type: 'none' },
 };
@@ -81,7 +81,7 @@ type Nested = z.infer<typeof NestedSchema>;
 const nestedDdl: DDL<Nested> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id' },
+        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
         'children': { primary_key: 'cid' },
         'children.items': { primary_key: 'iid' },
     },
@@ -98,7 +98,7 @@ type Owner = z.infer<typeof OwnerSchema>;
 const ownerDdl: DDL<Owner> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id' },
+        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
     },
     ownership: {
         type: 'basic',
@@ -118,7 +118,7 @@ type OwnerEmail = z.infer<typeof OwnerEmailSchema>;
 const ownerEmailDdl: DDL<OwnerEmail> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id' },
+        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
     },
     ownership: {
         type: 'basic',
@@ -143,7 +143,7 @@ type FlatWithSubItems = z.infer<typeof FlatWithSubItemsSchema>;
 const flatWithSubItemsDdl: DDL<FlatWithSubItems> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id' },
+        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
         'sub_items': { primary_key: 'sid' },
     },
     ownership: { type: 'none' },
@@ -158,7 +158,7 @@ type OwnerScalarArray = z.infer<typeof OwnerScalarArraySchema>;
 const ownerScalarArrayDdl: DDL<OwnerScalarArray> = {
     version: 1,
     lists: {
-        '.': { primary_key: 'id' },
+        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
     },
     ownership: {
         type: 'basic',

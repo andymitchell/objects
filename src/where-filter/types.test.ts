@@ -117,15 +117,11 @@ describe('WhereFilterDefinition types', () => {
                 };
             })
 
-            it('accepts $contains with string', () => {
-                const a: WhereFilterDefinition<TestObj> = { name: { $contains: 'nd' } };
-            })
-
-            it('rejects $contains with wrong type', () => {
+            it('rejects $regex with non-string pattern', () => {
                 const a: WhereFilterDefinition<TestObj> = {
                     name: {
                         // @ts-expect-error number is not string
-                        $contains: 1
+                        $regex: 1
                     }
                 };
             })
@@ -169,10 +165,6 @@ describe('WhereFilterDefinition types', () => {
                 const a: WhereFilterDefinition<TestObj> = { name: { $not: { $gte: 'M' } } };
             })
 
-            it('accepts $not wrapping $contains', () => {
-                const a: WhereFilterDefinition<TestObj> = { name: { $not: { $contains: 'nd' } } };
-            })
-
             it('accepts $not wrapping $ne', () => {
                 const a: WhereFilterDefinition<TestObj> = { name: { $not: { $ne: 'Bob' } } };
             })
@@ -193,7 +185,7 @@ describe('WhereFilterDefinition types', () => {
             it('accepts $type with valid type string', () => {
                 const a: WhereFilterDefinition<TestObj> = { name: { $type: 'string' } };
                 const b: WhereFilterDefinition<TestObj> = { name: { $type: 'number' } };
-                const c: WhereFilterDefinition<TestObj> = { name: { $type: 'boolean' } };
+                const c: WhereFilterDefinition<TestObj> = { name: { $type: 'bool' } };
                 const d: WhereFilterDefinition<TestObj> = { name: { $type: 'object' } };
                 const e: WhereFilterDefinition<TestObj> = { name: { $type: 'array' } };
                 const f: WhereFilterDefinition<TestObj> = { name: { $type: 'null' } };
@@ -236,15 +228,6 @@ describe('WhereFilterDefinition types', () => {
                 };
             })
 
-            it('rejects $contains', () => {
-                const a: WhereFilterDefinition<TestObj> = {
-                    age: {
-                        // @ts-expect-error $contains is string-only
-                        $contains: 'x'
-                    }
-                };
-            })
-
             it('rejects $regex', () => {
                 const a: WhereFilterDefinition<TestObj> = {
                     age: {
@@ -270,16 +253,8 @@ describe('WhereFilterDefinition types', () => {
                 const a: WhereFilterDefinition<TestObj> = { age: { $not: { $gte: 100 } } };
             })
 
-            it('$not correctly rejects $contains/$regex (gated on T extends string)', () => {
+            it('$not correctly rejects $regex (gated on T extends string)', () => {
                 const a: WhereFilterDefinition<TestObj> = {
-                    age: {
-                        $not: {
-                            // @ts-expect-error $contains inside $not is string-only
-                            $contains: 'x'
-                        }
-                    }
-                };
-                const b: WhereFilterDefinition<TestObj> = {
                     age: {
                         $not: {
                             // @ts-expect-error $regex inside $not is string-only
@@ -308,15 +283,6 @@ describe('WhereFilterDefinition types', () => {
                     active: {
                         // @ts-expect-error range operators not available for boolean
                         $gt: true
-                    }
-                };
-            })
-
-            it('rejects $contains', () => {
-                const a: WhereFilterDefinition<TestObj> = {
-                    active: {
-                        // @ts-expect-error $contains is string-only
-                        $contains: 'x'
                     }
                 };
             })
@@ -377,15 +343,6 @@ describe('WhereFilterDefinition types', () => {
                     contact: {
                         // @ts-expect-error range not available for objects
                         $gt: { city: 'A', zip: 0 }
-                    }
-                };
-            })
-
-            it('rejects $contains', () => {
-                const a: WhereFilterDefinition<TestObj> = {
-                    contact: {
-                        // @ts-expect-error $contains is string-only
-                        $contains: 'x'
                     }
                 };
             })
@@ -504,9 +461,15 @@ describe('WhereFilterDefinition types', () => {
                 };
             })
 
-            it('accepts logic filter ($and/$or) on object array elements', () => {
-                const a: WhereFilterDefinition<TestObj> = {
-                    addresses: { $and: [{ street: 'Main' }, { primary: true }] }
+            it('requires $elemMatch to apply logic operators to an object array', () => {
+                const wrong: WhereFilterDefinition<TestObj> = {
+                    addresses: {
+                        // @ts-expect-error logic operators on an array field must be wrapped in $elemMatch
+                        $and: [{ street: 'Main' }, { primary: true }]
+                    }
+                };
+                const right: WhereFilterDefinition<TestObj> = {
+                    addresses: { $elemMatch: { $and: [{ street: 'Main' }, { primary: true }] } }
                 };
             })
         })

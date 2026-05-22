@@ -68,7 +68,9 @@ export type TreeNode = {
     nameless_array_element?: boolean,
     parent?: TreeNode,
     descended_from_array?: boolean,
-    optional_or_nullable?: boolean
+    optional_or_nullable?: boolean,
+    /** True when this node is one variant of a `ZodUnion` parent. */
+    union_variant?: boolean
 }
 export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
   z.object({
@@ -81,6 +83,7 @@ export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
     parent: TreeNodeSchema.optional(),
     descended_from_array: z.boolean().optional(),
     optional_or_nullable: z.boolean().optional(),
+    union_variant: z.boolean().optional(),
   })
 );
 
@@ -88,13 +91,24 @@ export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
 export type TreeNodeMap = Record<DotPropPath, TreeNode>;
 type ConvertSchemaToDotPropPathTreeOptions = {
     exclude_schema_reference?: boolean,
-    exclude_parent_reference?: boolean
+    exclude_parent_reference?: boolean,
+    /**
+     * Represent each `z.union` as a `ZodUnion` node whose children are one complete subtree per
+     * variant. When absent, a union's variants are flattened into its parent, which collapses a
+     * union of objects into indistinguishable same-named siblings and throws if two variants
+     * register the same dot-prop path. Enable it for a faithful, serialisable tree of a
+     * polymorphic schema.
+     */
+    union_aware?: boolean
 }
 /**
  * Recursively walks a Zod schema and produces a TreeNode tree plus a flat TreeNodeMap.
  * The map is the key input to the SQL builder: it provides ZodKind (for casting), array ancestry
  * (for jsonb_array_elements spreading), optionality (for IS NOT NULL guards), and sub-schemas
  * (for recursing into array element types).
+ *
+ * A `z.union` is flattened into its parent unless the `union_aware` option is set, which
+ * represents the union as a dedicated `ZodUnion` node with one child subtree per variant.
  *
  * @example
  * const { root, map } = convertSchemaToDotPropPathTree(ContactSchema);
@@ -115,7 +129,8 @@ function _convertSchemaToDotPropPathTree(
     options?: ConvertSchemaToDotPropPathTreeOptions,
     parent?: TreeNode,
     parentsIncludeArray?: boolean,
-    optionalOrNullable?: boolean
+    optionalOrNullable?: boolean,
+    withinUnion?: boolean
 ):TreeNode {
    
     let node:TreeNode;
@@ -129,13 +144,19 @@ function _convertSchemaToDotPropPathTree(
             parent.children.push(newNode);
         }
         if( map[newNode.dotprop_path] ) {
-            // Already exists, so this must be an array element (which is nameless)
-            if( parent?.kind!=='ZodArray' ) {
+            // Sibling nodes legitimately share a dot-prop path in two cases: array elements (one
+            // per element type) and union variants (one subtree per variant, plus any fields the
+            // variants have in common). The flat map keeps the first node at a shared path; the
+            // tree retains every sibling. Any other collision throws.
+            if( parent?.kind==='ZodArray' ) {
+                newNode.nameless_array_element = true;
+            } else if( parent?.kind==='ZodUnion' ) {
+                newNode.union_variant = true;
+            } else if( !withinUnion ) {
                 throw new Error("Duplicate dotprop_path that is not in an array");
             }
-            newNode.nameless_array_element = true;
         } else {
-            map[node.dotprop_path] = newNode;
+            map[newNode.dotprop_path] = newNode;
         }
     }
 
@@ -151,7 +172,7 @@ function _convertSchemaToDotPropPathTree(
 
         // It'll be a nameless child on an array
         parentsIncludeArray = true;
-        _convertSchemaToDotPropPathTree('', schema.element, map, options, node, parentsIncludeArray);
+        _convertSchemaToDotPropPathTree('', schema.element, map, options, node, parentsIncludeArray, undefined, withinUnion);
         
     } else if( schema instanceof z.ZodObject ) {
         node = {
@@ -164,20 +185,35 @@ function _convertSchemaToDotPropPathTree(
 
         for( const childKey in schema.shape ) {
             const childSchema = schema.shape[childKey];
-            _convertSchemaToDotPropPathTree(childKey, childSchema, map, options, node, parentsIncludeArray);
+            _convertSchemaToDotPropPathTree(childKey, childSchema, map, options, node, parentsIncludeArray, undefined, withinUnion);
         }
     } else if( schema instanceof z.ZodUnion ) {
-        // Give the parent more children (pass through)
         const unionSchemas = schema._def.options as z.ZodSchema[];
-        for( const unionSchema of unionSchemas ) {
-            _convertSchemaToDotPropPathTree(key, unionSchema, map, options, parent, parentsIncludeArray);
+        if( options?.union_aware ) {
+            // A ZodUnion node holds one child subtree per variant. Variants are nameless and share
+            // this node's dot-prop path, mirroring how element types attach to a ZodArray node.
+            node = {
+                name: key,
+                dotprop_path,
+                kind: schema._def.typeName, // ZodUnion
+                children: []
+            }
+            addNode(node);
+            for( const unionSchema of unionSchemas ) {
+                _convertSchemaToDotPropPathTree('', unionSchema, map, options, node, parentsIncludeArray, undefined, true);
+            }
+        } else {
+            // The variants pass through as direct children of the union's parent.
+            for( const unionSchema of unionSchemas ) {
+                _convertSchemaToDotPropPathTree(key, unionSchema, map, options, parent, parentsIncludeArray, undefined, withinUnion);
+            }
+            node = parent!;
         }
-        node = parent!;
 
     } else if( schema._def.innerType ) {
         // Probably ZodOptional or ZodNullable - pass through it
         const optionalOrNullable = schema instanceof z.ZodOptional || schema instanceof z.ZodNullable;
-        node = _convertSchemaToDotPropPathTree(key, schema._def.innerType, map, options, parent, parentsIncludeArray, optionalOrNullable);
+        node = _convertSchemaToDotPropPathTree(key, schema._def.innerType, map, options, parent, parentsIncludeArray, optionalOrNullable, withinUnion);
     } else {
         // Presume leaf 
         node = {

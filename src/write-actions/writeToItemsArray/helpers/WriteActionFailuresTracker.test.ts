@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { expectTypeOf } from "vitest";
-import FailedWriteActionuresTracker from "./WriteActionFailuresTracker.ts";
+import WriteActionFailuresTracker from "./WriteActionFailuresTracker.ts";
 import { TreeNodeSchema } from "../../../dot-prop-paths/zod.ts";
 import type {
   WriteAction,
@@ -101,7 +101,7 @@ function makeAction<T extends Record<string, any>>(
  * recorded, so callers can rely on the narrowed shape.
  */
 function schemaErrorOf<T extends Record<string, any>>(
-  tracker: FailedWriteActionuresTracker<T>,
+  tracker: WriteActionFailuresTracker<T>,
 ) {
   const error = tracker.get()[0]?.errors.find((e) => e.type === "schema");
   if (!error || error.type !== "schema") {
@@ -114,14 +114,14 @@ function schemaErrorOf<T extends Record<string, any>>(
 
 describe("raising the halt signal", () => {
   test("a tracker with no failures signals it is safe to continue", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     expect(tracker.shouldHalt()).toBe(false);
   });
 
   test("a single recorded failure raises the halt signal", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat), validFlat, {
@@ -132,7 +132,7 @@ describe("raising the halt signal", () => {
   });
 
   test("the halt signal stays raised once any action has failed", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat, "a1"), validFlat, {
@@ -145,7 +145,7 @@ describe("raising the halt signal", () => {
   });
 
   test("the halt signal always agrees with whether failures are on record", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     expect(tracker.shouldHalt()).toBe(tracker.length() > 0);
@@ -156,7 +156,7 @@ describe("raising the halt signal", () => {
 
 describe("gating writes on schema validity", () => {
   test("an item that satisfies the schema passes and records nothing", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     expect(tracker.testSchema(makeAction(validFlat), validFlat)).toBe(true);
@@ -164,7 +164,7 @@ describe("gating writes on schema validity", () => {
   });
 
   test("an item that violates the schema fails and is recorded once", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     expect(tracker.testSchema(makeAction(invalidFlat), invalidFlat)).toBe(false);
@@ -174,7 +174,7 @@ describe("gating writes on schema validity", () => {
   });
 
   test("the offending item is recorded verbatim alongside the error", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat), invalidFlat);
@@ -182,7 +182,7 @@ describe("gating writes on schema validity", () => {
   });
 
   test("the Zod issues are carried through and point at the offending field", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat), invalidFlat);
@@ -192,7 +192,7 @@ describe("gating writes on schema validity", () => {
   });
 
   test("a schema violation marks the action as permanently unrecoverable", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat), invalidFlat);
@@ -200,7 +200,7 @@ describe("gating writes on schema validity", () => {
   });
 
   test("re-checking the same failing item leaves a single record", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(invalidFlat);
@@ -211,22 +211,33 @@ describe("gating writes on schema validity", () => {
     expect(tracker.get()[0]!.errors.length).toBe(1);
   });
 
-  test("a failing item with no usable primary key appends a fresh record each check", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+  test("a failing item with no usable primary key de-duplicates by its content", () => {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(noPkItem);
     tracker.testSchema(action, noPkItem);
     tracker.testSchema(action, noPkItem);
     const failure = tracker.get()[0]!;
-    // An empty-string primary key cannot be matched, so each check appends a
-    // fresh affected item, while the identical error is still de-duplicated.
-    expect(failure.affected_items?.length).toBe(2);
+    // With no usable primary key the item is matched by deep value equality, so
+    // re-checking the same item collapses onto one affected-item record.
+    expect(failure.affected_items?.length).toBe(1);
     expect(failure.errors.length).toBe(1);
   });
 
+  test("two distinct items that both lack a usable primary key stay separate", () => {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
+      primary_key: "id",
+    });
+    const action = makeAction(noPkItem);
+    tracker.testSchema(action, { id: "", name: "no" });
+    tracker.testSchema(action, { id: "", name: "xy" });
+    // Different content, so value-equality keeps them as separate affected items.
+    expect(tracker.get()[0]!.affected_items?.length).toBe(2);
+  });
+
   test("two distinct failing items under one action collect in a single record", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(invalidFlat);
@@ -237,7 +248,7 @@ describe("gating writes on schema validity", () => {
   });
 
   test("failing items under different actions produce separate records", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat, "a1"), invalidFlat);
@@ -248,7 +259,7 @@ describe("gating writes on schema validity", () => {
 
 describe("accumulating and de-duplicating errors", () => {
   test("reporting an error against a new action creates one failure holding it", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat), validFlat, {
@@ -262,7 +273,7 @@ describe("accumulating and de-duplicating errors", () => {
   });
 
   test("reporting the identical error twice keeps a single error", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -272,7 +283,7 @@ describe("accumulating and de-duplicating errors", () => {
   });
 
   test("an equivalent error supplied as a separate object is still de-duplicated", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -284,7 +295,7 @@ describe("accumulating and de-duplicating errors", () => {
   });
 
   test("two genuinely different errors for one item are both kept", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -304,7 +315,7 @@ describe("accumulating and de-duplicating errors", () => {
   test.each(unrecoverableErrors)(
     'an error of type "$type" marks the action as unrecoverable',
     (errorDetails) => {
-      const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+      const tracker = new WriteActionFailuresTracker(FlatSchema, {
         primary_key: "id",
       });
       tracker.report(makeAction(validFlat), validFlat, errorDetails);
@@ -313,7 +324,7 @@ describe("accumulating and de-duplicating errors", () => {
   );
 
   test("a custom error leaves the action recoverable", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat), validFlat, {
@@ -324,7 +335,7 @@ describe("accumulating and de-duplicating errors", () => {
   });
 
   test("an unrecoverable error keeps the action unrecoverable when a soft error follows", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -334,7 +345,7 @@ describe("accumulating and de-duplicating errors", () => {
   });
 
   test("a soft error followed by an unrecoverable one ends up unrecoverable", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -344,7 +355,7 @@ describe("accumulating and de-duplicating errors", () => {
   });
 
   test("a reported error is tagged with the item's primary key", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const item: FlatItem = { id: "item-7", name: "abc" };
@@ -355,7 +366,7 @@ describe("accumulating and de-duplicating errors", () => {
 
 describe("blocking an action behind an earlier failure", () => {
   test("blocking a not-yet-failed action records it tagged with the blocker", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.blocked(makeAction(validFlat), "blocker-uuid");
@@ -367,7 +378,7 @@ describe("blocking an action behind an earlier failure", () => {
   });
 
   test("blocking an action that already failed annotates the existing record", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -379,7 +390,7 @@ describe("blocking an action behind an earlier failure", () => {
   });
 
   test("blocking the same action twice keeps the latest blocker", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -389,7 +400,7 @@ describe("blocking an action behind an earlier failure", () => {
   });
 
   test("a blocked action raises the halt signal", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.blocked(makeAction(validFlat), "blocker-uuid");
@@ -401,7 +412,7 @@ describe("merging sub-action failures under a parent", () => {
   const subItem: FlatItem = { id: "sub-1", name: "abc" };
 
   test("item-scoped sub-errors attach under the parent action", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
@@ -423,7 +434,7 @@ describe("merging sub-action failures under a parent", () => {
   });
 
   test("sub-errors carrying no item context attach to each merged item", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
@@ -439,7 +450,7 @@ describe("merging sub-action failures under a parent", () => {
   });
 
   test("a sub-item with no item payload contributes nothing", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
@@ -453,7 +464,7 @@ describe("merging sub-action failures under a parent", () => {
   });
 
   test("a sub-action with no affected items contributes nothing", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
@@ -466,7 +477,7 @@ describe("merging sub-action failures under a parent", () => {
   });
 
   test("several sub-actions collect under a single parent record", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const otherItem: FlatItem = { id: "sub-2", name: "def" };
@@ -491,7 +502,7 @@ describe("merging sub-action failures under a parent", () => {
   });
 
   test("merging the same sub-failures twice does not duplicate errors", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const parent = makeAction(validFlat, "parent");
@@ -509,7 +520,7 @@ describe("merging sub-action failures under a parent", () => {
   });
 
   test("an unrecoverable sub-error makes the parent action unrecoverable", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
@@ -527,14 +538,14 @@ describe("merging sub-action failures under a parent", () => {
 
 describe("counting failed actions", () => {
   test("a fresh tracker has a count of zero", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     expect(tracker.length()).toBe(0);
   });
 
   test("the count reflects failed actions, not the number of errors", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -549,7 +560,7 @@ describe("counting failed actions", () => {
   });
 
   test("each distinct failed action adds one to the count", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat, "a1"), validFlat, { type: "custom" });
@@ -561,14 +572,14 @@ describe("counting failed actions", () => {
 
 describe("snapshotting failures through get()", () => {
   test("a fresh tracker snapshots to an empty list", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     expect(tracker.get()).toEqual([]);
   });
 
   test("a snapshot reproduces the recorded action and its errors", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -579,7 +590,7 @@ describe("snapshotting failures through get()", () => {
   });
 
   test("a snapshot is a deep copy disconnected from later snapshots", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat), validFlat, {
@@ -595,7 +606,7 @@ describe("snapshotting failures through get()", () => {
   });
 
   test("repeated snapshots are structurally equal", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat), validFlat, { type: "custom" });
@@ -603,7 +614,7 @@ describe("snapshotting failures through get()", () => {
   });
 
   test("a snapshot holds copies, not the live action references", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
@@ -613,7 +624,7 @@ describe("snapshotting failures through get()", () => {
   });
 
   test("a snapshot omits non-JSON values such as functions in a stored item", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.report(makeAction(validFlat), validFlat, {
@@ -625,11 +636,8 @@ describe("snapshotting failures through get()", () => {
     expect(error.tested_item).toEqual({ id: "1" });
   });
 
-  test("snapshotting a failure that holds a circular value throws", () => {
-    // DEFECT: get() runs JSON.stringify with no guard, so a circular tested_item
-    // or item makes the snapshot throw. testSchema guards its own serialisation;
-    // get() does not. Pinned as current behaviour pending a decision to fix it.
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+  test("snapshotting a failure whose stored item holds a circular reference succeeds", () => {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     type SelfRef = FlatItem & { self?: SelfRef };
@@ -639,13 +647,19 @@ describe("snapshotting failures through get()", () => {
       type: "custom",
       message: "boom",
     });
-    expect(() => tracker.get()).toThrow();
+    expect(() => tracker.get()).not.toThrow();
+    const error = tracker.get()[0]!.errors[0]!;
+    expect(error.type).toBe("custom");
+    if (error.type === "custom") expect(error.message).toBe("boom");
+    // The non-circular fields of the stored item survive the snapshot.
+    expect(error.item?.id).toBe("1");
+    expect(error.item?.name).toBe("abc");
   });
 });
 
 describe("serialising the schema for error reports", () => {
   test("a flat object schema serialises into a defined ZodObject tree", () => {
-    const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat), invalidFlat);
@@ -655,7 +669,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a nested object schema serialises its nested structure", () => {
-    const tracker = new FailedWriteActionuresTracker(NestedSchema, {
+    const tracker = new WriteActionFailuresTracker(NestedSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidNested), invalidNested);
@@ -668,7 +682,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a schema with arrays, optionals, nullables and defaults serialises JSON-safely", () => {
-    const tracker = new FailedWriteActionuresTracker(RichSchema, {
+    const tracker = new WriteActionFailuresTracker(RichSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidRich), invalidRich);
@@ -678,7 +692,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a recursive lazy schema serialises without hanging or throwing", () => {
-    const tracker = new FailedWriteActionuresTracker(LazySchema, {
+    const tracker = new WriteActionFailuresTracker(LazySchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidLazy), invalidLazy);
@@ -687,7 +701,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("exotic leaf types such as set and record serialise JSON-safely", () => {
-    const tracker = new FailedWriteActionuresTracker(ExoticSchema, {
+    const tracker = new WriteActionFailuresTracker(ExoticSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidExotic), invalidExotic);
@@ -697,7 +711,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a top-level union of objects serialises every variant as its own subtree", () => {
-    const tracker = new FailedWriteActionuresTracker(TopUnionSchema, {
+    const tracker = new WriteActionFailuresTracker(TopUnionSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidTopUnion), invalidTopUnion);
@@ -714,7 +728,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a nested union keeps each variant of the shared key distinct", () => {
-    const tracker = new FailedWriteActionuresTracker(NestedUnionSchema, {
+    const tracker = new WriteActionFailuresTracker(NestedUnionSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidNestedUnion), invalidNestedUnion);
@@ -735,7 +749,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("the serialised schema survives a second JSON round-trip unchanged", () => {
-    const tracker = new FailedWriteActionuresTracker(NestedUnionSchema, {
+    const tracker = new WriteActionFailuresTracker(NestedUnionSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidNestedUnion), invalidNestedUnion);
@@ -744,7 +758,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a refined schema serialises as a defined but shallow opaque node", () => {
-    const tracker = new FailedWriteActionuresTracker(RefinedSchema, {
+    const tracker = new WriteActionFailuresTracker(RefinedSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(refinedItem), refinedItem);
@@ -755,7 +769,7 @@ describe("serialising the schema for error reports", () => {
   });
 
   test("a discriminated union serialises as a defined but shallow opaque node", () => {
-    const tracker = new FailedWriteActionuresTracker(DiscriminatedSchema, {
+    const tracker = new WriteActionFailuresTracker(DiscriminatedSchema, {
       primary_key: "id",
     });
     tracker.testSchema(
@@ -770,7 +784,7 @@ describe("serialising the schema for error reports", () => {
 });
 
 describe("the public type contract", () => {
-  const tracker = new FailedWriteActionuresTracker(FlatSchema, {
+  const tracker = new WriteActionFailuresTracker(FlatSchema, {
     primary_key: "id",
   });
 

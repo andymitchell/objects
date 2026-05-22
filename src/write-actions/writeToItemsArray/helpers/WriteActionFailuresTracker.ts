@@ -12,17 +12,13 @@ import {
   type PrimaryKeyGetter,
   makePrimaryKeyGetter,
 } from "../../../utils/getKeyValue.ts";
-import {
-  convertSchemaToDotPropPathTree,
-  type TreeNode,
-} from "../../../dot-prop-paths/zod.ts";
-import cloneDeepSafe from "../../../utils/cloneDeepSafe.ts";
+import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
 import {
   cloneDeepScalarValues,
   type JsonValueCapped,
 } from "@andyrmitchell/utils/deep-clone-scalar-values";
 
-export default class FailedWriteActionuresTracker<
+export default class WriteActionFailuresTracker<
   T extends Record<string, any>,
 > {
   private schema: z.ZodType<T, any, any>;
@@ -69,9 +65,10 @@ export default class FailedWriteActionuresTracker<
     let failedItem: WriteAffectedItem<T> | undefined;
     if (failedAction) {
       const itemPk = this.pk(item, true);
-      failedItem = itemPk
-        ? failedAction.affected_items?.find((x) => itemPk === x.item_pk)
-        : undefined;
+      // A no-usable-pk item yields an empty-string pk; match it by value so re-checks de-dup.
+      failedItem = failedAction.affected_items?.find((x) =>
+        itemPk ? itemPk === x.item_pk : deepEql(x.item, item),
+      );
       if (ifMissingAdd && !failedItem) {
         failedItem = { item_pk: itemPk, item };
         if (!failedAction.affected_items) failedAction.affected_items = [];
@@ -208,6 +205,15 @@ export default class FailedWriteActionuresTracker<
   }
 
   get(): WriteOutcomeFailed<T>[] {
-    return JSON.parse(JSON.stringify(this.failures));
+    // Snapshot is JSON-normalised so callers cannot reach tracker state through it.
+    // Circular references in stored items are resolved first so serialisation cannot throw.
+    return JSON.parse(
+      JSON.stringify(
+        cloneDeepScalarValues(this.failures, {
+          skip_circular: true,
+          skip_symbols: true,
+        }),
+      ),
+    );
   }
 }

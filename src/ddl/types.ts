@@ -72,7 +72,10 @@ export type DDL<T extends Record<string, any>> = IfAny<
   T,
   {
     lists: {
-      ".": RootListRules<any>;
+      // Both `IfAny` branches must type `'.'` identically: indexing
+      // `DDL<genericT>['lists']['.']` distributes over both branches, so a mismatch
+      // widens the result to a poisoned `RootListRules<any> | RootListRules<T>` union.
+      ".": RootListRules<T>;
     };
   } & DDLRoot<T>,
   {

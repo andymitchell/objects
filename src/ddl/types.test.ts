@@ -423,6 +423,16 @@ describe("Root vs nested list rules", () => {
     expectTypeOf<DDL<Flat>["lists"]["."]>().toEqualTypeOf<RootListRules<Flat>>();
   });
 
+  it("exposes the root list rules for an unresolved generic collection type", () => {
+    // Pins the deferred-conditional case: for a bare generic T, DDL<T>['lists']['.']
+    // must stay RootListRules<T>, never widen to a RootListRules<any> | RootListRules<T> union.
+    function _rootRulesOf<T extends Record<string, any>>(ddl: DDL<T>): RootListRules<T> {
+      return ddl.lists["."];
+    }
+    // _rootRulesOf's return type IS the assertion; reference it so noUnusedLocals stays quiet.
+    expect(typeof _rootRulesOf).toBe("function");
+  });
+
   it("types a nested list as list rules over the array element type", () => {
     expectTypeOf<DDL<Nested>["lists"]["rows"]>().toEqualTypeOf<
       ListRules<Nested["rows"][number]>

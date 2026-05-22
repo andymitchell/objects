@@ -5,7 +5,7 @@ import { setProperty } from "dot-prop";
 import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
 import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, ItemHash } from "./types.ts";
-import type { DDL, ListRules } from "../../ddl/types.ts";
+import type { DDL, RootListRules } from "../../ddl/types.ts";
 import writeLww from "./writeStrategies/lww.ts";
 import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.ts";
 import { z } from "zod";
@@ -185,7 +185,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 
     // Load the rules
-    const rules:ListRules<T> | undefined = ddl.lists['.'];
+    const rules: RootListRules<T> = ddl.lists['.'];
     const pk = makePrimaryKeyGetter<T>(rules.primary_key);
 
     const addedHash: ItemHash<T> = {};

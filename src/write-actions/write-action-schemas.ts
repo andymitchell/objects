@@ -177,6 +177,10 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
     type: z.literal("permission_denied"),
     reason: z.string(),
   }),
+  z.object({
+    type: z.literal("blocked"),
+    blocked_by_action_uuid: z.string(),
+  }),
 ]);
 isTypeEqual<z.infer<typeof WriteErrorSchema>, WriteError>(true);
 
@@ -224,7 +228,7 @@ export function makeWriteOutcomeFailedCoreSchema<
   return z.object({
     ok: z.literal(false),
     action: makeWriteActionSchema<T>(),
-    errors: z.array(makeWriteErrorContextSchema<T>()),
+    errors: z.array(makeWriteErrorContextSchema<T>()).nonempty(),
     unrecoverable: z.boolean().optional(),
     back_off_until_ts: z.number().optional(),
     blocked_by_action_uuid: z.string().optional(),

@@ -331,6 +331,13 @@ describe("4. WriteError discriminated union", () => {
         const _pk = error.primary_key;
       }
     });
+
+    it("type:blocked -> .blocked_by_action_uuid accessible", () => {
+      const error: WriteError = {} as WriteError;
+      if (error.type === "blocked") {
+        const _uuid = error.blocked_by_action_uuid;
+      }
+    });
   });
 
   describe("4.2 Exhaustiveness", () => {
@@ -348,6 +355,8 @@ describe("4. WriteError discriminated union", () => {
         case "create_duplicated_key":
           break;
         case "permission_denied":
+          break;
+        case "blocked":
           break;
         default: {
           // If all cases are handled, this should resolve to never

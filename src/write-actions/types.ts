@@ -173,6 +173,12 @@ export type WriteError =
   | {
       type: "permission_denied";
       reason: CorePermissionDeniedReason | (string & {});
+    }
+  | {
+      /** The action did not run: an earlier action in the same batch failed and blocked it. */
+      type: "blocked";
+      /** `uuid` of the earlier action whose failure blocked this one. */
+      blocked_by_action_uuid: string;
     };
 
 /**
@@ -252,8 +258,8 @@ export type WriteOutcomeFailedCore<
 > = {
   ok: false;
   action: WriteAction<T, W, WF>;
-  /** At least one error that caused the failure. */
-  errors: WriteErrorContext<T>[];
+  /** The action's errors; always at least one. A blocked action carries a single `blocked` error. */
+  errors: [WriteErrorContext<T>, ...WriteErrorContext<T>[]];
   /** True if the action can never succeed (e.g. schema violation, permission denied). */
   unrecoverable?: boolean;
   /** Don't retry until this timestamp. */

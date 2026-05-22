@@ -3,7 +3,6 @@ import type {
   WriteAction,
   WriteError,
   WriteErrorContext,
-  WriteAffectedItem,
   WriteOutcomeFailed,
 } from "../../types.ts";
 import type { ListRules } from "../../../ddl/types.ts";
@@ -17,6 +16,21 @@ import {
   cloneDeepScalarValues,
   type JsonValueCapped,
 } from "@andyrmitchell/utils/deep-clone-scalar-values";
+
+/** Error kinds an action can never recover from, however many times it is retried. */
+function isUnrecoverable(type: WriteError["type"]): boolean {
+  switch (type) {
+    case "schema":
+    case "missing_key":
+    case "create_duplicated_key":
+    case "update_altered_key":
+    case "permission_denied":
+      return true;
+    case "custom":
+    case "blocked":
+      return false;
+  }
+}
 
 export default class WriteActionFailuresTracker<
   T extends Record<string, any>,
@@ -35,87 +49,54 @@ export default class WriteActionFailuresTracker<
     return this.length() > 0;
   }
 
-  private findAction<IMA extends boolean = false>(
+  /** Locate the open failure record for `action`, if one exists. */
+  private findAction(
     action: WriteAction<T>,
-    ifMissingAdd?: IMA,
-  ): IMA extends true
-    ? WriteOutcomeFailed<T>
-    : WriteOutcomeFailed<T> | undefined {
-    let failedAction = this.failures.find((x) => deepEql(x.action, action));
-    if (ifMissingAdd && !failedAction) {
-      failedAction = { ok: false, action, errors: [], affected_items: [] };
-      this.failures.push(failedAction);
-    }
-    return failedAction as IMA extends true
-      ? WriteOutcomeFailed<T>
-      : WriteOutcomeFailed<T> | undefined;
+  ): WriteOutcomeFailed<T> | undefined {
+    return this.failures.find((x) => deepEql(x.action, action));
   }
 
-  private findActionAndItem<IMA extends boolean = false>(
+  /**
+   * Add `errorDetails` (scoped to `item`) to the failure record for `action`, opening the
+   * record if this is its first error. Opening it together with that first error is what
+   * keeps `errors` non-empty. Identical errors and identical affected items are de-duplicated.
+   */
+  private record(
     action: WriteAction<T>,
     item: T,
-    ifMissingAdd?: IMA,
-  ): IMA extends true
-    ? { failedAction: WriteOutcomeFailed<T>; failedItem: WriteAffectedItem<T> }
-    : {
-        failedAction?: WriteOutcomeFailed<T>;
-        failedItem?: WriteAffectedItem<T>;
-      } {
-    const failedAction = this.findAction(action, ifMissingAdd);
-    let failedItem: WriteAffectedItem<T> | undefined;
-    if (failedAction) {
-      const itemPk = this.pk(item, true);
-      // A no-usable-pk item yields an empty-string pk; match it by value so re-checks de-dup.
-      failedItem = failedAction.affected_items?.find((x) =>
-        itemPk ? itemPk === x.item_pk : deepEql(x.item, item),
-      );
-      if (ifMissingAdd && !failedItem) {
-        failedItem = { item_pk: itemPk, item };
-        if (!failedAction.affected_items) failedAction.affected_items = [];
-        failedAction.affected_items.push(failedItem);
-      }
-    }
-
-    return { failedAction, failedItem } as IMA extends true
-      ? {
-          failedAction: WriteOutcomeFailed<T>;
-          failedItem: WriteAffectedItem<T>;
-        }
-      : {
-          failedAction?: WriteOutcomeFailed<T>;
-          failedItem?: WriteAffectedItem<T>;
-        };
-  }
-
-  private addErrorDetails(
-    action: WriteOutcomeFailed<T>,
-    item: WriteAffectedItem<T>,
     errorDetails: WriteError,
-  ) {
+  ): void {
+    const itemPk = this.pk(item, true);
     const errorContext: WriteErrorContext<T> = {
       ...errorDetails,
-      item_pk: item.item_pk,
-      item: item.item,
+      item_pk: itemPk,
+      item,
     };
 
-    // Deduplicate: skip if an equivalent error already exists for this item
-    if (action.errors.some((x) => deepEql(x, errorContext))) {
-      return;
+    let failedAction = this.findAction(action);
+    if (failedAction) {
+      if (!failedAction.errors.some((x) => deepEql(x, errorContext))) {
+        failedAction.errors.push(errorContext);
+      }
+    } else {
+      failedAction = {
+        ok: false,
+        action,
+        errors: [errorContext],
+        affected_items: [],
+      };
+      this.failures.push(failedAction);
     }
 
-    action.errors.push(errorContext);
+    // Register the affected item. A no-usable-pk item yields an empty-string pk, so match
+    // it by value instead — re-checks of the same item then de-dup.
+    if (!failedAction.affected_items) failedAction.affected_items = [];
+    const itemKnown = failedAction.affected_items.some((x) =>
+      itemPk ? itemPk === x.item_pk : deepEql(x.item, item),
+    );
+    if (!itemKnown) failedAction.affected_items.push({ item_pk: itemPk, item });
 
-    switch (errorDetails.type) {
-      case "schema":
-      case "missing_key":
-      case "create_duplicated_key":
-      case "update_altered_key":
-      case "permission_denied":
-        action.unrecoverable = true;
-        break;
-      case "custom":
-        break;
-    }
+    if (isUnrecoverable(errorDetails.type)) failedAction.unrecoverable = true;
   }
 
   testSchema(action: WriteAction<T>, item: T): boolean {
@@ -138,12 +119,7 @@ export default class WriteActionFailuresTracker<
         );
       }
 
-      const { failedAction, failedItem } = this.findActionAndItem(
-        action,
-        item,
-        true,
-      );
-      this.addErrorDetails(failedAction, failedItem, {
+      this.record(action, item, {
         type: "schema",
         issues: result.error.issues,
         tested_item: item,
@@ -154,16 +130,34 @@ export default class WriteActionFailuresTracker<
   }
 
   report(action: WriteAction<T>, item: T, errorDetails: WriteError): void {
-    const { failedAction, failedItem } = this.findActionAndItem(
-      action,
-      item,
-      true,
-    );
-    this.addErrorDetails(failedAction, failedItem, errorDetails);
+    this.record(action, item, errorDetails);
   }
 
+  /**
+   * Mark `action` as blocked by an earlier action's failure. A blocked-only action opens a
+   * failure record holding a single `blocked` error; re-blocking updates that error and the
+   * `blocked_by_action_uuid` field in place, so the latest blocker always wins.
+   */
   blocked(action: WriteAction<T>, blocked_by_action_uuid: string): void {
-    const failedAction = this.findAction(action, true);
+    let failedAction = this.findAction(action);
+    if (failedAction) {
+      const blockedError = failedAction.errors.find(
+        (e) => e.type === "blocked",
+      );
+      if (blockedError?.type === "blocked") {
+        blockedError.blocked_by_action_uuid = blocked_by_action_uuid;
+      } else {
+        failedAction.errors.push({ type: "blocked", blocked_by_action_uuid });
+      }
+    } else {
+      failedAction = {
+        ok: false,
+        action,
+        errors: [{ type: "blocked", blocked_by_action_uuid }],
+        affected_items: [],
+      };
+      this.failures.push(failedAction);
+    }
     failedAction.blocked_by_action_uuid = blocked_by_action_uuid;
   }
 
@@ -172,28 +166,20 @@ export default class WriteActionFailuresTracker<
     failedActions: WriteOutcomeFailed<any>[],
   ): void {
     for (const subAction of failedActions) {
-      if (subAction.affected_items) {
-        for (const subItem of subAction.affected_items) {
-          if (subItem.item) {
-            const { failedAction, failedItem } = this.findActionAndItem(
-              action,
-              subItem.item,
-              true,
-            );
-            // Merge errors from sub-action that relate to this item
-            for (const error of subAction.errors) {
-              if (error.item_pk === subItem.item_pk) {
-                const { item_pk: _ipk, item: _item, ...errorBase } = error;
-                this.addErrorDetails(failedAction, failedItem, errorBase);
-              }
-            }
-            // Also merge errors without item context
-            for (const error of subAction.errors) {
-              if (error.item_pk === undefined) {
-                const { item_pk: _ipk, item: _item, ...errorBase } = error;
-                this.addErrorDetails(failedAction, failedItem, errorBase);
-              }
-            }
+      for (const subItem of subAction.affected_items ?? []) {
+        if (!subItem.item) continue;
+        // Errors scoped to this item.
+        for (const error of subAction.errors) {
+          if (error.item_pk === subItem.item_pk) {
+            const { item_pk: _ipk, item: _item, ...errorBase } = error;
+            this.record(action, subItem.item, errorBase);
+          }
+        }
+        // Errors with no item context apply to every merged item.
+        for (const error of subAction.errors) {
+          if (error.item_pk === undefined) {
+            const { item_pk: _ipk, item: _item, ...errorBase } = error;
+            this.record(action, subItem.item, errorBase);
           }
         }
       }

@@ -365,19 +365,27 @@ describe("accumulating and de-duplicating errors", () => {
 });
 
 describe("blocking an action behind an earlier failure", () => {
-  test("blocking a not-yet-failed action records it tagged with the blocker", () => {
+  test("blocking a not-yet-failed action records it with a blocked error", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.blocked(makeAction(validFlat), "blocker-uuid");
     expect(tracker.length()).toBe(1);
-    expect(tracker.get()[0]!.blocked_by_action_uuid).toBe("blocker-uuid");
-    // A blocked-only action carries an empty `errors` array — see the suite's
-    // closing notes on WriteOutcomeFailedCore's documented "at least one" rule.
-    expect(tracker.get()[0]!.errors).toEqual([]);
+    const failure = tracker.get()[0]!;
+    expect(failure.blocked_by_action_uuid).toBe("blocker-uuid");
+    // A blocked-only action has no error of its own, so it carries a single `blocked`
+    // error naming the blocker — the failure record is never error-less.
+    expect(failure.errors.length).toBe(1);
+    const error = failure.errors[0]!;
+    expect(error.type).toBe("blocked");
+    if (error.type === "blocked") {
+      expect(error.blocked_by_action_uuid).toBe("blocker-uuid");
+    }
+    // A blocked action can run once the blocker is resolved, so it stays recoverable.
+    expect(failure.unrecoverable).toBeUndefined();
   });
 
-  test("blocking an action that already failed annotates the existing record", () => {
+  test("blocking an action that already failed adds a blocked error alongside its own", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
@@ -385,18 +393,30 @@ describe("blocking an action behind an earlier failure", () => {
     tracker.report(action, validFlat, { type: "custom", message: "earlier" });
     tracker.blocked(action, "blocker-uuid");
     expect(tracker.length()).toBe(1);
-    expect(tracker.get()[0]!.blocked_by_action_uuid).toBe("blocker-uuid");
-    expect(tracker.get()[0]!.errors.length).toBe(1);
+    const failure = tracker.get()[0]!;
+    expect(failure.blocked_by_action_uuid).toBe("blocker-uuid");
+    // The action's own error is kept; the blocked error joins it.
+    expect(failure.errors.length).toBe(2);
+    expect(failure.errors.some((e) => e.type === "custom")).toBe(true);
+    expect(failure.errors.some((e) => e.type === "blocked")).toBe(true);
   });
 
-  test("blocking the same action twice keeps the latest blocker", () => {
+  test("re-blocking the same action keeps one blocked error at the latest blocker", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
     tracker.blocked(action, "first-blocker");
     tracker.blocked(action, "second-blocker");
-    expect(tracker.get()[0]!.blocked_by_action_uuid).toBe("second-blocker");
+    const failure = tracker.get()[0]!;
+    expect(failure.blocked_by_action_uuid).toBe("second-blocker");
+    // Re-blocking updates the existing blocked error in place rather than appending a second.
+    expect(failure.errors.length).toBe(1);
+    const error = failure.errors[0]!;
+    expect(error.type).toBe("blocked");
+    if (error.type === "blocked") {
+      expect(error.blocked_by_action_uuid).toBe("second-blocker");
+    }
   });
 
   test("a blocked action raises the halt signal", () => {

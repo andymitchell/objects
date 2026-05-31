@@ -365,8 +365,40 @@ describe("Ordering and sortable-key declarations", () => {
 
   it("leaves the sortable-keys allowlist optional and read-only", () => {
     expectTypeOf<ListRules<Flat>["sortable_keys"]>().toEqualTypeOf<
-      ReadonlyArray<DotPropPathsUnion<Flat>> | undefined
+      ReadonlyArray<SortableKeyRule<Flat>> | undefined
     >();
+  });
+
+  it("accepts a sortable-key rule with an optional direction restriction", () => {
+    const _ddl: DDL<Flat> = {
+      version: 1,
+      lists: {
+        ".": {
+          primary_key: "id",
+          default_ordering_key: { key: "id", direction: 1 },
+          // `direction` omitted = both directions; `1`/`-1` restricts.
+          sortable_keys: [{ key: "title" }, { key: "age", direction: -1 }],
+        },
+      },
+      ownership: { type: "none" },
+    };
+    expect(_ddl.lists["."].sortable_keys?.[1]?.direction).toBe(-1);
+  });
+
+  it("rejects an out-of-range direction on a sortable-key rule", () => {
+    const _ddl: DDL<Flat> = {
+      version: 1,
+      lists: {
+        ".": {
+          primary_key: "id",
+          default_ordering_key: { key: "id", direction: 1 },
+          // @ts-expect-error: direction must be 1 | -1
+          sortable_keys: [{ key: "title", direction: 2 }],
+        },
+      },
+      ownership: { type: "none" },
+    };
+    expect(_ddl).toBeDefined();
   });
 
   it("accepts an empty sortable-keys allowlist", () => {
@@ -391,7 +423,7 @@ describe("Ordering and sortable-key declarations", () => {
           primary_key: "id",
           default_ordering_key: { key: "id", direction: 1 },
           // @ts-expect-error: 'nonsense' is not a dot-prop path of Flat
-          sortable_keys: ["nonsense"],
+          sortable_keys: [{ key: "nonsense" }],
         },
       },
       ownership: { type: "none" },

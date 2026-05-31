@@ -66,7 +66,7 @@ type StandardTestConfig<T extends Record<string, any> = StandardTestItem> = {
  * // Restrict to single sort key — multi-key tests will be skipped statically.
  * standardTests({
  *     it, expect, execute,
- *     ddl: { ...STANDARD_TEST_DDL, lists: { '.': { primary_key: 'id', sortable_keys: ['age'] } } },
+ *     ddl: { ...STANDARD_TEST_DDL, lists: { '.': { primary_key: 'id', sortable_keys: [{ key: 'age' }] } } },
  * });
  */
 export function standardTests<T extends Record<string, any> = StandardTestItem>(config: StandardTestConfig<T>) {
@@ -75,7 +75,8 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
     const implementationName = config.implementationName ?? 'unknown';
 
     const sortableKeys = (config.ddl ?? (STANDARD_TEST_DDL as unknown as DDL<T>)).lists['.'].sortable_keys;
-    const allowedKeys = sortableKeys ? new Set<string>(sortableKeys) : undefined;
+    // Each sortable_keys entry is a `SortableKeyRule` (`{ key, direction? }`) — gating keys off `.key` (direction is a runtime concern).
+    const allowedKeys = sortableKeys ? new Set<string>(sortableKeys.map(e => e.key as string)) : undefined;
 
     /**
      * Per-test gate. When the impl declares `sortable_keys`, tests whose sort uses

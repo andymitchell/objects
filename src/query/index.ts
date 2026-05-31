@@ -62,3 +62,6 @@ export { standardTests } from './standardTests.ts';
 // Re-export DotPropPathsUnion for consumers that need to type `sortable_keys`
 // alongside the SortEntry/SortDefinition types.
 export type { DotPropPathsUnion } from '../dot-prop-paths/types.ts';
+
+// Re-export SortableKeyRule so consumers can type `sortable_keys` entries (`{ key, direction? }`).
+export type { SortableKeyRule } from '../ddl/types.ts';

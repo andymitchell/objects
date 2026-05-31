@@ -61,10 +61,10 @@ describe('standardTests gating via DDL.sortable_keys', () => {
         });
     });
 
-    describe('sortable_keys: ["age"]', () => {
+    describe('sortable_keys: [{ key: "age" }]', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: ['age'] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: [{ key: 'age' }] } },
         });
 
         it('runs tests using `age`', () => {
@@ -118,10 +118,10 @@ describe('standardTests gating via DDL.sortable_keys', () => {
         });
     });
 
-    describe('multi-key allowlist: ["category", "name", "date"]', () => {
+    describe('multi-key allowlist: [{ key: "category" }, { key: "name" }, { key: "date" }]', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: ['category', 'name', 'date'] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: [{ key: 'category' }, { key: 'name' }, { key: 'date' }] } },
         });
 
         it('runs multi-key tests when both keys are allowed', () => {
@@ -135,15 +135,37 @@ describe('standardTests gating via DDL.sortable_keys', () => {
         });
     });
 
-    describe('dot-prop allowlist: ["sender.name"]', () => {
+    describe('dot-prop allowlist: [{ key: "sender.name" }]', () => {
         const { ran, skipped } = captureTestRegistrations({
             ...STANDARD_TEST_DDL,
-            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: ['sender.name'] } },
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: [{ key: 'sender.name' }] } },
         });
 
         it('matches dot-prop nested keys exactly', () => {
             expect(ran).toContain('sorts by a dot-prop path into nested objects');
             expect(skipped).toContain('sorts ascending by a numeric field');
+        });
+    });
+
+    describe('direction-restricted rule: [{ key: "age", direction: -1 }]', () => {
+        // Gating keys off `.key` only — a per-key `direction` restriction is a runtime concern
+        // (`unsupported-ordering`), so it must register exactly the same tests as the unrestricted rule.
+        const restricted = captureTestRegistrations({
+            ...STANDARD_TEST_DDL,
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: [{ key: 'age', direction: -1 as const }] } },
+        });
+        const unrestricted = captureTestRegistrations({
+            ...STANDARD_TEST_DDL,
+            lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 }, sortable_keys: [{ key: 'age' }] } },
+        });
+
+        it('runs the `age` tests (direction does not narrow the static gate)', () => {
+            expect(restricted.ran).toContain('sorts ascending by a numeric field');
+        });
+
+        it('registers identically to the unrestricted rule', () => {
+            expect(restricted.ran).toEqual(unrestricted.ran);
+            expect(restricted.skipped).toEqual(unrestricted.skipped);
         });
     });
 });

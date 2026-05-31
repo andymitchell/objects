@@ -171,6 +171,18 @@ export type WriteError =
       primary_key: string | number | symbol;
     }
   | {
+      /**
+       * Two actions carry the same `uuid` but non-equivalent payloads. Detected in two places:
+       * within a single batch by this library (the same uuid submitted twice with differing payloads),
+       * or across calls by a store's idempotency ledger (a previously-succeeded uuid replayed with a
+       * different payload — the store, not this pure library, holds the ledger). Either way the conflicting
+       * action is rejected unrecoverably and state is left unchanged. See ICollection `dec-write-uuid-idempotent`.
+       */
+      type: "uuid_conflict";
+      /** The `uuid` shared by the conflicting actions. */
+      uuid: string;
+    }
+  | {
       type: "permission_denied";
       reason: CorePermissionDeniedReason | (string & {});
     }

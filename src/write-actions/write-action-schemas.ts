@@ -174,6 +174,10 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
     primary_key: z.union([z.string(), z.number(), z.symbol()]),
   }),
   z.object({
+    type: z.literal("uuid_conflict"),
+    uuid: z.string(),
+  }),
+  z.object({
     type: z.literal("permission_denied"),
     reason: z.string(),
   }),

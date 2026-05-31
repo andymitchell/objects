@@ -1,4 +1,5 @@
 import { writeToItemsArray, writeToItemsArrayPreserveInputType } from "./writeToItemsArray/index.ts";
+import { deepEquals } from "./writeToItemsArray/helpers/mutations/index.ts";
 import { isIUser } from "./auth/index.js";
 import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
 import { getWrittenPaths } from "./getWrittenPaths.ts";
@@ -9,6 +10,14 @@ export {
     writeToItemsArray,
     writeToItemsArrayPreserveInputType,
     isIUser,
+    /**
+     * Key-order-independent structural deep-equal. Promoted to the public surface so stores can
+     * canonicalise a replayed `WriteAction` against a prior one when detecting `uuid_conflict`
+     * (ICollection `dec-write-uuid-idempotent`). Semantics: scalars `===` (with `NaN === NaN`);
+     * objects recursive, key-order independent, `undefined` ≡ missing key; arrays order-sensitive;
+     * `null` distinct from `undefined`.
+     */
+    deepEquals,
 }
 
 // ─── Helpers ───

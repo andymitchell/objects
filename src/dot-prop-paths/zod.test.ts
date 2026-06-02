@@ -299,3 +299,87 @@ describe('Zod test', () => {
     });
 
 });
+
+describe('migration baseline — walker invariants (kind-free; must survive the zod4 representation change)', () => {
+    // Deliberately free of `kind` assertions: the kind vocabulary changes by design in the zod4
+    // migration ('ZodArray' -> 'array'), so pinning it here would prove nothing. These lock what
+    // must NOT change — path discovery, array-ancestry, optionality, and a schema-at-a-path
+    // actually validating the value that lives there. They are the regression net for the rewrite.
+
+    const REPRESENTATIVE = z.object({
+        contact: z.object({
+            name: z.string(),
+            age: z.number().optional(),
+            emailAddress: z.string().optional(),
+            locations: z.array(z.union([
+                z.string(),
+                z.number(),
+                z.object({
+                    city: z.string().optional(),
+                    country: z.string().optional(),
+                    flights: z.array(z.string()).optional(),
+                }),
+            ])).optional(),
+        }),
+    });
+
+    test('every leaf path is discovered, with correct array-ancestry and optionality', () => {
+        const { map } = convertSchemaToDotPropPathTree(REPRESENTATIVE, {
+            exclude_parent_reference: true,
+            exclude_schema_reference: true,
+        });
+
+        // The flat map exposes exactly these dot-prop paths. Array-element and union variants
+        // legitimately share their parent's path, so the map keeps the parent; the tree keeps siblings.
+        expect(new Set(Object.keys(map))).toEqual(new Set([
+            '',
+            'contact',
+            'contact.name',
+            'contact.age',
+            'contact.emailAddress',
+            'contact.locations',
+            'contact.locations.city',
+            'contact.locations.country',
+            'contact.locations.flights',
+        ]));
+
+        // Metadata that drives SQL casting / jsonb array spreading / IS-NOT-NULL guards downstream.
+        const flags = (p: string) => ({
+            descended_from_array: !!map[p]?.descended_from_array,
+            optional_or_nullable: !!map[p]?.optional_or_nullable,
+        });
+        expect(flags('contact')).toEqual({ descended_from_array: false, optional_or_nullable: false });
+        expect(flags('contact.name')).toEqual({ descended_from_array: false, optional_or_nullable: false });
+        expect(flags('contact.age')).toEqual({ descended_from_array: false, optional_or_nullable: true });
+        expect(flags('contact.emailAddress')).toEqual({ descended_from_array: false, optional_or_nullable: true });
+        expect(flags('contact.locations')).toEqual({ descended_from_array: false, optional_or_nullable: true });
+        expect(flags('contact.locations.city')).toEqual({ descended_from_array: true, optional_or_nullable: true });
+        expect(flags('contact.locations.country')).toEqual({ descended_from_array: true, optional_or_nullable: true });
+        expect(flags('contact.locations.flights')).toEqual({ descended_from_array: true, optional_or_nullable: true });
+    });
+
+    test('schema-at-path resolves through optional, nullable and array wrappers to the value living there', () => {
+        const schema = z.object({
+            title: z.string(),
+            score: z.number().nullable(),
+            tags: z.array(z.string()),
+            profile: z.object({ nickname: z.string().optional() }).optional(),
+        });
+
+        // nullable leaf -> a schema that accepts the value OR null, and rejects the wrong type.
+        const score = getZodSchemaAtSchemaDotPropPath(schema, 'score');
+        expect(score?.safeParse(42).success).toBe(true);
+        expect(score?.safeParse(null).success).toBe(true);
+        expect(score?.safeParse('not a number').success).toBe(false);
+
+        // array leaf -> the ELEMENT schema (parses one element, rejects the whole array).
+        const tags = getZodSchemaAtSchemaDotPropPath(schema, 'tags');
+        expect(tags?.safeParse('red').success).toBe(true);
+        expect(tags?.safeParse(['red']).success).toBe(false);
+
+        // a field beneath an optional nested object still resolves and validates its own type.
+        const nickname = getZodSchemaAtSchemaDotPropPath(schema, 'profile.nickname');
+        expect(nickname?.safeParse('bob').success).toBe(true);
+        expect(nickname?.safeParse(123).success).toBe(false);
+    });
+});

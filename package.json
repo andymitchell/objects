@@ -72,8 +72,8 @@
     "license": "MIT",
     "sideEffects": false,
     "devDependencies": {
-        "@andyrmitchell/pg-testable": "^0.4.0",
-        "@andyrmitchell/utils": "^0.27.3",
+        "@andyrmitchell/pg-testable": "^0.5.2",
+        "@andyrmitchell/utils": "^0.29.0",
         "@types/better-sqlite3": "^7.6.13",
         "@types/deep-eql": "^4.0.2",
         "@types/jest": "^29.5.12",
@@ -87,7 +87,7 @@
         "zod": "^4.1.8"
     },
     "dependencies": {
-        "@andyrmitchell/composite-timestamps": "^0.2.3",
+        "@andyrmitchell/composite-timestamps": "^0.5.1",
         "deep-eql": "^5.0.2",
         "dot-prop": "^9.0.0",
         "immer": "^10.1.1",

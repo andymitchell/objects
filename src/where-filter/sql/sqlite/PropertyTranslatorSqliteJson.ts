@@ -36,11 +36,11 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
     /** Counts how many ZodArray nodes exist in the ancestry chain for a path. */
     private countArraysInPath(dotpropPath: string): number {
-        if ((this.nodeMap[dotpropPath]?.kind === 'ZodArray' || this.nodeMap[dotpropPath]?.descended_from_array)) {
+        if ((this.nodeMap[dotpropPath]?.kind === 'array' || this.nodeMap[dotpropPath]?.descended_from_array)) {
             let count = 0;
             let target: TreeNode | undefined = this.nodeMap[dotpropPath];
             while (target) {
-                if (target.kind === 'ZodArray') count++;
+                if (target.kind === 'array') count++;
                 target = target?.parent;
             }
             return count;
@@ -105,7 +105,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             const treeNode = this.nodeMap[dotpropPath];
             if (!treeNode) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
             if (Array.isArray(filter)) {
-                if (treeNode.kind !== 'ZodArray') throw new Error("Cannot compare an array to a non-array");
+                if (treeNode.kind !== 'array') throw new Error("Cannot compare an array to a non-array");
                 if (countArraysInPath === 1) {
                     return this.generateComparison(dotpropPath, filter, statementArguments);
                 } else {
@@ -127,10 +127,10 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 // When the path continues past the last array to a scalar/object field
                 // (e.g. messages.rfc822msgid where messages is the array), extract the
                 // remaining field from the spread output.
-                if (treeNode.kind !== 'ZodArray') {
+                if (treeNode.kind !== 'array') {
                     const remainingSegments: string[] = [];
                     for (let i = path.length - 1; i >= 0; i--) {
-                        if (path[i]!.kind === 'ZodArray') break;
+                        if (path[i]!.kind === 'array') break;
                         if (path[i]!.name) remainingSegments.unshift(path[i]!.name);
                     }
                     if (remainingSegments.length > 0) {
@@ -337,7 +337,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         // $regex — SQLite has no native regex; translate simple patterns to LIKE (best-effort).
         // $options: 'i' is a no-op because SQLite LIKE is already ASCII case-insensitive.
         if (isValueComparisonRegex(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
             const raw = filter.$regex;
 
             // Detect complex regex features we cannot translate to LIKE
@@ -392,7 +392,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         } else if (isValueComparisonRange(filter)) {
 
             const firstFilterValueType = typeof (Object.values(filter)[0]);
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType === 'string' ? 'ZodString' : 'ZodNumber']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType === 'string' ? 'string' : 'number']);
 
             const operators = ValueComparisonRangeOperators
                 .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
@@ -421,11 +421,11 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
             }
         } else if (isPlainObject(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodObject']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['object']);
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             return optionalWrapper(sqlIdentifier, `json(${sqlIdentifier}) = json(${placeholder})`);
         } else if (Array.isArray(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodArray']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             return optionalWrapper(sqlIdentifier, `json(${sqlIdentifier}) = json(${placeholder})`);
         } else if (filter === null) {

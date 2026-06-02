@@ -275,7 +275,7 @@ function buildLeafExpression(
     for (let i = 0; i < pathParts.length; i++) {
         checkPath = checkPath ? `${checkPath}.${pathParts[i]}` : pathParts[i]!;
         const checkNode = nodeMap[checkPath];
-        if (checkNode?.kind === 'ZodArray') {
+        if (checkNode?.kind === 'array') {
             lastArrayIdx = i;
         }
     }

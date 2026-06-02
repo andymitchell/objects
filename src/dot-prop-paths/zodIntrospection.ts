@@ -10,6 +10,17 @@ import { z } from "zod";
 export type ZodKind = z.core.$ZodTypeDef["type"];
 
 /**
+ * A Zod schema of statically-unknown shape, as the walker sees it.
+ *
+ * The walker introspects arbitrary user schemas, so it cannot know their output type; `<any>` keeps the
+ * schemas it returns assignable for callers without a cast at every site (v4's bare `z.ZodType` is
+ * `<unknown>`, which would reject those assignments — `<any>` restores the permissiveness zod 3's
+ * `ZodTypeAny` gave).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see JSDoc: walker handles schemas of unknown shape; <any> preserves v3 ZodTypeAny assignability for callers.
+export type AnyZodSchema = z.ZodType<any>;
+
+/**
  * Reads a schema's kind from zod's canonical `_zod.def.type`.
  *
  * The walker's single source of truth for "what is this schema?". Reading the def (rather than
@@ -18,7 +29,7 @@ export type ZodKind = z.core.$ZodTypeDef["type"];
  *
  * @example getZodKind(z.string()) // 'string'
  */
-export function getZodKind(schema: z.ZodType): ZodKind {
+export function getZodKind(schema: AnyZodSchema): ZodKind {
     return schema._zod.def.type;
 }
 
@@ -29,9 +40,9 @@ export function getZodKind(schema: z.ZodType): ZodKind {
  *
  * @example unwrap(z.string().optional()) // z.string()
  */
-export function unwrap(schema: z.ZodType): z.ZodType {
-    // The getter yields the core `$ZodType`; widen back to the classic class the rest of the walker uses.
-    return (schema as z.ZodOptional | z.ZodNullable).unwrap() as z.ZodType;
+export function unwrap(schema: AnyZodSchema): AnyZodSchema {
+    // The getter yields the core `$ZodType`; widen back to the classic schema the rest of the walker uses.
+    return (schema as z.ZodOptional | z.ZodNullable).unwrap() as AnyZodSchema;
 }
 
 /**
@@ -41,8 +52,8 @@ export function unwrap(schema: z.ZodType): z.ZodType {
  *
  * @example getArrayElement(z.array(z.string())) // z.string()
  */
-export function getArrayElement(schema: z.ZodType): z.ZodType {
-    return (schema as z.ZodArray).element as z.ZodType;
+export function getArrayElement(schema: AnyZodSchema): AnyZodSchema {
+    return (schema as z.ZodArray).element as AnyZodSchema;
 }
 
 /**
@@ -53,8 +64,8 @@ export function getArrayElement(schema: z.ZodType): z.ZodType {
  *
  * @example getObjectShape(z.object({ a: z.string() })) // { a: z.string() }
  */
-export function getObjectShape(schema: z.ZodType): Record<string, z.ZodType> {
-    return (schema as z.ZodObject).shape as Record<string, z.ZodType>;
+export function getObjectShape(schema: AnyZodSchema): Record<string, AnyZodSchema> {
+    return (schema as z.ZodObject).shape as Record<string, AnyZodSchema>;
 }
 
 /**
@@ -64,8 +75,8 @@ export function getObjectShape(schema: z.ZodType): Record<string, z.ZodType> {
  *
  * @example getUnionOptions(z.union([z.string(), z.number()])) // [z.string(), z.number()]
  */
-export function getUnionOptions(schema: z.ZodType): readonly z.ZodType[] {
-    return (schema as z.ZodUnion).options as readonly z.ZodType[];
+export function getUnionOptions(schema: AnyZodSchema): readonly AnyZodSchema[] {
+    return (schema as z.ZodUnion).options as readonly AnyZodSchema[];
 }
 
 /**
@@ -74,6 +85,6 @@ export function getUnionOptions(schema: z.ZodType): readonly z.ZodType[] {
  * The walker keeps a DU as an opaque leaf; this guard is essential because in v4 a DU also passes
  * `instanceof z.ZodUnion`, so without it a DU would be wrongly descended as a plain union.
  */
-export function isDiscriminatedUnion(schema: z.ZodType): boolean {
+export function isDiscriminatedUnion(schema: AnyZodSchema): boolean {
     return schema instanceof z.ZodDiscriminatedUnion;
 }

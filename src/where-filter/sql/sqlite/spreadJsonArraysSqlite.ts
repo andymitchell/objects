@@ -27,7 +27,7 @@ export function spreadJsonArraysSqlite(column: string, nodesDesc: TreeNode[]): S
         if (!node) throw new Error("node was empty in spreadJsonArraysSqlite");
         if (node.name) {
             pathSegments = [...pathSegments, node.name];
-            if (node.kind === 'ZodArray') {
+            if (node.kind === 'array') {
                 const alias = `${aliasBase}${arrayDepth}`;
                 const jsonPath = '$.' + pathSegments.join('.');
                 parts.push({

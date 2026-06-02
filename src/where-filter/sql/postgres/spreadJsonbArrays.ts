@@ -21,7 +21,7 @@ export function spreadJsonbArrays(column: string, nodesDesc: TreeNode[]): Spread
         if (!node) throw new Error("node was empty in spreadJsonbArrays");
         if (node.name) {
             jsonbParts.push(`'${node.name}'`);
-            if (node.kind === 'ZodArray') {
+            if (node.kind === 'array') {
 
                 const newColumn = column + arrayDepth;
                 const outputColumn = `${newColumn}`;

@@ -43,11 +43,11 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
 
     /** Counts how many ZodArray nodes exist in the ancestry chain for a path. Determines whether array spreading is needed. */
     private countArraysInPath(dotpropPath: string): number {
-        if ((this.nodeMap[dotpropPath]?.kind === 'ZodArray' || this.nodeMap[dotpropPath]?.descended_from_array)) {
+        if ((this.nodeMap[dotpropPath]?.kind === 'array' || this.nodeMap[dotpropPath]?.descended_from_array)) {
             let count = 0;
             let target: TreeNode | undefined = this.nodeMap[dotpropPath];
             while (target) {
-                if (target.kind === 'ZodArray') count++;
+                if (target.kind === 'array') count++;
                 target = target?.parent;
             }
             return count;
@@ -118,7 +118,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             const treeNode = this.nodeMap[dotpropPath];
             if (!treeNode) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
             if (Array.isArray(filter)) {
-                if (treeNode.kind !== 'ZodArray') throw new Error("Cannot compare an array to a non-array");
+                if (treeNode.kind !== 'array') throw new Error("Cannot compare an array to a non-array");
                 if (countArraysInPath === 1) {
                     // Just do a direct comparison
                     return this.generateComparison(dotpropPath, filter, statementArguments);
@@ -129,7 +129,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     sa = spreadJsonbArrays(this.sqlColumnName, path);
                     if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
 
-                    if (treeNode.kind !== 'ZodArray') throw new Error("Cannot compare an array to a non-array");
+                    if (treeNode.kind !== 'array') throw new Error("Cannot compare an array to a non-array");
                     subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_column);
                 }
 
@@ -146,10 +146,10 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 // When the path continues past the last array to a scalar/object field
                 // (e.g. messages.rfc822msgid where messages is the array), extract the
                 // remaining field from the spread output.
-                if (treeNode.kind !== 'ZodArray') {
+                if (treeNode.kind !== 'array') {
                     const remainingSegments: string[] = [];
                     for (let i = path.length - 1; i >= 0; i--) {
-                        if (path[i]!.kind === 'ZodArray') break;
+                        if (path[i]!.kind === 'array') break;
                         if (path[i]!.name) remainingSegments.unshift(path[i]!.name);
                     }
                     if (remainingSegments.length > 0) {
@@ -377,7 +377,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         }
         // $regex
         if (isValueComparisonRegex(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodString']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
             const placeholder = this.generatePlaceholder(filter.$regex, statementArguments);
             const op = filter.$options?.includes('i') ? '~*' : '~';
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ${op} ${placeholder}`);
@@ -399,7 +399,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             // Range comparison can be string or filter, so we need to determinate what we're dealing with to set the SQL straight.
             // E.g. if the filter is {$gt: 'A'}, this will be 'string'. If the filter is {$gt: 1}, this will be 'number'.
             const firstFilterValueType = typeof (Object.values(filter)[0]);
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType === 'string' ? 'ZodString' : 'ZodNumber']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType === 'string' ? 'string' : 'number']);
 
             const operators = ValueComparisonRangeOperators
                 .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
@@ -419,18 +419,18 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
 
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             if (testArrayContainsString) {
-                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodArray']);
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
                 return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ? ${placeholder}`);
             } else {
                 const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
                 return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
             }
         } else if (isPlainObject(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodObject']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['object']);
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
         } else if (Array.isArray(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['ZodArray']);
+            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
             const placeholder = this.generatePlaceholder(filter, statementArguments);
             return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
         } else if (filter === null) {

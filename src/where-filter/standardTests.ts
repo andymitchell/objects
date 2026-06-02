@@ -1,4 +1,4 @@
-import { z, ZodSchema } from "zod"
+import { z, type ZodSchema } from "zod"
 
 import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test.js"
 import type { MatchJavascriptObject, WhereFilterDefinition } from "./types.ts";

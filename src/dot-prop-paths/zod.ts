@@ -7,6 +7,7 @@ import {
     getUnionOptions,
     isDiscriminatedUnion,
     type ZodKind,
+    type AnyZodSchema,
 } from "./zodIntrospection.ts";
 
 // Re-exported so SQL builders can name expected kinds without reaching into the introspection layer.
@@ -24,7 +25,7 @@ export type TreeNode = {
     dotprop_path: string,
     kind: ZodKind,
     children: TreeNode[],
-    schema?: z.ZodType,
+    schema?: AnyZodSchema,
     nameless_array_element?: boolean,
     parent?: TreeNode,
     descended_from_array?: boolean,
@@ -76,7 +77,7 @@ type ConvertSchemaToDotPropPathTreeOptions = {
  * map['contact.name'].kind // 'string'
  */
 export function convertSchemaToDotPropPathTree(
-    schema: z.ZodType,
+    schema: AnyZodSchema,
     options?: ConvertSchemaToDotPropPathTreeOptions
 ): {root: TreeNode, map: TreeNodeMap} {
     const map = {};
@@ -85,7 +86,7 @@ export function convertSchemaToDotPropPathTree(
 }
 function _convertSchemaToDotPropPathTree(
     key: string,
-    schema: z.ZodType,
+    schema: AnyZodSchema,
     map: TreeNodeMap,
     options?: ConvertSchemaToDotPropPathTreeOptions,
     parent?: TreeNode,
@@ -205,16 +206,16 @@ function _convertSchemaToDotPropPathTree(
 
 
 /** Returns the ZodKind at a dot-prop path within a schema, unwrapping arrays/optionals. */
-export function getZodKindAtSchemaDotPropPath(schema: z.ZodType, path: DotPropPath): ZodKind | undefined {
+export function getZodKindAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath): ZodKind | undefined {
     const schemaAtPath = getZodSchemaAtSchemaDotPropPath(schema, path);
     return schemaAtPath ? getZodKind(schemaAtPath) : undefined;
 }
 
 
 /** Navigates a Zod schema by dot-prop path and returns the leaf schema, unwrapping arrays/optionals/nullables along the way. */
-export function getZodSchemaAtSchemaDotPropPath(schema: z.ZodType, path: DotPropPath): z.ZodType | undefined {
+export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath): AnyZodSchema | undefined {
     const keys = path.split('.');
-    let currentSchema: z.ZodType = schema;
+    let currentSchema: AnyZodSchema = schema;
 
     for (const key of keys) {
         // Step through array/optional/nullable wrappers to reach the object that owns the next key.

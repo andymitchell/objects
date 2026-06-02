@@ -40,13 +40,13 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
 
     const jsonbParts = dotPropPath.split(".");
     const castingMap:Partial<Record<ZodKind, string>> = {
-        'ZodString': '::text',
-        'ZodNumber': '::numeric',
-        'ZodBoolean': '::boolean',
-        'ZodBigInt': '::bigint',
-        'ZodObject': '::jsonb',
-        'ZodArray': '::jsonb',
-        'ZodNull': '',
+        'string': '::text',
+        'number': '::numeric',
+        'boolean': '::boolean',
+        'bigint': '::bigint',
+        'object': '::jsonb',
+        'array': '::jsonb',
+        'null': '',
     }
 
     const nodeMapForPath = nodeMap[dotPropPath];
@@ -59,7 +59,7 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         if( !part ) {
             return { success: false, error: { type: 'invalid_path', dotPropPath, message: `Unknown part in dotPropPath. ${UNSAFE_WARNING}` } };
         }
-        jsonbPath += `${jsonbParts.length>0 || (jsonbParts.length===0 && ['ZodArray', 'ZodObject'].includes(zodKind))? '->' : '->>'}'${part}'`;
+        jsonbPath += `${jsonbParts.length>0 || (jsonbParts.length===0 && ['array', 'object'].includes(zodKind))? '->' : '->>'}'${part}'`;
     }
 
 

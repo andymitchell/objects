@@ -23,6 +23,7 @@ function isUnrecoverable(type: WriteError["type"]): boolean {
     case "schema":
     case "missing_key":
     case "create_duplicated_key":
+    case "uuid_conflict":
     case "update_altered_key":
     case "permission_denied":
       return true;

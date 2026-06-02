@@ -21,9 +21,10 @@ export function isObjectsDelta(x: unknown): x is ObjectsDelta {
 }
 
 
-export const ObjectsDeltaApplicableSchema = ObjectsDeltaSchema.partial().merge(z.object({
+export const ObjectsDeltaApplicableSchema = z.object({
+    ...ObjectsDeltaSchema.partial().shape,
     upsert: z.array(itemSchema).optional(),
-}));
+});
 isTypeEqual<z.infer<typeof ObjectsDeltaApplicableSchema>, ObjectsDeltaApplicable>(true);
 isTypeExtended<ObjectsDeltaApplicable, z.infer<typeof ObjectsDeltaApplicableSchema>>(true);
 

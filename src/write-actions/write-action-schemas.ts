@@ -154,7 +154,7 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
       type: z.literal("custom"),
       message: z.string().optional(),
     })
-    .passthrough(),
+    .loose(),
   z.object({
     type: z.literal("schema"),
     issues: z.array(z.any()) as z.ZodType<z.ZodIssue[]>,
@@ -232,7 +232,12 @@ export function makeWriteOutcomeFailedCoreSchema<
   return z.object({
     ok: z.literal(false),
     action: makeWriteActionSchema<T>(),
-    errors: z.array(makeWriteErrorContextSchema<T>()).nonempty(),
+    // `errors` is a non-empty tuple `[WriteErrorContext, ...WriteErrorContext[]]`. `z.tuple([x], x)`
+    // expresses that in the inferred type natively; v4's `.nonempty()` only enforces ≥1 at runtime
+    // (it infers a plain `T[]`, dropping the compile-time guarantee). To relax later, switch to
+    // `z.array(makeWriteErrorContextSchema<T>()).nonempty()` → `WriteErrorContext[]` (then `errors[0]`
+    // becomes possibly-undefined under noUncheckedIndexedAccess).
+    errors: z.tuple([makeWriteErrorContextSchema<T>()], makeWriteErrorContextSchema<T>()),
     unrecoverable: z.boolean().optional(),
     back_off_until_ts: z.number().optional(),
     blocked_by_action_uuid: z.string().optional(),

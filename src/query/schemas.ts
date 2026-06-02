@@ -42,10 +42,10 @@ export const SortAndSliceSchema = SortAndSliceBaseSchema.extend({
     after_pk: PrimaryKeyValueSchema.optional(),
 }).superRefine((data, ctx) => {
     if (data.offset !== undefined && data.after_pk !== undefined) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'offset and after_pk are mutually exclusive' });
+        ctx.addIssue({ code: "custom", message: 'offset and after_pk are mutually exclusive' });
     }
     if (data.after_pk !== undefined && (!data.sort || data.sort.length === 0)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'after_pk requires a non-empty sort to define deterministic ordering' });
+        ctx.addIssue({ code: "custom", message: 'after_pk requires a non-empty sort to define deterministic ordering' });
     }
 });
 

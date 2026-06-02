@@ -108,42 +108,42 @@ describe('Zod test', () => {
         expect(result.root).toEqual({
             "name": "",
             "dotprop_path": "",
-            "kind": "ZodObject",
+            "kind": "object",
             "children": [
                 {
                     "name": "contact",
                     "dotprop_path": "contact",
-                    "kind": "ZodObject",
+                    "kind": "object",
                     "children": [
                         {
                             "name": "name",
                             "dotprop_path": "contact.name",
-                            "kind": "ZodString",
+                            "kind": "string",
                             "children": []
                         },
                         {
                             "name": "age",
                             "dotprop_path": "contact.age",
-                            "kind": "ZodNumber",
+                            "kind": "number",
                             "children": [],
                             "optional_or_nullable": true
                         },
                         {
                             "name": "emailAddress",
                             "dotprop_path": "contact.emailAddress",
-                            "kind": "ZodString",
+                            "kind": "string",
                             "children": [],
                             "optional_or_nullable": true
                         },
                         {
                             "name": "locations",
                             "dotprop_path": "contact.locations",
-                            "kind": "ZodArray",
+                            "kind": "array",
                             "children": [
                                 {
                                     "name": "",
                                     "dotprop_path": "contact.locations",
-                                    "kind": "ZodString",
+                                    "kind": "string",
                                     "children": [],
                                     "descended_from_array": true,
                                     "nameless_array_element": true
@@ -151,7 +151,7 @@ describe('Zod test', () => {
                                 {
                                     "name": "",
                                     "dotprop_path": "contact.locations",
-                                    "kind": "ZodNumber",
+                                    "kind": "number",
                                     "children": [],
                                     "descended_from_array": true,
                                     "nameless_array_element": true
@@ -159,12 +159,12 @@ describe('Zod test', () => {
                                 {
                                     "name": "",
                                     "dotprop_path": "contact.locations",
-                                    "kind": "ZodObject",
+                                    "kind": "object",
                                     "children": [
                                         {
                                             "name": "city",
                                             "dotprop_path": "contact.locations.city",
-                                            "kind": "ZodString",
+                                            "kind": "string",
                                             "children": [],
                                             "descended_from_array": true,
                                             "optional_or_nullable": true
@@ -172,7 +172,7 @@ describe('Zod test', () => {
                                         {
                                             "name": "country",
                                             "dotprop_path": "contact.locations.country",
-                                            "kind": "ZodString",
+                                            "kind": "string",
                                             "children": [],
                                             "descended_from_array": true,
                                             "optional_or_nullable": true
@@ -180,12 +180,12 @@ describe('Zod test', () => {
                                         {
                                             "name": "flights",
                                             "dotprop_path": "contact.locations.flights",
-                                            "kind": "ZodArray",
+                                            "kind": "array",
                                             "children": [
                                                 {
                                                     "name": "",
                                                     "dotprop_path": "contact.locations.flights",
-                                                    "kind": "ZodString",
+                                                    "kind": "string",
                                                     "children": [],
                                                     "descended_from_array": true,
                                                     "nameless_array_element": true
@@ -229,7 +229,7 @@ describe('Zod test', () => {
             const schema = z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]);
             const { root } = convertSchemaToDotPropPathTree(schema, { ...SHARED_OPTS, union_aware: true });
 
-            expect(root.kind).toBe('ZodUnion');
+            expect(root.kind).toBe('union');
             expect(root.children.length).toBe(2);
             expect(root.children.every(c => c.union_variant === true)).toBe(true);
 
@@ -237,7 +237,7 @@ describe('Zod test', () => {
             const variantB = root.children[1]!;
             expect(variantA.children.length).toBe(1);
             expect(variantA.children[0]!.name).toBe('a');
-            expect(variantA.children[0]!.kind).toBe('ZodString');
+            expect(variantA.children[0]!.kind).toBe('string');
             expect(variantB.children[0]!.name).toBe('b');
         });
 
@@ -248,14 +248,14 @@ describe('Zod test', () => {
             const { root } = convertSchemaToDotPropPathTree(schema, { ...SHARED_OPTS, union_aware: true });
 
             const unionNode = root.children.find(c => c.name === 'k')!;
-            expect(unionNode.kind).toBe('ZodUnion');
+            expect(unionNode.kind).toBe('union');
             expect(unionNode.children.length).toBe(2);
 
             // Both variants of `k.a` survive with their own type — no first-wins loss.
             const variant1A = unionNode.children[0]!.children.find(c => c.name === 'a');
             const variant2A = unionNode.children[1]!.children.find(c => c.name === 'a');
-            expect(variant1A?.kind).toBe('ZodString');
-            expect(variant2A?.kind).toBe('ZodNumber');
+            expect(variant1A?.kind).toBe('string');
+            expect(variant2A?.kind).toBe('number');
         });
 
         test('a union inside an array nests its variants under the array element', () => {
@@ -265,15 +265,15 @@ describe('Zod test', () => {
             const { root } = convertSchemaToDotPropPathTree(schema, { ...SHARED_OPTS, union_aware: true });
 
             const arrayNode = root.children.find(c => c.name === 'tags')!;
-            expect(arrayNode.kind).toBe('ZodArray');
+            expect(arrayNode.kind).toBe('array');
             expect(arrayNode.children.length).toBe(1);
 
             const unionNode = arrayNode.children[0]!;
-            expect(unionNode.kind).toBe('ZodUnion');
+            expect(unionNode.kind).toBe('union');
             expect(unionNode.nameless_array_element).toBe(true);
             expect(unionNode.children.length).toBe(2);
-            expect(unionNode.children[0]!.kind).toBe('ZodString');
-            expect(unionNode.children[1]!.kind).toBe('ZodObject');
+            expect(unionNode.children[0]!.kind).toBe('string');
+            expect(unionNode.children[1]!.kind).toBe('object');
         });
 
         test('the union-aware tree validates against TreeNodeSchema', () => {
@@ -291,9 +291,9 @@ describe('Zod test', () => {
             const { root } = convertSchemaToDotPropPathTree(schema, SHARED_OPTS);
             const arrayNode = root.children.find(c => c.name === 'tags')!;
             expect(arrayNode.children.length).toBe(2);
-            expect(arrayNode.children[0]!.kind).toBe('ZodString');
-            expect(arrayNode.children[1]!.kind).toBe('ZodNumber');
-            expect(arrayNode.children.some(c => c.kind === 'ZodUnion')).toBe(false);
+            expect(arrayNode.children[0]!.kind).toBe('string');
+            expect(arrayNode.children[1]!.kind).toBe('number');
+            expect(arrayNode.children.some(c => c.kind === 'union')).toBe(false);
         });
 
     });
@@ -302,7 +302,7 @@ describe('Zod test', () => {
 
 describe('migration baseline — walker invariants (kind-free; must survive the zod4 representation change)', () => {
     // Deliberately free of `kind` assertions: the kind vocabulary changes by design in the zod4
-    // migration ('ZodArray' -> 'array'), so pinning it here would prove nothing. These lock what
+    // migration ('array' -> 'array'), so pinning it here would prove nothing. These lock what
     // must NOT change — path discovery, array-ancestry, optionality, and a schema-at-a-path
     // actually validating the value that lives there. They are the regression net for the rewrite.
 

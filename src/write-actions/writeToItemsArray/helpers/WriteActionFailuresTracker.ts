@@ -36,11 +36,15 @@ function isUnrecoverable(type: WriteError["type"]): boolean {
 export default class WriteActionFailuresTracker<
   T extends Record<string, any>,
 > {
-  private schema: z.ZodType<T, any, any>;
+  private schema: z.ZodType<T>;
   private failures: WriteOutcomeFailed<T>[];
   private pk: PrimaryKeyGetter<T>;
 
-  constructor(schema: z.ZodType<T, any, any>, rules: ListRules<T>) {
+  // `schema` is `z.ZodType<T>`, not `z.ZodType<T, any, any>`: the 3-arg form does not infer `T`
+  // from a passed schema under zod v4 (it falls back to `Record<string, any>`), which would strip
+  // per-field item typing from callers that rely on inference. The 1-arg form infers `T` from the
+  // schema's output.
+  constructor(schema: z.ZodType<T>, rules: ListRules<T>) {
     this.schema = schema;
     this.failures = [];
     this.pk = makePrimaryKeyGetter(rules.primary_key);

@@ -58,7 +58,7 @@ const ExoticSchema = z
   .object({
     id: z.string().min(3),
     bag: z.set(z.string()),
-    lookup: z.record(z.number()),
+    lookup: z.record(z.string(), z.number()),
   })
   .strict();
 type ExoticItem = z.infer<typeof ExoticSchema>;
@@ -80,7 +80,7 @@ const NestedUnionSchema = z.object({
 type NestedUnionItem = z.infer<typeof NestedUnionSchema>;
 const invalidNestedUnion: NestedUnionItem = { id: "nu1", k: { a: "no" } };
 
-// A refined schema: an opaque ZodEffects leaf that rejects every input.
+// A refined object schema that always rejects. In v4 `.refine()` returns the object itself, so the walker descends into its fields.
 const RefinedSchema = z
   .object({ id: z.string() })
   .strict()
@@ -678,13 +678,13 @@ describe("snapshotting failures through get()", () => {
 });
 
 describe("serialising the schema for error reports", () => {
-  test("a flat object schema serialises into a defined ZodObject tree", () => {
+  test("a flat object schema serialises into a defined object tree", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat), invalidFlat);
     const tree = TreeNodeSchema.parse(schemaErrorOf(tracker).serialised_schema);
-    expect(tree.kind).toBe("ZodObject");
+    expect(tree.kind).toBe("object");
     expect(tree.children.some((c) => c.name === "name")).toBe(true);
   });
 
@@ -695,9 +695,9 @@ describe("serialising the schema for error reports", () => {
     tracker.testSchema(makeAction(invalidNested), invalidNested);
     const tree = TreeNodeSchema.parse(schemaErrorOf(tracker).serialised_schema);
     const profile = tree.children.find((c) => c.name === "profile");
-    expect(profile?.kind).toBe("ZodObject");
+    expect(profile?.kind).toBe("object");
     expect(profile?.children.find((c) => c.name === "age")?.kind).toBe(
-      "ZodNumber",
+      "number",
     );
   });
 
@@ -717,7 +717,7 @@ describe("serialising the schema for error reports", () => {
     });
     tracker.testSchema(makeAction(invalidLazy), invalidLazy);
     const tree = TreeNodeSchema.parse(schemaErrorOf(tracker).serialised_schema);
-    expect(tree.kind).toBe("ZodLazy");
+    expect(tree.kind).toBe("lazy");
   });
 
   test("exotic leaf types such as set and record serialise JSON-safely", () => {
@@ -738,9 +738,9 @@ describe("serialising the schema for error reports", () => {
     const error = schemaErrorOf(tracker);
     const tree = TreeNodeSchema.parse(error.serialised_schema);
 
-    expect(tree.kind).toBe("ZodUnion");
+    expect(tree.kind).toBe("union");
     expect(tree.children.length).toBe(2);
-    expect(tree.children.every((v) => v.kind === "ZodObject")).toBe(true);
+    expect(tree.children.every((v) => v.kind === "object")).toBe(true);
     expect(tree.children.every((v) => v.union_variant === true)).toBe(true);
     // The union does not compromise the rest of the error.
     expect(error.issues.length).toBeGreaterThan(0);
@@ -755,7 +755,7 @@ describe("serialising the schema for error reports", () => {
     const tree = TreeNodeSchema.parse(schemaErrorOf(tracker).serialised_schema);
 
     const unionNode = tree.children.find((c) => c.name === "k");
-    expect(unionNode?.kind).toBe("ZodUnion");
+    expect(unionNode?.kind).toBe("union");
     expect(unionNode?.children.length).toBe(2);
     // Both variants of `k.a` survive with their own type — no first-wins loss.
     const variant1A = unionNode?.children[0]?.children.find(
@@ -764,8 +764,8 @@ describe("serialising the schema for error reports", () => {
     const variant2A = unionNode?.children[1]?.children.find(
       (c) => c.name === "a",
     );
-    expect(variant1A?.kind).toBe("ZodString");
-    expect(variant2A?.kind).toBe("ZodNumber");
+    expect(variant1A?.kind).toBe("string");
+    expect(variant2A?.kind).toBe("number");
   });
 
   test("the serialised schema survives a second JSON round-trip unchanged", () => {
@@ -777,15 +777,16 @@ describe("serialising the schema for error reports", () => {
     expect(JSON.parse(JSON.stringify(schema))).toEqual(schema);
   });
 
-  test("a refined schema serialises as a defined but shallow opaque node", () => {
+  test("a refined object schema descends into its fields", () => {
     const tracker = new WriteActionFailuresTracker(RefinedSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(refinedItem), refinedItem);
     const tree = TreeNodeSchema.parse(schemaErrorOf(tracker).serialised_schema);
-    // An effects wrapper is an opaque leaf — its inner field paths are not expanded.
-    expect(tree.kind).toBe("ZodEffects");
-    expect(tree.children.length).toBe(0);
+    // `.refine()` returns the underlying object (no effects wrapper), so the walker descends
+    // into its fields rather than treating the schema as an opaque leaf.
+    expect(tree.kind).toBe("object");
+    expect(tree.children.some((c) => c.name === "id")).toBe(true);
   });
 
   test("a discriminated union serialises as a defined but shallow opaque node", () => {
@@ -797,8 +798,9 @@ describe("serialising the schema for error reports", () => {
       invalidDiscriminated,
     );
     const tree = TreeNodeSchema.parse(schemaErrorOf(tracker).serialised_schema);
-    // A discriminated union is not a ZodUnion; it stays an opaque leaf.
-    expect(tree.kind).toBe("ZodDiscriminatedUnion");
+    // A discriminated union extends ZodUnion in v4, but the walker guards it before the union
+    // branch so it stays an opaque leaf (its variants are not expanded).
+    expect(tree.kind).toBe("union");
     expect(tree.children.length).toBe(0);
   });
 });

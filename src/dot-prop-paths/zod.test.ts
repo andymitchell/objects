@@ -302,7 +302,7 @@ describe('Zod test', () => {
 
 describe('migration baseline — walker invariants (kind-free; must survive the zod4 representation change)', () => {
     // Deliberately free of `kind` assertions: the kind vocabulary changes by design in the zod4
-    // migration ('array' -> 'array'), so pinning it here would prove nothing. These lock what
+    // migration (the v3 'ZodArray' kind is now 'array'), so pinning it here would prove nothing. These lock what
     // must NOT change — path discovery, array-ancestry, optionality, and a schema-at-a-path
     // actually validating the value that lives there. They are the regression net for the rewrite.
 
@@ -381,5 +381,44 @@ describe('migration baseline — walker invariants (kind-free; must survive the 
         const nickname = getZodSchemaAtSchemaDotPropPath(schema, 'profile.nickname');
         expect(nickname?.safeParse('bob').success).toBe(true);
         expect(nickname?.safeParse(123).success).toBe(false);
+    });
+
+    test('default / catch / readonly wrappers are transparent: paths beneath them are still found and resolve', () => {
+        // These wrappers change a value's presence/default/mutability but not its structural shape, so
+        // the walker must descend through them (the v3 walker did; the zod4 rewrite must preserve it).
+        const schema = z.object({
+            cfg: z.object({ on: z.boolean() }).default({ on: true }),
+            fallback: z.object({ tier: z.string() }).catch({ tier: 'free' }),
+            locked: z.object({ code: z.number() }).readonly(),
+            tags: z.array(z.string()).default([]),
+        });
+
+        const { map } = convertSchemaToDotPropPathTree(schema, {
+            exclude_parent_reference: true,
+            exclude_schema_reference: true,
+        });
+
+        // Wrapped object/array fields are descended into, never treated as opaque leaves.
+        expect(new Set(Object.keys(map))).toEqual(new Set([
+            '', 'cfg', 'cfg.on', 'fallback', 'fallback.tier', 'locked', 'locked.code', 'tags',
+        ]));
+
+        // default/catch/readonly supply an always-present value, so they do NOT mark the field optional.
+        expect(!!map['cfg']?.optional_or_nullable).toBe(false);
+        expect(!!map['fallback']?.optional_or_nullable).toBe(false);
+        expect(!!map['locked']?.optional_or_nullable).toBe(false);
+
+        // schema-at-path resolves through each wrapper to the inner field's own validator.
+        const on = getZodSchemaAtSchemaDotPropPath(schema, 'cfg.on');
+        expect(on?.safeParse(true).success).toBe(true);
+        expect(on?.safeParse('nope').success).toBe(false);
+
+        const tier = getZodSchemaAtSchemaDotPropPath(schema, 'fallback.tier');
+        expect(tier?.safeParse('paid').success).toBe(true);
+        expect(tier?.safeParse(7).success).toBe(false);
+
+        const code = getZodSchemaAtSchemaDotPropPath(schema, 'locked.code');
+        expect(code?.safeParse(42).success).toBe(true);
+        expect(code?.safeParse('x').success).toBe(false);
     });
 });

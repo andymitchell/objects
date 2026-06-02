@@ -6,6 +6,7 @@ import {
     getObjectShape,
     getUnionOptions,
     isDiscriminatedUnion,
+    isTransparentWrapper,
     type ZodKind,
     type AnyZodSchema,
 } from "./zodIntrospection.ts";
@@ -186,9 +187,12 @@ function _convertSchemaToDotPropPathTree(
             node = parent!;
         }
 
-    } else if( kind==='optional' || kind==='nullable' ) {
-        // Pass through the wrapper; the value's real shape is one level in.
-        node = _convertSchemaToDotPropPathTree(key, unwrap(schema), map, options, parent, parentsIncludeArray, true, withinUnion);
+    } else if( isTransparentWrapper(kind) ) {
+        // Pass through transparent wrappers (optional/nullable/default/catch/readonly); the value's
+        // real shape is one level in. Only optional/nullable mark the field optional — default/catch/
+        // readonly always yield a present value.
+        const optionalOrNullable = kind==='optional' || kind==='nullable';
+        node = _convertSchemaToDotPropPathTree(key, unwrap(schema), map, options, parent, parentsIncludeArray, optionalOrNullable, withinUnion);
     } else {
         // Presume leaf
         node = {
@@ -205,25 +209,26 @@ function _convertSchemaToDotPropPathTree(
 }
 
 
-/** Returns the ZodKind at a dot-prop path within a schema, unwrapping arrays/optionals. */
+/** Returns the ZodKind at a dot-prop path within a schema, unwrapping arrays and transparent wrappers (optional/nullable/default/catch/readonly). */
 export function getZodKindAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath): ZodKind | undefined {
     const schemaAtPath = getZodSchemaAtSchemaDotPropPath(schema, path);
     return schemaAtPath ? getZodKind(schemaAtPath) : undefined;
 }
 
 
-/** Navigates a Zod schema by dot-prop path and returns the leaf schema, unwrapping arrays/optionals/nullables along the way. */
+/** Navigates a Zod schema by dot-prop path and returns the leaf schema, unwrapping arrays and transparent wrappers (optional/nullable/default/catch/readonly) along the way. */
 export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath): AnyZodSchema | undefined {
     const keys = path.split('.');
     let currentSchema: AnyZodSchema = schema;
 
     for (const key of keys) {
-        // Step through array/optional/nullable wrappers to reach the object that owns the next key.
+        // Step through array and transparent (optional/nullable/default/catch/readonly) wrappers to
+        // reach the object that owns the next key.
         while( true ) {
             const currentKind = getZodKind(currentSchema);
             if( currentKind==='array' ) {
                 currentSchema = getArrayElement(currentSchema);
-            } else if( currentKind==='optional' || currentKind==='nullable' ) {
+            } else if( isTransparentWrapper(currentKind) ) {
                 currentSchema = unwrap(currentSchema);
             } else {
                 break;

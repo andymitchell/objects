@@ -34,15 +34,32 @@ export function getZodKind(schema: AnyZodSchema): ZodKind {
 }
 
 /**
- * Steps through one optional/nullable wrapper to the schema it wraps.
+ * Steps through one transparent wrapper — optional/nullable/default/catch/readonly — to the schema
+ * it wraps.
  *
- * The walker treats optionality as transparent — the value's real shape lives one level in.
+ * These change a value's presence/default/mutability but not its structural shape, so the value's
+ * real shape lives one level in. Every such wrapper stores it on `def.innerType`, so one read covers
+ * them all (matching zod 3, which passed through any `_def.innerType` wrapper).
  *
- * @example unwrap(z.string().optional()) // z.string()
+ * @example unwrap(z.string().optional()) // z.string();  unwrap(z.string().default('x')) // z.string()
  */
 export function unwrap(schema: AnyZodSchema): AnyZodSchema {
-    // The getter yields the core `$ZodType`; widen back to the classic schema the rest of the walker uses.
-    return (schema as z.ZodOptional | z.ZodNullable).unwrap() as AnyZodSchema;
+    return (schema._zod.def as z.core.$ZodTypeDef & { innerType: AnyZodSchema }).innerType;
+}
+
+/** The wrapper kinds {@link unwrap} steps through (each stores its inner schema on `def.innerType`). */
+const TRANSPARENT_WRAPPER_KINDS: readonly ZodKind[] = ["optional", "nullable", "default", "catch", "readonly"];
+
+/**
+ * True for a wrapper kind the walker descends through to its inner schema (see {@link unwrap}).
+ *
+ * `optional`/`nullable` additionally mark a node optional; `default`/`catch`/`readonly` always yield
+ * a present value, so callers must not treat them as optional.
+ *
+ * @example isTransparentWrapper("default") // true;  isTransparentWrapper("object") // false
+ */
+export function isTransparentWrapper(kind: ZodKind): boolean {
+    return TRANSPARENT_WRAPPER_KINDS.includes(kind);
 }
 
 /**

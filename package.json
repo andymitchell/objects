@@ -83,7 +83,7 @@
         "ts-morph": "^26.0.0",
         "tsup": "^8.5.0",
         "typescript": "^5.8.3",
-        "vitest": "^3.0.7",
+        "vitest": "^4.1.8",
         "zod": "^4.1.8"
     },
     "dependencies": {

@@ -5,6 +5,7 @@ import type {
   ListRules,
   ListRulesCore,
   RootListRules,
+  SortableKeyRule,
 } from "./types.ts";
 import type { resolveDdlListRules } from "./resolveDdlListRules.ts";
 import type { SortEntry } from "../query/types.ts";
@@ -377,7 +378,7 @@ describe("Ordering and sortable-key declarations", () => {
           primary_key: "id",
           default_ordering_key: { key: "id", direction: 1 },
           // `direction` omitted = both directions; `1`/`-1` restricts.
-          sortable_keys: [{ key: "title" }, { key: "age", direction: -1 }],
+          sortable_keys: [{ key: "name" }, { key: "rank", direction: -1 }],
         },
       },
       ownership: { type: "none" },

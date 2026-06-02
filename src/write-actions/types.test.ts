@@ -358,6 +358,8 @@ describe("4. WriteError discriminated union", () => {
           break;
         case "blocked":
           break;
+        case "uuid_conflict":
+          break;
         default: {
           // If all cases are handled, this should resolve to never
           const _exhaustive: never = error;

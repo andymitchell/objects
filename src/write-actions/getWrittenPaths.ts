@@ -48,5 +48,11 @@ function extractFromPayload<T extends Record<string, any>>(
             return extractFromPayload(payload.action, join(payload.scope as string));
         case 'delete':
             return [];
+        default: {
+            // Every WritePayload variant is handled above; the never-assertion makes a future
+            // unhandled variant a compile error here rather than a silent `undefined` return.
+            const _exhaustive: never = payload;
+            throw new Error(`getWrittenPaths: unhandled WritePayload variant ${JSON.stringify(_exhaustive)}`);
+        }
     }
 }

@@ -1,11 +1,11 @@
 
 import { isTypeEqual, isTypeExtended } from "@andyrmitchell/utils";
 import { PrimaryKeyValueSchema} from "../utils/getKeyValue.ts";
-import z from "zod";
+import { z } from "zod";
 import type { ObjectsDelta, ObjectsDeltaApplicable} from "./types.ts";
 import { FlexibleTimestampSchema } from "@andyrmitchell/composite-timestamps";
 
-const itemSchema = z.record(z.any());
+const itemSchema = z.record(z.string(), z.any());
 
 
 export const ObjectsDeltaSchema = z.object({

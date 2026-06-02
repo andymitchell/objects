@@ -1,4 +1,4 @@
-import z from "zod";
+import { z } from "zod";
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
 import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
 

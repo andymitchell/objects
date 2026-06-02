@@ -1,4 +1,4 @@
-import { z, ZodNumber, ZodOptional, type ZodSchema, type ZodTypeDef } from "zod";
+import { z, ZodNumber, ZodOptional, type ZodSchema } from "zod";
 import type {  ArrayValueComparisonAll, ArrayValueComparisonElemMatch, ArrayValueComparisonSize, ValueComparisonEq, ValueComparisonExists, ValueComparisonIn, ValueComparisonNe, ValueComparisonNin, ValueComparisonNot, ValueComparisonRegex, ValueComparisonType, WhereFilterDefinition } from "./types.ts";
 import isPlainObject from "../utils/isPlainObject.js";
 import { ValueComparisonRangeOperators } from "./consts.ts";
@@ -38,7 +38,7 @@ const ValueComparisonNotSchema: ZodSchema = z.lazy(() => z.object({
     ])
 }));
 
-const ArrayValueComparisonAllSchema = z.object({ $all: z.array(z.union([z.string(), z.number(), z.record(z.unknown())])) });
+const ArrayValueComparisonAllSchema = z.object({ $all: z.array(z.union([z.string(), z.number(), z.record(z.string(), z.unknown())])) });
 
 const ValueComparisonSchema = z.union([
     ValueComparisonScalarSchema,
@@ -62,9 +62,9 @@ const ArrayValueComparisonSchema = z.union([
     ArrayValueComparisonSizeSchema,
 ]);
 
-export const WhereFilterSchema: ZodSchema<WhereFilterDefinition<any>, ZodTypeDef, any> = z.lazy(() =>
+export const WhereFilterSchema: z.ZodType<WhereFilterDefinition<any>> = z.lazy(() =>
     z.union([
-        z.record(z.union([
+        z.record(z.string(), z.union([
             ValueComparisonSchema,
             ArrayValueComparisonSchema,
             WhereFilterSchema

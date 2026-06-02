@@ -1,62 +1,22 @@
-import { type ZodTypeAny, z } from "zod";
+import { z } from "zod";
+import {
+    getZodKind,
+    unwrap,
+    getArrayElement,
+    getObjectShape,
+    getUnionOptions,
+    isDiscriminatedUnion,
+    type ZodKind,
+} from "./zodIntrospection.ts";
 
-
-/** Union of all Zod first-party type names (e.g. 'ZodString', 'ZodArray'). Used to drive type-aware SQL casting and path validation. */
-export type ZodKind = keyof typeof z.ZodFirstPartyTypeKind;
+// Re-exported so SQL builders can name expected kinds without reaching into the introspection layer.
+export type { ZodKind };
 type DotPropPath = string;
-
-
-
-type WhitelistTypes<T extends ZodKind[] = ZodKind[]> = T[number];
-
-/**
- * Returns a flat map of dot-prop paths to their ZodKind for a schema. Simpler than convertSchemaToDotPropPathTree (no tree structure).
- *
- * @param schema The source schema
- * @param whitelistTypes Optional shortlist of allowed types (dot prop paths not of this type are excluded)
- * @returns `{'person.age': 'ZodNumber', ...}`
- *
- * @example
- * convertSchemaToDotPropPathKind(mySchema, ['ZodString', 'ZodNumber'])
- */
-export function convertSchemaToDotPropPathKind<T extends ZodKind[] = ZodKind[]>(
-    schema: ZodTypeAny,
-    whitelistTypes: T = Object.keys(z.ZodFirstPartyTypeKind) as T// ZodKind[] = Object.keys(z.ZodFirstPartyTypeKind) as ZodKind[],
-): Record<DotPropPath, WhitelistTypes<T>> {
-    return _convertSchemaToDotPropPathKind(schema, whitelistTypes);
-}
-function _convertSchemaToDotPropPathKind(
-    schema: ZodTypeAny,
-    whitelistTypes: ZodKind[] = Object.keys(z.ZodFirstPartyTypeKind) as ZodKind[],
-    basePath = ''
-) {
-    const paths: Record<string, ZodKind> = {};
-
-    if (schema._def.typeName === 'ZodObject') {
-        // @ts-ignore
-        for (const key in schema.shape) {
-            // @ts-ignore
-            const subSchema: ZodTypeAny = schema.shape[key];
-            const path = basePath ? `${basePath}.${key}` : key;
-
-            if (subSchema._def.typeName === 'ZodObject') {
-
-                Object.assign(paths, _convertSchemaToDotPropPathKind(subSchema, whitelistTypes, path));
-
-            } else if (whitelistTypes.includes(subSchema._def.typeName as ZodKind)) {
-
-                paths[path] = subSchema._def.typeName as ZodKind;
-            }
-        }
-    }
-
-    return paths;
-}
 
 
 /**
  * A node in the schema tree produced by convertSchemaToDotPropPathTree.
- * Captures the Zod type, parent/child links, and metadata (array ancestry, optionality)
+ * Captures the Zod kind, parent/child links, and metadata (array ancestry, optionality)
  * needed by the SQL builder for type casting, array spreading, and null guards.
  */
 export type TreeNode = {
@@ -64,12 +24,12 @@ export type TreeNode = {
     dotprop_path: string,
     kind: ZodKind,
     children: TreeNode[],
-    schema?: z.ZodSchema,
+    schema?: z.ZodType,
     nameless_array_element?: boolean,
     parent?: TreeNode,
     descended_from_array?: boolean,
     optional_or_nullable?: boolean,
-    /** True when this node is one variant of a `ZodUnion` parent. */
+    /** True when this node is one variant of a union parent. */
     union_variant?: boolean
 }
 export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
@@ -93,7 +53,7 @@ type ConvertSchemaToDotPropPathTreeOptions = {
     exclude_schema_reference?: boolean,
     exclude_parent_reference?: boolean,
     /**
-     * Represent each `z.union` as a `ZodUnion` node whose children are one complete subtree per
+     * Represent each `z.union` as a dedicated union node whose children are one complete subtree per
      * variant. When absent, a union's variants are flattened into its parent, which collapses a
      * union of objects into indistinguishable same-named siblings and throws if two variants
      * register the same dot-prop path. Enable it for a faithful, serialisable tree of a
@@ -103,19 +63,20 @@ type ConvertSchemaToDotPropPathTreeOptions = {
 }
 /**
  * Recursively walks a Zod schema and produces a TreeNode tree plus a flat TreeNodeMap.
- * The map is the key input to the SQL builder: it provides ZodKind (for casting), array ancestry
+ * The map is the key input to the SQL builder: it provides the kind (for casting), array ancestry
  * (for jsonb_array_elements spreading), optionality (for IS NOT NULL guards), and sub-schemas
  * (for recursing into array element types).
  *
  * A `z.union` is flattened into its parent unless the `union_aware` option is set, which
- * represents the union as a dedicated `ZodUnion` node with one child subtree per variant.
+ * represents the union as a dedicated union node with one child subtree per variant. A
+ * discriminated union is always an opaque leaf — its variants are not expanded.
  *
  * @example
  * const { root, map } = convertSchemaToDotPropPathTree(ContactSchema);
- * map['contact.name'].kind // 'ZodString'
+ * map['contact.name'].kind // 'string'
  */
 export function convertSchemaToDotPropPathTree(
-    schema: ZodTypeAny,
+    schema: z.ZodType,
     options?: ConvertSchemaToDotPropPathTreeOptions
 ): {root: TreeNode, map: TreeNodeMap} {
     const map = {};
@@ -123,8 +84,8 @@ export function convertSchemaToDotPropPathTree(
     return {root, map};
 }
 function _convertSchemaToDotPropPathTree(
-    key: string, 
-    schema: ZodTypeAny,
+    key: string,
+    schema: z.ZodType,
     map: TreeNodeMap,
     options?: ConvertSchemaToDotPropPathTreeOptions,
     parent?: TreeNode,
@@ -132,7 +93,7 @@ function _convertSchemaToDotPropPathTree(
     optionalOrNullable?: boolean,
     withinUnion?: boolean
 ):TreeNode {
-   
+
     let node:TreeNode;
     const dotprop_path = (parent?.dotprop_path && key? `${parent?.dotprop_path}.${key}` : (key? key : parent?.dotprop_path)) ?? '';
     function addNode(newNode:TreeNode) {
@@ -148,9 +109,9 @@ function _convertSchemaToDotPropPathTree(
             // per element type) and union variants (one subtree per variant, plus any fields the
             // variants have in common). The flat map keeps the first node at a shared path; the
             // tree retains every sibling. Any other collision throws.
-            if( parent?.kind==='ZodArray' ) {
+            if( parent?.kind==='array' ) {
                 newNode.nameless_array_element = true;
-            } else if( parent?.kind==='ZodUnion' ) {
+            } else if( parent?.kind==='union' ) {
                 newNode.union_variant = true;
             } else if( !withinUnion ) {
                 throw new Error("Duplicate dotprop_path that is not in an array");
@@ -160,11 +121,13 @@ function _convertSchemaToDotPropPathTree(
         }
     }
 
-    if( schema instanceof z.ZodArray ) {
+    const kind = getZodKind(schema);
+
+    if( kind==='array' ) {
         node = {
-            name: key, 
+            name: key,
             dotprop_path,
-            kind: schema._def.typeName, // ZodArray,
+            kind,
             children: []
         }
 
@@ -172,30 +135,42 @@ function _convertSchemaToDotPropPathTree(
 
         // It'll be a nameless child on an array
         parentsIncludeArray = true;
-        _convertSchemaToDotPropPathTree('', schema.element, map, options, node, parentsIncludeArray, undefined, withinUnion);
-        
-    } else if( schema instanceof z.ZodObject ) {
+        _convertSchemaToDotPropPathTree('', getArrayElement(schema), map, options, node, parentsIncludeArray, undefined, withinUnion);
+
+    } else if( kind==='object' ) {
+        // Refined objects reach here too (v4 has no ZodEffects wrapper) and descend into their fields.
         node = {
-            name: key, 
+            name: key,
             dotprop_path,
-            kind: schema._def.typeName, // ZodObject,
+            kind,
             children: []
         }
         addNode(node);
 
-        for( const childKey in schema.shape ) {
-            const childSchema = schema.shape[childKey];
+        const shape = getObjectShape(schema);
+        for( const childKey in shape ) {
+            const childSchema = shape[childKey]!;
             _convertSchemaToDotPropPathTree(childKey, childSchema, map, options, node, parentsIncludeArray, undefined, withinUnion);
         }
-    } else if( schema instanceof z.ZodUnion ) {
-        const unionSchemas = schema._def.options as z.ZodSchema[];
+    } else if( kind==='union' && isDiscriminatedUnion(schema) ) {
+        // A discriminated union stays an opaque leaf: its variants are not expanded. This guard runs
+        // before the plain-union branch because in v4 a DU also satisfies `instanceof z.ZodUnion`.
+        node = {
+            name: key,
+            dotprop_path,
+            kind,
+            children: []
+        }
+        addNode(node);
+    } else if( kind==='union' ) {
+        const unionSchemas = getUnionOptions(schema);
         if( options?.union_aware ) {
-            // A ZodUnion node holds one child subtree per variant. Variants are nameless and share
-            // this node's dot-prop path, mirroring how element types attach to a ZodArray node.
+            // A union node holds one child subtree per variant. Variants are nameless and share
+            // this node's dot-prop path, mirroring how element types attach to an array node.
             node = {
                 name: key,
                 dotprop_path,
-                kind: schema._def.typeName, // ZodUnion
+                kind,
                 children: []
             }
             addNode(node);
@@ -210,56 +185,52 @@ function _convertSchemaToDotPropPathTree(
             node = parent!;
         }
 
-    } else if( schema._def.innerType ) {
-        // Probably ZodOptional or ZodNullable - pass through it
-        const optionalOrNullable = schema instanceof z.ZodOptional || schema instanceof z.ZodNullable;
-        node = _convertSchemaToDotPropPathTree(key, schema._def.innerType, map, options, parent, parentsIncludeArray, optionalOrNullable, withinUnion);
+    } else if( kind==='optional' || kind==='nullable' ) {
+        // Pass through the wrapper; the value's real shape is one level in.
+        node = _convertSchemaToDotPropPathTree(key, unwrap(schema), map, options, parent, parentsIncludeArray, true, withinUnion);
     } else {
-        // Presume leaf 
+        // Presume leaf
         node = {
-            name: key, 
+            name: key,
             dotprop_path,
-            kind: schema._def.typeName,
+            kind,
             children: []
         }
         addNode(node);
     }
 
     return node;
-    
+
 }
 
 
 /** Returns the ZodKind at a dot-prop path within a schema, unwrapping arrays/optionals. */
-export function getZodKindAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropPath): ZodKind | undefined {
-
+export function getZodKindAtSchemaDotPropPath(schema: z.ZodType, path: DotPropPath): ZodKind | undefined {
     const schemaAtPath = getZodSchemaAtSchemaDotPropPath(schema, path);
-    return schemaAtPath?._def.typeName;
-
-
+    return schemaAtPath ? getZodKind(schemaAtPath) : undefined;
 }
 
 
-/** Navigates a Zod schema by dot-prop path and returns the leaf ZodTypeAny, unwrapping arrays/optionals/nullables along the way. */
-export function getZodSchemaAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPropPath): ZodTypeAny | undefined {
+/** Navigates a Zod schema by dot-prop path and returns the leaf schema, unwrapping arrays/optionals/nullables along the way. */
+export function getZodSchemaAtSchemaDotPropPath(schema: z.ZodType, path: DotPropPath): z.ZodType | undefined {
     const keys = path.split('.');
-    let currentSchema: ZodTypeAny = schema;
+    let currentSchema: z.ZodType = schema;
 
     for (const key of keys) {
-        while( currentSchema instanceof z.ZodArray || currentSchema._def.innerType ) {
-            // Step into it
-            if( currentSchema instanceof z.ZodArray ) {
-                currentSchema = currentSchema.element;
-            } else if( currentSchema._def.innerType ) {
-                // Schemas like z.ZodOptional and z.Nullable wrap the type
-                currentSchema = currentSchema._def.innerType;
+        // Step through array/optional/nullable wrappers to reach the object that owns the next key.
+        while( true ) {
+            const currentKind = getZodKind(currentSchema);
+            if( currentKind==='array' ) {
+                currentSchema = getArrayElement(currentSchema);
+            } else if( currentKind==='optional' || currentKind==='nullable' ) {
+                currentSchema = unwrap(currentSchema);
+            } else {
+                break;
             }
         }
 
-        // @ts-ignore
-        if (currentSchema.shape) {
-            // @ts-ignore
-            currentSchema = currentSchema.shape[key];
+        if (getZodKind(currentSchema)==='object') {
+            currentSchema = getObjectShape(currentSchema)[key]!;
         } else {
             return undefined; // Path is not valid for the given schema
         }
@@ -270,11 +241,11 @@ export function getZodSchemaAtSchemaDotPropPath(schema: ZodTypeAny, path: DotPro
     }
 
 
-    // Why use instanceof *and* _def.typeName? Because when it's bundled the bundler could potentially have a currentSchema of `z.ZodArray2` (e.g. if multiple zods in the environment), which is all kinds of crazy but the easiest way to make it more robust was to _also_ check on the unofficial `_def.typeName`. 
-    if( currentSchema instanceof z.ZodOptional || currentSchema._def.typeName==='ZodOptional' ) currentSchema = currentSchema._def.innerType;
-    if( currentSchema instanceof z.ZodArray || currentSchema._def.typeName==='ZodArray' ) currentSchema = (currentSchema as z.ZodArray<ZodTypeAny>).element;
+    // A trailing optional unwraps to its inner type; a trailing array resolves to its element (so the
+    // returned schema validates a single element). A trailing nullable is kept so it still accepts null.
+    if( getZodKind(currentSchema)==='optional' ) currentSchema = unwrap(currentSchema);
+    if( getZodKind(currentSchema)==='array' ) currentSchema = getArrayElement(currentSchema);
 
     return currentSchema;
 
 }
-

@@ -1,4 +1,4 @@
-import z from "zod";
+import { z } from "zod";
 import {
   UpdatingMethodSchema,
   WhereFilterSchema,
@@ -25,15 +25,15 @@ import { JsonValueSchema } from "@andyrmitchell/utils/deep-clone-scalar-values";
 
 export function makeWriteActionSchema<
   T extends Record<string, any> = Record<string, any>,
->(objectSchema?: z.AnyZodObject): z.ZodType<WriteAction<T>> {
+>(objectSchema?: z.ZodObject<any>): z.ZodType<WriteAction<T>> {
   return makeWriteActionAndPayloadSchema(objectSchema).writeAction;
 }
-export function makeWritePayloadSchema(objectSchema?: z.AnyZodObject) {
+export function makeWritePayloadSchema(objectSchema?: z.ZodObject<any>) {
   return makeWriteActionAndPayloadSchema(objectSchema).payload;
 }
 
-function makeWriteActionAndPayloadSchema(objectSchema?: z.AnyZodObject) {
-  const schema: z.ZodTypeAny = objectSchema ?? z.record(z.any());
+function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
+  const schema: z.ZodTypeAny = objectSchema ?? z.record(z.string(), z.any());
   const WritePayloadCreateSchema = z.object({
     type: z.literal("create"),
     data: objectSchema ? objectSchema.strict() : schema,
@@ -58,7 +58,7 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.AnyZodObject) {
     .object({
       type: z.literal("array_scope"),
       scope: z.string(),
-      action: z.record(z.any()), // This gets tighter control in the .refine below
+      action: z.record(z.string(), z.any()), // This gets tighter control in the .refine below
       where: WhereFilterSchema,
     })
     .refine(

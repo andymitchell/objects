@@ -65,7 +65,8 @@
         "build_prepare": "npm run build && npm run pkglint",
         "prepublishOnly": "npm run build_prepare",
         "test": "vitest",
-        "test:watch": "vitest --watch"
+        "test:watch": "vitest --watch",
+        "typecheck": "tsc --noEmit"
     },
     "author": "",
     "license": "MIT",
@@ -82,7 +83,8 @@
         "ts-morph": "^26.0.0",
         "tsup": "^8.5.0",
         "typescript": "^5.8.3",
-        "vitest": "^3.0.7"
+        "vitest": "^3.0.7",
+        "zod": "^4.1.8"
     },
     "dependencies": {
         "@andyrmitchell/composite-timestamps": "^0.2.3",
@@ -92,6 +94,6 @@
         "lodash-es": "^4.17.21"
     },
     "peerDependencies": {
-        "zod": "^3.25.71"
+        "zod": "^4.1.8"
     }
 }

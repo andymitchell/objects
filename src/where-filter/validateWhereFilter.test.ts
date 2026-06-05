@@ -96,16 +96,26 @@ describe("validateWhereFilter", () => {
         });
     });
 
-    describe("flags non-finite numbers (NaN compares false to everything → matches nothing)", () => {
+    describe("flags non-finite numbers (NaN, and ±Infinity in zero-match positions → matches nothing)", () => {
         it("flags NaN as a direct operand (bare, $eq, range)", () => {
             expect(validate({ age: NaN })).toMatchObject([{ reason: "non_finite", path: "age" }]);
             expect(validate({ age: { $eq: NaN } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
             expect(validate({ age: { $gt: NaN } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
         });
-        it("does NOT flag Infinity — it is finite-comparable (e.g. $lt:Infinity matches every finite value)", () => {
-            expect(validate({ age: Infinity })).toEqual([]);
-            expect(validate({ age: { $gt: Infinity } })).toEqual([]);
+        it("flags ±Infinity in a zero-match position — no finite value equals or exceeds it (eq, $gt/$gte:Infinity; eq, $lt/$lte:-Infinity)", () => {
+            expect(validate({ age: Infinity })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+            expect(validate({ age: { $eq: Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+            expect(validate({ age: { $gt: Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+            expect(validate({ age: { $gte: Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+            expect(validate({ age: -Infinity })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+            expect(validate({ age: { $lt: -Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+            expect(validate({ age: { $lte: -Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+        });
+        it("does NOT flag ±Infinity used as a legitimate bound — it matches every finite value ($lt/$lte:Infinity; $gt/$gte:-Infinity)", () => {
             expect(validate({ age: { $lt: Infinity } })).toEqual([]);
+            expect(validate({ age: { $lte: Infinity } })).toEqual([]);
+            expect(validate({ age: { $gt: -Infinity } })).toEqual([]);
+            expect(validate({ age: { $gte: -Infinity } })).toEqual([]);
         });
         it("does NOT flag a non-finite inside $in — a sibling element can still match", () => {
             expect(validate({ age: { $in: [1, Infinity] } })).toEqual([]);
@@ -464,9 +474,9 @@ describe("validateWhereFilter — metamorphic (never rejects what the matcher ma
         { age: { $in: [1, Infinity] } }, { age: { $in: [1, "a"] } }, { age: { $lt: Infinity } },
         { $or: [{ id: "1" }, { ghost: 1 }] }, { $nor: [{ ghost: 1 }] },
         { children: { $or: [{ ghost: 1 }, { name: "Bob" }] } }, { children: { $nor: [{ ghost: 1 }] } }, // array-logic rescue → match, not flagged
-        { age: { $gt: Infinity } }, { children: { $elemMatch: { age: { $gt: Infinity } } } }, // match nothing but not flagged (Infinity is finite-comparable) — a conservative miss
         // — invalid: flagged AND matches nothing (positive contradictions + would-throw) —
         { ghost: 1 }, { "contact.ghost": 1 }, { age: "old" }, { id: 5 }, { active: "yes" },
+        { age: { $gt: Infinity } }, { children: { $elemMatch: { age: { $gt: Infinity } } } }, // ±Infinity in a zero-match position → flagged, matches 0
         { age: { $in: ["a"] } }, { age: NaN }, { age: { $gt: NaN } },
         { children: { ghost: 1 } }, { children: { $elemMatch: { ghost: 1 } } },
         { children: { age: "wrong" } }, { children: { $elemMatch: { age: { $gt: NaN } } } },

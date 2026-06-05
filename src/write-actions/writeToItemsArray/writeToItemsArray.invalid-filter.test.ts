@@ -55,6 +55,22 @@ describe("writeToItemsArray — invalid where clause", () => {
         expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "type_mismatch", where_path: "age" });
     });
 
+    it("rejects an update/delete whose where pins a numeric field to Infinity (a zero-match no-op) as invalid_filter, mutating nothing", () => {
+        // No finite age is >= Infinity, so the where matches nothing — previously a silent write no-op, now
+        // surfaced as invalid_filter, mirroring the NaN behavior (validateWhereFilter flags it non_finite).
+        const rows = (): Row[] => [{ id: "1", text: "a", age: 5 }];
+
+        const updateResult = writeToItemsArray([update({ age: { $gte: Infinity } })], rows(), Schema, ddl);
+        expect(updateResult.ok).toBe(false);
+        expect(getWriteFailures(updateResult)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "non_finite", where_path: "age" });
+        expect(updateResult.changes.final_items).toEqual([{ id: "1", text: "a", age: 5 }]); // unchanged
+
+        const deleteResult = writeToItemsArray([del({ age: { $gte: Infinity } })], rows(), Schema, ddl);
+        expect(deleteResult.ok).toBe(false);
+        expect(getWriteFailures(deleteResult)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "non_finite", where_path: "age" });
+        expect(deleteResult.changes.final_items).toEqual([{ id: "1", text: "a", age: 5 }]); // unchanged
+    });
+
     it("rejects a malformed (null) where as invalid_filter instead of throwing at match time", () => {
         const result = writeToItemsArray([update(null)], seed(), Schema, ddl);
         expect(result.ok).toBe(false);

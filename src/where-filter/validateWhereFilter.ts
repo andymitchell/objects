@@ -26,9 +26,12 @@ import type { WhereFilterDefinition } from "./types.ts";
  *   (`$or`) or the negation inverts it (`$nor`) — so a bad arm is never flagged. `$and`, multiple keys
  *   (implicit `$and`), and the top level are still checked. (This misses the rare all-arms-dead `$or`;
  *   accepted, to stay simple and never false-positive.)
- * - **Numbers.** Only `NaN` as a *direct* operand (bare/`$eq`/range) is `non_finite` — `NaN` compares false
- *   to everything, so the clause matches nothing. `Infinity` is finite-comparable (`$lt:Infinity` matches
- *   every finite value) and a `NaN` inside `$in` can sit beside a matching element, so neither is flagged.
+ * - **Numbers.** A *direct* operand (bare/`$eq`/range) is `non_finite` when it makes the clause match nothing:
+ *   `NaN` always (it compares false to everything), and `±Infinity` only in a *zero-match position* —
+ *   `$eq`/`$gt`/`$gte:Infinity` and `$eq`/`$lt`/`$lte:-Infinity` (no finite value equals or exceeds ±Infinity,
+ *   and data can't store a non-finite number anyway). The mirror positions `$lt`/`$lte:Infinity` and
+ *   `$gt`/`$gte:-Infinity` are legitimate bounds matching every finite value, so they stay valid. A non-finite
+ *   element inside `$in` can sit beside a matching element, so `$in` is never flagged for it.
  * - **`$in`.** Reported `type_mismatch` only when *every* element is the wrong type (one right-type element
  *   could match).
  * - **Arrays.** Descends element-wise into object-array conditions (`$elemMatch` and the operator-free
@@ -73,7 +76,7 @@ const LOGIC_OPERATORS = WhereFilterLogicOperators as readonly string[];
 /** Operators that broaden a match (incl. missing fields), so a contradiction under them never means "matches nothing". */
 const BROADENING_OPS = ["$ne", "$nin", "$not", "$exists", "$type"] as const;
 /** Positive range operators whose operand is compared as the field's own value. */
-const RANGE_OPS = ValueComparisonRangeOperators as readonly string[];
+const RANGE_OPS = ValueComparisonRangeOperators; // literal tuple — each element keeps its `RangeOp` type (no `as string[]`), so a classified operand can record which range op produced it
 
 /**
  * path → *every* `TreeNode` registered at that path. The flat `TreeNodeMap` keeps only the first node per
@@ -190,12 +193,21 @@ function walk(filter: Record<string, unknown> | null | undefined, prefix: string
     }
 }
 
+/** A range comparison operator (derived from the canonical tuple — single source of truth) whose operand is compared against the field's own value. */
+type RangeOp = (typeof ValueComparisonRangeOperators)[number];
+/**
+ * A direct (must-match) operand tagged with the operator it was supplied under. The tag is what lets the
+ * `non_finite` check tell a zero-match `Infinity` (e.g. `$gte:Infinity`, which no finite row reaches) from a
+ * legitimate bound (`$lt:Infinity`, which every finite row satisfies). Bare scalars and `$eq` carry `"$eq"`.
+ */
+type DirectOperand = { value: unknown; op: "$eq" | RangeOp };
+
 /** A leaf condition classified by which matcher branch it drives — only `direct`/`in` operands can make a clause match nothing. */
 type LeafClass =
     | { kind: "broadening" }
     | { kind: "in"; list: unknown[] }
     | { kind: "regex"; pattern: unknown; options: unknown }
-    | { kind: "direct"; operands: unknown[]; isRange: boolean }
+    | { kind: "direct"; operands: DirectOperand[] }
     | { kind: "opaque" };
 
 /**
@@ -205,16 +217,16 @@ type LeafClass =
  */
 function classifyCondition(condition: unknown): LeafClass {
     if (condition === null || condition === undefined) return { kind: "broadening" }; // bare null / absent → matches missing
-    if (typeof condition !== "object") return { kind: "direct", operands: [condition], isRange: false }; // bare scalar equality
+    if (typeof condition !== "object") return { kind: "direct", operands: [{ value: condition, op: "$eq" }] }; // bare scalar equality
     if (Array.isArray(condition)) return { kind: "opaque" }; // array literal = exact deep-equal
     const ops = condition as Record<string, unknown>;
     for (const op of BROADENING_OPS) if (op in ops) return { kind: "broadening" };
     if ("$eq" in ops && ops["$eq"] === null) return { kind: "broadening" }; // $eq:null matches null/missing
     if ("$in" in ops) return Array.isArray(ops["$in"]) ? { kind: "in", list: ops["$in"] } : { kind: "opaque" };
     if ("$regex" in ops) return { kind: "regex", pattern: ops["$regex"], options: ops["$options"] }; // pattern, not a field-typed value
-    if ("$eq" in ops) return ops["$eq"] === undefined ? { kind: "opaque" } : { kind: "direct", operands: [ops["$eq"]], isRange: false };
-    const rangeOperands = RANGE_OPS.filter((op) => op in ops).map((op) => ops[op]);
-    if (rangeOperands.length > 0) return { kind: "direct", operands: rangeOperands, isRange: true };
+    if ("$eq" in ops) return ops["$eq"] === undefined ? { kind: "opaque" } : { kind: "direct", operands: [{ value: ops["$eq"], op: "$eq" }] };
+    const operands = RANGE_OPS.filter((op) => op in ops).map((op) => ({ value: ops[op], op })); // tag each operand with its range op → drives the position-aware Infinity check
+    if (operands.length > 0) return { kind: "direct", operands };
     return { kind: "opaque" }; // operator-free object: deep-equal on a scalar, or a compound array-element filter
 }
 
@@ -226,6 +238,19 @@ function regexCompiles(pattern: string, options: unknown): boolean {
     } catch {
         return false;
     }
+}
+
+/**
+ * True for an `±Infinity` operand that makes a finite-valued field match **zero** rows — the same zero-match
+ * property that flags `NaN`, so it earns the same `non_finite`. No stored finite value equals `±Infinity`, is
+ * `> +Infinity`, or is `< -Infinity` (data can't even store a non-finite number — it won't round-trip JSON),
+ * so `$eq`/`$gt`/`$gte:Infinity` and `$eq`/`$lt`/`$lte:-Infinity` are contradictions. The mirror positions
+ * (`$lt`/`$lte:Infinity`, `$gt`/`$gte:-Infinity`) are legitimate bounds matching every finite value — left valid.
+ */
+function isZeroMatchInfinity(value: number, op: "$eq" | RangeOp): boolean {
+    if (value === Infinity) return op === "$eq" || op === "$gt" || op === "$gte";
+    if (value === -Infinity) return op === "$eq" || op === "$lt" || op === "$lte";
+    return false;
 }
 
 /** Validate one `{ path: condition }` leaf: skip broadening/logic-rescued clauses, descend object-arrays, then coarsely check known scalar fields. */
@@ -245,7 +270,7 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
         }
         return; // a $regex operand is a pattern, not a field-typed value — nothing else to check
     }
-    if (cls.kind === "direct" && cls.isRange && cls.operands.some((o) => typeof o !== "number" && typeof o !== "string")) {
+    if (cls.kind === "direct" && cls.operands.some((o) => o.op !== "$eq" && typeof o.value !== "number" && typeof o.value !== "string")) {
         issues.push({ path, reason: "malformed", message: `Range operator on '${path}' needs a number or string operand.` });
         return;
     }
@@ -278,13 +303,13 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
     if (kinds.size === 1 && SCALAR_KINDS.has(nodes[0]!.kind) && !parentMayCarryAnyType(path, index)) {
         const kind = nodes[0]!.kind;
         if (cls.kind === "direct") {
-            for (const operand of cls.operands) {
-                if (typeof operand === "number" && Number.isNaN(operand)) {
-                    issues.push({ path, reason: "non_finite", message: `NaN in filter on '${path}' matches nothing.` });
+            for (const { value, op } of cls.operands) {
+                if (typeof value === "number" && (Number.isNaN(value) || isZeroMatchInfinity(value, op))) {
+                    issues.push({ path, reason: "non_finite", message: `Non-finite operand in filter on '${path}' matches nothing.` });
                     return;
                 }
-                if (operand !== null && operand !== undefined && typeof operand !== kind) {
-                    issues.push({ path, reason: "type_mismatch", message: `Filter on '${path}' expects ${kind}, got ${typeof operand}.` });
+                if (value !== null && value !== undefined && typeof value !== kind) {
+                    issues.push({ path, reason: "type_mismatch", message: `Filter on '${path}' expects ${kind}, got ${typeof value}.` });
                     return;
                 }
             }

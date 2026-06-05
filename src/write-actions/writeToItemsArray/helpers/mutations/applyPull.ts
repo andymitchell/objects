@@ -38,7 +38,8 @@ export function applyPull<T extends Record<string, any>>(
         // Scalar mode: remove elements matching any value in the list
         filtered = existing.filter(el => !itemsWhere.some(target => deepEquals(el, target)));
     } else {
-        // Object mode: remove elements matching the WhereFilter
+        // Object mode: remove elements matching the WhereFilter. A throw-prone items_where is rejected up-front
+        // by preflightActionWhere, so the matcher does not throw here.
         filtered = existing.filter(el => {
             if (typeof el === 'object' && el !== null) {
                 return !matchJavascriptObject(el, itemsWhere);

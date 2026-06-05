@@ -187,6 +187,19 @@ export type WriteError =
       reason: CorePermissionDeniedReason | (string & {});
     }
   | {
+      /**
+       * The action's `where` clause is invalid against the schema — it references a field that
+       * doesn't exist, carries a value whose primitive type contradicts the field, or contains a
+       * non-finite number. Caught before any mutation; the action is rejected unrecoverably and
+       * state is left unchanged. Distinct from `schema` (which is about the written *data*).
+       */
+      type: "invalid_filter";
+      /** The offending dot-prop path within the `where`, when one field can be singled out. */
+      where_path?: string;
+      /** Why the `where` was rejected. */
+      reason: "unknown_field" | "type_mismatch" | "non_finite" | "malformed";
+    }
+  | {
       /** The action did not run: an earlier action in the same batch failed and blocked it. */
       type: "blocked";
       /** `uuid` of the earlier action whose failure blocked this one. */

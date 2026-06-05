@@ -26,6 +26,7 @@ function isUnrecoverable(type: WriteError["type"]): boolean {
     case "uuid_conflict":
     case "update_altered_key":
     case "permission_denied":
+    case "invalid_filter":
       return true;
     case "custom":
     case "blocked":
@@ -139,6 +140,31 @@ export default class WriteActionFailuresTracker<
   }
 
   /**
+   * Report an action-level failure that is not tied to a specific item — e.g. an invalid `where`
+   * clause, which is rejected before any item is matched (an invalid `where` matches nothing, so
+   * there is no item to attach). Mirrors `blocked()`: opens a failure record with no
+   * `affected_items`, de-duplicating identical errors.
+   */
+  reportActionError(action: WriteAction<T>, errorDetails: WriteError): void {
+    const errorContext: WriteErrorContext<T> = { ...errorDetails };
+    let failedAction = this.findAction(action);
+    if (failedAction) {
+      if (!failedAction.errors.some((x) => deepEql(x, errorContext))) {
+        failedAction.errors.push(errorContext);
+      }
+    } else {
+      failedAction = {
+        ok: false,
+        action,
+        errors: [errorContext],
+        affected_items: [],
+      };
+      this.failures.push(failedAction);
+    }
+    if (isUnrecoverable(errorDetails.type)) failedAction.unrecoverable = true;
+  }
+
+  /**
    * Mark `action` as blocked by an earlier action's failure. A blocked-only action opens a
    * failure record holding a single `blocked` error; re-blocking updates that error and the
    * `blocked_by_action_uuid` field in place, so the latest blocker always wins.
@@ -166,6 +192,13 @@ export default class WriteActionFailuresTracker<
     failedAction.blocked_by_action_uuid = blocked_by_action_uuid;
   }
 
+  /**
+   * Fold a scoped sub-write's failures (e.g. from an `array_scope` recursion) onto the parent action. An
+   * item-scoped sub-error re-attaches to its affected item so the parent reports which items failed; an
+   * itemless sub-error (no `item_pk` — e.g. an `invalid_filter` from a runtime-throwing filter the scoped
+   * recursion caught before matching any element) is recorded at the parent action level so it is propagated
+   * rather than dropped.
+   */
   mergeUnderAction(
     action: WriteAction<T>,
     failedActions: WriteOutcomeFailed<any>[],
@@ -185,6 +218,16 @@ export default class WriteActionFailuresTracker<
           if (error.item_pk === undefined) {
             const { item_pk: _ipk, item: _item, ...errorBase } = error;
             this.record(action, subItem.item, errorBase);
+          }
+        }
+      }
+      // A sub-failure with no affected items has no item to attach to; record its itemless errors at the
+      // parent action level so a scoped invalid_filter still fails the parent.
+      if (!subAction.affected_items?.length) {
+        for (const error of subAction.errors) {
+          if (error.item_pk === undefined) {
+            const { item_pk: _ipk, item: _item, ...errorBase } = error;
+            this.reportActionError(action, errorBase);
           }
         }
       }

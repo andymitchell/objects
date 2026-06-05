@@ -86,6 +86,33 @@ export function getObjectShape(schema: AnyZodSchema): Record<string, AnyZodSchem
 }
 
 /**
+ * True when an object schema REJECTS unknown keys — `.strict()` / `z.strictObject` — versus the default
+ * (which strips them on parse) or `.passthrough()` / `.catchall(x)` (which keep them).
+ *
+ * A strict object is the only mode that guarantees a value cannot carry an undeclared key: its `safeParse`
+ * fails on extras. A consumer that flags filters on undeclared fields (e.g. the where-filter validator)
+ * should flag only under a strict object — elsewhere an undeclared key may legitimately be present, so a
+ * flag would be a false positive.
+ *
+ * Transparent wrappers are unwrapped first (a `strict().optional()` field keeps its catchall on the inner
+ * object). Non-objects, and bare objects with no catchall (the default/strip mode), return false. Reads
+ * zod's internal `_zod.def.catchall` (a `ZodNever` for `.strict()`), mirroring zod's own parser, which
+ * rejects unknown keys exactly when that catchall's kind is `never`. It is an undocumented field, so a unit
+ * test pins this against the installed zod and fails loudly if a version changes the shape.
+ *
+ * @example objectRejectsUnknownKeys(z.object({a:z.string()}).strict())       // true
+ * @example objectRejectsUnknownKeys(z.object({a:z.string()}).passthrough())  // false
+ * @example objectRejectsUnknownKeys(z.object({a:z.string()}))                // false — default strips, it does not reject
+ */
+export function objectRejectsUnknownKeys(schema: AnyZodSchema): boolean {
+    let s: AnyZodSchema | undefined = schema;
+    while (s && isTransparentWrapper(getZodKind(s))) s = unwrap(s);
+    if (!s || getZodKind(s) !== "object") return false;
+    const catchall = (s._zod.def as z.core.$ZodTypeDef & { catchall?: AnyZodSchema }).catchall;
+    return !!catchall && getZodKind(catchall) === "never";
+}
+
+/**
  * The variant schemas of a union (`.options`).
  *
  * The walker emits one child subtree per variant (in `union_aware` mode) so polymorphic shapes stay distinct.

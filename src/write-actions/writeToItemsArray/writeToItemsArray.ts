@@ -1,8 +1,10 @@
 
-import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome } from "../types.ts";
+import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome, WritePayload } from "../types.ts";
 import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
+import { compileValidateWhereFilter } from "../../where-filter/validateWhereFilter.ts";
+import { preflightActionWhere } from "./helpers/wherePreflight.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
 import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, ItemHash } from "./types.ts";
 import type { DDL, RootListRules } from "../../ddl/types.ts";
@@ -205,6 +207,11 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
     const writeStrategy = writeLww;
 
+    // Validate each action's `where` against the schema before applying it. Compiled once (walks the
+    // schema a single time) and reused per action. An invalid `where` matches no items, so it must be
+    // caught here — at the action level — not at the per-item match site below.
+    const validateWhere = compileValidateWhereFilter(schema);
+
     const existingIds = new Set(wipItems.map(item => safeKeyValue(item[rules.primary_key])));
 
     // Now go through the actions
@@ -272,6 +279,20 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
             }
         } else {
+            // Preflight the action's `where` filters before touching any item: static schema validation across
+            // the whole action tree (own `where`, nested `array_scope` `action.where`, `pull` object
+            // `items_where`) plus a runtime throw-safety dry-run. An invalid filter matches nothing and can
+            // never succeed on retry, so it is reported as an unrecoverable `invalid_filter` and the action
+            // mutates nothing — which keeps a throw-prone filter from committing a partial change. Validating
+            // the nested wheres up-front is essential: the per-item recursion only runs for parents matching the
+            // outer `where`, so an outer `where` matching nothing would otherwise let a nested invalid `where`
+            // slip through as a silent no-op.
+            const whereIssues = preflightActionWhere(action.payload as WritePayload<any>, schema, validateWhere, wipItems);
+            if( whereIssues.length>0 ) {
+                const issue = whereIssues[0]!;
+                failureTracker.reportActionError(action, { type: 'invalid_filter', where_path: issue.path, reason: issue.reason });
+                continue;
+            }
             for( let i = 0; i < wipItems.length; i++) {
                 if( failureTracker.shouldHalt() ) break;
                 const item = wipItems[i];
@@ -279,7 +300,9 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 const pkValue = pk(item);
 
 
-                if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && (matchJavascriptObject(item, action.payload.where)) ) {
+                // The match cannot throw here: preflightActionWhere already dry-ran any throw-prone filter and
+                // rejected the action before this loop, so the mutation pass is throw-free.
+                if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && matchJavascriptObject(item, action.payload.where) ) {
                     const permissionFailure = (scoped || options?.enforce_ownership === false)? undefined : checkWritePermission(item, ddl, user);
                     if( permissionFailure ) {
                         failureTracker.report(action, item, permissionFailure);

@@ -483,17 +483,21 @@ describe("merging sub-action failures under a parent", () => {
     expect(tracker.length()).toBe(0);
   });
 
-  test("a sub-action with no affected items contributes nothing", () => {
+  test("a sub-action's itemless failure is propagated to the parent action (e.g. a scoped invalid_filter)", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
       action: makeAction(subItem, "sub-action"),
-      errors: [{ type: "custom", message: "orphan" }],
+      errors: [{ type: "custom", message: "orphan" }], // no item_pk / affected_items → itemless
     };
-    tracker.mergeUnderAction(makeAction(validFlat, "parent"), [subAction]);
-    expect(tracker.length()).toBe(0);
+    const parent = makeAction(validFlat, "parent");
+    tracker.mergeUnderAction(parent, [subAction]);
+    expect(tracker.length()).toBe(1);
+    const failure = tracker.get()[0]!;
+    expect(failure.action.uuid).toBe("parent");
+    expect(failure.errors[0]).toMatchObject({ type: "custom", message: "orphan" });
   });
 
   test("several sub-actions collect under a single parent record", () => {

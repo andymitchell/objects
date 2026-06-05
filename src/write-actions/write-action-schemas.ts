@@ -182,6 +182,11 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
     reason: z.string(),
   }),
   z.object({
+    type: z.literal("invalid_filter"),
+    where_path: z.string().optional(),
+    reason: z.enum(["unknown_field", "type_mismatch", "non_finite", "malformed"]),
+  }),
+  z.object({
     type: z.literal("blocked"),
     blocked_by_action_uuid: z.string(),
   }),

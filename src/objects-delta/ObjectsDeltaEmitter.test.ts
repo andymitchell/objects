@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectsDeltaEmitter } from './ObjectsDeltaEmitter.ts';
 import type { ObjectsDelta } from './types.ts';
 
@@ -13,11 +13,22 @@ type TestItem = {
 
 describe('ObjectsDeltaEmitter', () => {
 
+    // Freeze the clock so every delta's `created_at` (stamped via Date.now() in
+    // createObjectsArrayDiffer) is deterministic; otherwise a millisecond tick
+    // between the two back-to-back update() calls flakes the referential-equality check.
+    const FIXED_NOW = new Date('2024-01-01T00:00:00.000Z');
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(FIXED_NOW);
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     it('should correctly identify and emit deltas when using deep equality (useDeepEqual: true)', () => {
         // 1. Setup
         const viewDeltaEmitter = new ObjectsDeltaEmitter<TestItem>('id', { useDeepEqual: true });
-        const events:ObjectsDelta<TestItem>[] = [];
-        const listener = vi.fn(event => events.push(event));
+        const listener = vi.fn();
         viewDeltaEmitter.on('UPDATE_DELTA', listener);
 
         const initialItems: TestItem[] = [{ id: 1, value: 'A' }, { id: 2, value: 'B' }];
@@ -40,24 +51,23 @@ describe('ObjectsDeltaEmitter', () => {
             insert: [{ id: 1, value: 'A' }, { id: 2, value: 'B' }],
             update: [],
             remove_keys: [],
-            created_at: Date.now()
+            created_at: FIXED_NOW.getTime()
         };
-        expect(listener).toHaveBeenNthCalledWith(1, {...expectedInitialDelta, created_at: events[0]?.created_at});
+        expect(listener).toHaveBeenNthCalledWith(1, expectedInitialDelta);
 
         const expectedSecondDelta: ObjectsDelta<TestItem> = {
             insert: [{ id: 3, value: 'C' }],
             update: [{ id: 1, value: 'A_modified' }],
             remove_keys: [2],
-            created_at: Date.now()
+            created_at: FIXED_NOW.getTime()
         };
-        expect(listener).toHaveBeenNthCalledWith(2, {...expectedSecondDelta, created_at: events[1]?.created_at});
+        expect(listener).toHaveBeenNthCalledWith(2, expectedSecondDelta);
     });
 
     it('should correctly identify and emit deltas when using referential equality (useDeepEqual: false)', () => {
         // 1. Setup
         const viewDeltaEmitter = new ObjectsDeltaEmitter<TestItem>('id', { useDeepEqual: false });
-        const events:ObjectsDelta<TestItem>[] = [];
-        const listener = vi.fn(event => events.push(event));
+        const listener = vi.fn();
         viewDeltaEmitter.on('UPDATE_DELTA', listener);
 
         const item1 = { id: 1, value: 'A' };
@@ -80,19 +90,15 @@ describe('ObjectsDeltaEmitter', () => {
             insert: [item3],
             update: [item1Updated],
             remove_keys: [item2.id],
-            created_at: Date.now()
+            created_at: FIXED_NOW.getTime()
         };
-        expect(listener).toHaveBeenLastCalledWith({
-            ...expectedDelta,
-            created_at: events[0]!.created_at
-        });
+        expect(listener).toHaveBeenLastCalledWith(expectedDelta);
     });
 
     it('should NOT emit an UPDATE_DELTA event if there are no changes', () => {
         // 1. Setup
         const viewDeltaEmitter = new ObjectsDeltaEmitter<TestItem>('id', { useDeepEqual: true });
-        const events:ObjectsDelta<TestItem>[] = [];
-        const listener = vi.fn(event => events.push(event));
+        const listener = vi.fn();
         viewDeltaEmitter.on('UPDATE_DELTA', listener);
 
         const initialItems: TestItem[] = [{ id: 1, value: 'A' }];
@@ -107,12 +113,9 @@ describe('ObjectsDeltaEmitter', () => {
             insert: [{ id: 1, value: 'A' }],
             update: [],
             remove_keys: [],
-            created_at: Date.now()
+            created_at: FIXED_NOW.getTime()
         };
-        expect(listener).toHaveBeenCalledWith({
-            ...expectedDelta,
-            created_at: events[0]!.created_at
-        });
+        expect(listener).toHaveBeenCalledWith(expectedDelta);
     });
 
     it('should not detect an update with useDeepEqual: false if the object reference has not changed', () => {

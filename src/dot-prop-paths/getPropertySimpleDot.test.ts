@@ -1,5 +1,5 @@
 import { setProperty } from "dot-prop";
-import {  getProperty as getPropertySimpleDot, getPropertySpreadingArrays } from "./getPropertySimpleDot.js";
+import {  getProperty as getPropertySimpleDot, getPropertySpreadingArrays, DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "./getPropertySimpleDot.js";
 
 describe('getPropertySpreadingArrays test', () => {
 
@@ -220,7 +220,6 @@ describe('getPropertySpreadingArraysFlat test', () => {
 */
 
 
-export const DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED = ['', '.', '.id', '*', '__proto__', '__proto__.polluted', 'prototype', 'constructor'];
 describe('attacks', () => {
 
     function expectUndefined(path:string):boolean {

@@ -1,13 +1,13 @@
 import { z, type ZodSchema } from "zod"
 
-import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.test.js"
+import { DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "../dot-prop-paths/getPropertySimpleDot.js"
 import type { MatchJavascriptObject, WhereFilterDefinition } from "./types.ts";
 
 export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(obj: T, filter: WhereFilterDefinition<T>, schema: ZodSchema<T>) => Promise<ReturnType<MatchJavascriptObject> | undefined>;
 
-type StandardTestConfig = {
-    test: jest.It,
-    expect: jest.Expect,
+export type StandardTestConfig = {
+    test: typeof test,
+    expect: typeof expect,
     matchJavascriptObject: MatchJavascriptObjectInTesting,
     implementationName?: string
 }

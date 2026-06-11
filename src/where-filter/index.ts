@@ -56,3 +56,9 @@ export type {
     IPropertyTranslator,
     SqlDialect,
 };
+
+// ─── Testing ───
+// Published so a stackable-collection conformance suite can run the standard WhereFilter
+// semantics battery against a real ICollection (it injects its own `matchJavascriptObject`).
+export { standardTests } from './standardTests.ts';
+export type { StandardTestConfig, MatchJavascriptObjectInTesting } from './standardTests.ts';

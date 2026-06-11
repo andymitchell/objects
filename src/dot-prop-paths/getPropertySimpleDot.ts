@@ -4,10 +4,19 @@ import isPlainObject from "../utils/isPlainObject.js";
 
 
 export function getProperty<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean):ReturnType<typeof ldGetProperty> {
-    
+
     return ldGetProperty(object, dotPath);
 
 }
+
+/**
+ * Dot-paths that `getProperty` MUST resolve to `undefined` — the security + degenerate-input contract.
+ * Why: prototype-pollution vectors (`__proto__`, `constructor`, `prototype`) must never reach a real
+ * value, and degenerate paths (`''`, `'.'`, `'.id'`, `'*'`) have no meaning. Published from the source
+ * module (not a `.test.ts`) so the where-filter conformance suite can assert the same contract without
+ * importing test code.
+ */
+export const DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED = ['', '.', '.id', '*', '__proto__', '__proto__.polluted', 'prototype', 'constructor'];
 
 
 

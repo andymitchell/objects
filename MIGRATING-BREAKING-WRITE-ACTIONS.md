@@ -4,6 +4,8 @@ This document describes how to update a codebase that uses `applyWritesToItems` 
 
 It is written as instructions for an LLM performing the migration, but is equally useful as a human reference.
 
+> ⚠️ **Superseded — ownership/permissions fully removed.** A later **major** version removed the built-in ownership/permission layer entirely; authorization now lives upstream in Casl (compiled to `WhereFilterDefinition` + `WriteActions`, which reach this library already authorized). The following no longer exist: the `ddl.ownership` field, the `@andyrmitchell/objects/ownership` sub-path, `checkOwnership` / `prepareOwnershipWhereClause` / `OwnershipRule` / `IUser` / `isIUser` / `checkWritePermission`, the `user` parameter on `writeToItemsArray` and `writeToItemsArrayPreserveInputType`, the `enforce_ownership` option, and the `permission_denied` `WriteError` (and `CorePermissionDeniedReason`). Items 15–18 below introduced ownership and are kept only as history — any example that passes a `user` argument, sets `ddl.ownership`, references `checkWritePermission` / `checkOwnership`, or inspects a `permission_denied` error reflects that interim state and no longer applies.
+
 ## Overview of the Change
 
 The response type system was redesigned for ergonomic, flat access. The key changes:
@@ -26,6 +28,8 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 16. **`type: 'basic_ownership_property'` renamed to `type: 'basic'`** — simpler discriminant now that ownership is its own module.
 17. **`checkWritePermission` removed from public API** — use `checkOwnership` from `@andyrmitchell/objects/ownership` instead. Returns `OwnershipCheckResult` (not `WriteError`).
 18. **New `@andyrmitchell/objects/ownership` sub-path** — exports `checkOwnership`, `prepareOwnershipWhereClause`, `OwnershipRule`, `IUser`, and standard test utilities.
+
+> _Items 15–18 are **superseded**: ownership has since been removed entirely (see the notice at the top of this document). They remain only to document the interim state._
 
 ---
 

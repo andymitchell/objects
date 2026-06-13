@@ -14,8 +14,6 @@ import { z } from "zod";
 import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker.ts";
 import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.ts";
 import { type Draft, current, isDraft } from "immer";
-import { type IUser } from "../auth/types.ts";
-import { checkWritePermission } from "./helpers/checkPermission.ts";
 import { applyAddToSet, applyPush, applyPull, applyInc } from "./helpers/mutations/index.ts";
 
 
@@ -36,7 +34,7 @@ function getMutableItem<T extends Record<string, any>>(item:T, mode?: ObjectClon
 }
 
 
-type OptionsWithDefaults = Required<Pick<WriteToItemsArrayOptions, 'attempt_recover_duplicate_create' | 'mutate' | 'atomic'>> & Pick<WriteToItemsArrayOptions, 'enforce_ownership'>;
+type OptionsWithDefaults = Required<Pick<WriteToItemsArrayOptions, 'attempt_recover_duplicate_create' | 'mutate' | 'atomic'>>;
 
 function getOptionDefaults(options?:Partial<WriteToItemsArrayOptions>):OptionsWithDefaults {
     return {
@@ -99,19 +97,17 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  * @param writeActions The actions to perform
  * @param items The items to perform them on (by default they will not be mutated)
  * @param schema
- * @param ddl The rules for how the write actions will be implemented
- * @param user Required if the `ddl` specifies ownership
- * @param options Optional:
+ * @param ddl The rules for how the write actions will be implemented * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
  * @returns A new array (unless `mutate` is used) with the actions applied to its objects
  */
-export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T, I extends T | Draft<T> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<I, W, WF> {
+export function writeToItemsArrayPreserveInputType<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T, I extends T | Draft<T> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: I[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<I, W, WF> {
     // This function works as overload for writeToItemsArray (instead of the 'PreserveInputType' suffix);
     // but with the cost of requiring the user to specify 2 generics instead of just 1 T.
     // So decided to give the consumer the choice.
-    return writeToItemsArray(writeActions, items as T[], schema, ddl, user, options) as WriteToItemsArrayResult<I, W, WF>;
+    return writeToItemsArray(writeActions, items as T[], schema, ddl, options) as WriteToItemsArrayResult<I, W, WF>;
 }
 
 /**
@@ -134,9 +130,7 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  * @param writeActions The actions to perform
  * @param items The items to perform them on (by default they will not be mutated)
  * @param schema
- * @param ddl The rules for how the write actions will be implemented
- * @param user Required if the `ddl` specifies ownership
- * @param options Optional:
+ * @param ddl The rules for how the write actions will be implemented * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
@@ -144,7 +138,7 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  * 
  * @note 
  */
-export function writeToItemsArray<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<T, W, WF>  {
+export function writeToItemsArray<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<T, W, WF>  {
 
     // Wondering if using this in a Read-Modify-Write process (e.g. read items from sql, modify with this, write back to table)
     // is too slow and you should implement a custom WriteAction-to-SQL converter (or any other target)?
@@ -153,9 +147,9 @@ export function writeToItemsArray<T extends Record<string, any>, W extends Recor
     // The key to making it performant was to batch all the writes in one using `UPDATE WITH VALUES`
 
     // W/WF are compile-time only; internally we operate on T
-    return _writeToItemsArray(writeActions as WriteAction<T>[], items, schema, ddl, user, options) as WriteToItemsArrayResult<T, W, WF>;
+    return _writeToItemsArray(writeActions as WriteAction<T>[], items, schema, ddl, options) as WriteToItemsArrayResult<T, W, WF>;
 }
-function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, user?: IUser, options?: WriteToItemsArrayOptions, scoped?:boolean): WriteToItemsArrayResult<T> {
+function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAction<T>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: WriteToItemsArrayOptions, scoped?:boolean): WriteToItemsArrayResult<T> {
 
 
     if( writeActions.length===0 ) {
@@ -258,22 +252,17 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                         failureTracker.report(action, action.payload.data, {type: 'create_duplicated_key', primary_key: rules.primary_key});
                     }
                 } else {
-                    const permissionFailure = (scoped || options?.enforce_ownership === false)? undefined : checkWritePermission(action.payload.data, ddl, user);
-                    if( permissionFailure ) {
-                        failureTracker.report(action, action.payload.data, permissionFailure);
-                    } else {
-                        const newItem = writeStrategy.create_handler(action.payload) as T;
+                    const newItem = writeStrategy.create_handler(action.payload) as T;
 
-                        const schemaOk = failureTracker.testSchema(action, newItem);
-                        if( schemaOk ) {
-                            existingIds.add(pkValue);
-                            addedHash[pkValue] = newItem;
-                            if( deletedHash[pkValue] ) delete deletedHash[pkValue];
-                            successTracker.report(action, newItem);
-                            //failureTracker.undoable()?.add(wipItems.length);
-                            wipItems.push(newItem);
-                        } // #fail_continues
-                    }
+                    const schemaOk = failureTracker.testSchema(action, newItem);
+                    if( schemaOk ) {
+                        existingIds.add(pkValue);
+                        addedHash[pkValue] = newItem;
+                        if( deletedHash[pkValue] ) delete deletedHash[pkValue];
+                        successTracker.report(action, newItem);
+                        //failureTracker.undoable()?.add(wipItems.length);
+                        wipItems.push(newItem);
+                    } // #fail_continues
                 }
             } else {
                 failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
@@ -303,157 +292,151 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 // The match cannot throw here: preflightActionWhere already dry-ran any throw-prone filter and
                 // rejected the action before this loop, so the mutation pass is throw-free.
                 if ( !deletedHash[pkValue] && isUpdateOrDeleteWritePayload<T>(action.payload) && matchJavascriptObject(item, action.payload.where) ) {
-                    const permissionFailure = (scoped || options?.enforce_ownership === false)? undefined : checkWritePermission(item, ddl, user);
-                    if( permissionFailure ) {
-                        failureTracker.report(action, item, permissionFailure);
-                    } else {
-                        let mutableUpdatedItem: T | undefined;
-                        let deleted = !!deletedHash[pkValue];
+                    let mutableUpdatedItem: T | undefined;
+                    let deleted = !!deletedHash[pkValue];
 
 
 
-                        if( !failureTracker.shouldHalt() ) {
-                            switch (action.payload.type) {
-                                case 'update':
-                                    if (!mutableUpdatedItem) {
-                                        mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                    }
-
-
-                                    const payloadSetsPrimaryKeyAs = rules.primary_key in action.payload.data && (action.payload.data as T)[rules.primary_key];
-                                    if( payloadSetsPrimaryKeyAs && payloadSetsPrimaryKeyAs!==pk(mutableUpdatedItem) ) {
-                                        failureTracker.report(action, item, {
-                                            'type': 'update_altered_key',
-                                            primary_key: rules.primary_key
-                                        })
-                                    } else {
-                                        writeStrategy.update_handler(action.payload, mutableUpdatedItem);
-                                        failureTracker.testSchema(action, mutableUpdatedItem);
-                                        // #fail_continues — if schema failed, shouldHalt() prevents commit
-                                    }
-
-                                    break;
-                                case 'array_scope':
-                                    if (!mutableUpdatedItem) {
-                                        mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                    }
-                                    // Get all arrays that match the scope, then recurse into writeToItemsArray for them
-                                    const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
-
-
-
-                                    for( const scopedArray of scopedArrays ) {
-
-
-                                        // #immer_cannot_mutate_in_atomic
-                                        // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.
-                                        // In Immer, any update to an object or property flags the whole draft, and it cannot be undone.
-                                        // At the moment, Immer+atomic can rollback because it clones the object before updating it, only accepting it if all actions succeed.
-                                        // The problem is when it recurses into _writeToItemsArray: the recursed level succeeds and mutates an object.
-                                        // Now it can no longer be rolled back, even if the top level now fails on a subsequent action.
-                                        // To workaround this, in the case of (`atomic` + Immer + array_scope), it must clone the target before recursing into it
-                                        const preventMutation = optionsIncDefaults.mutate && optionsIncDefaults.atomic && isDraft(scopedArray.items);
-
-                                        const arrayResponse = _writeToItemsArray(
-                                            [scopedArray.writeAction],
-                                            preventMutation? structuredClone(current(scopedArray.items)) : scopedArray.items,
-                                            scopedArray.schema,
-                                            scopedArray.ddl,
-                                            user,
-                                            optionsIncDefaults,
-                                            true
-                                            );
-
-                                        if( !arrayResponse.ok ) {
-                                            failureTracker.mergeUnderAction(action, getWriteFailures(arrayResponse));
-                                        }
-
-                                        setProperty(
-                                            mutableUpdatedItem,
-                                            scopedArray.path,
-                                            arrayResponse.changes.final_items
-                                        )
-
-                                    }
-
-                                    break;
-                                case 'delete':
-                                    deleted = true;
-                                    existingIds.delete(pkValue);
-                                    break;
-                                // New mutation types bypass WriteStrategy (same as delete/array_scope).
-                                // Future work may extend WriteStrategy if custom strategies need to intercept these.
-                                case 'add_to_set': {
-                                    // Read from current state (mutableUpdatedItem if already cloned, else original)
-                                    const addSource = mutableUpdatedItem ?? item;
-                                    const addResult = applyAddToSet(addSource, action.payload.path as string, action.payload.items as unknown[], action.payload.unique_by, ddl);
-                                    if ('error' in addResult) {
-                                        failureTracker.report(action, item, addResult.error);
-                                    } else if (addResult.changed) {
-                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = addResult.value;
-                                        failureTracker.testSchema(action, mutableUpdatedItem);
-                                    }
-                                    break;
+                    if( !failureTracker.shouldHalt() ) {
+                        switch (action.payload.type) {
+                            case 'update':
+                                if (!mutableUpdatedItem) {
+                                    mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                 }
-                                case 'push': {
-                                    const pushSource = mutableUpdatedItem ?? item;
-                                    const pushResult = applyPush(pushSource, action.payload.path as string, action.payload.items as unknown[]);
-                                    if ('error' in pushResult) {
-                                        failureTracker.report(action, item, pushResult.error);
-                                    } else if (pushResult.changed) {
-                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = pushResult.value;
-                                        failureTracker.testSchema(action, mutableUpdatedItem);
-                                    }
-                                    break;
+
+
+                                const payloadSetsPrimaryKeyAs = rules.primary_key in action.payload.data && (action.payload.data as T)[rules.primary_key];
+                                if( payloadSetsPrimaryKeyAs && payloadSetsPrimaryKeyAs!==pk(mutableUpdatedItem) ) {
+                                    failureTracker.report(action, item, {
+                                        'type': 'update_altered_key',
+                                        primary_key: rules.primary_key
+                                    })
+                                } else {
+                                    writeStrategy.update_handler(action.payload, mutableUpdatedItem);
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                    // #fail_continues — if schema failed, shouldHalt() prevents commit
                                 }
-                                case 'pull': {
-                                    const pullSource = mutableUpdatedItem ?? item;
-                                    const pullResult = applyPull(pullSource, action.payload.path as string, action.payload.items_where as any);
-                                    if ('error' in pullResult) {
-                                        failureTracker.report(action, item, pullResult.error);
-                                    } else if (pullResult.changed) {
-                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = pullResult.value;
-                                        failureTracker.testSchema(action, mutableUpdatedItem);
-                                    }
-                                    break;
+
+                                break;
+                            case 'array_scope':
+                                if (!mutableUpdatedItem) {
+                                    mutableUpdatedItem = getMutableItem(item, objectCloneMode);
                                 }
-                                case 'inc': {
-                                    const incSource = mutableUpdatedItem ?? item;
-                                    const incResult = applyInc(incSource, action.payload.path as string, action.payload.amount);
-                                    if ('error' in incResult) {
-                                        failureTracker.report(action, item, incResult.error);
-                                    } else if (incResult.changed) {
-                                        if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                        (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = incResult.value;
-                                        failureTracker.testSchema(action, mutableUpdatedItem);
+                                // Get all arrays that match the scope, then recurse into writeToItemsArray for them
+                                const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
+
+
+
+                                for( const scopedArray of scopedArrays ) {
+
+
+                                    // #immer_cannot_mutate_in_atomic
+                                    // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.
+                                    // In Immer, any update to an object or property flags the whole draft, and it cannot be undone.
+                                    // At the moment, Immer+atomic can rollback because it clones the object before updating it, only accepting it if all actions succeed.
+                                    // The problem is when it recurses into _writeToItemsArray: the recursed level succeeds and mutates an object.
+                                    // Now it can no longer be rolled back, even if the top level now fails on a subsequent action.
+                                    // To workaround this, in the case of (`atomic` + Immer + array_scope), it must clone the target before recursing into it
+                                    const preventMutation = optionsIncDefaults.mutate && optionsIncDefaults.atomic && isDraft(scopedArray.items);
+
+                                    const arrayResponse = _writeToItemsArray(
+                                        [scopedArray.writeAction],
+                                        preventMutation? structuredClone(current(scopedArray.items)) : scopedArray.items,
+                                        scopedArray.schema,
+                                        scopedArray.ddl,
+                                        optionsIncDefaults,
+                                        true
+                                        );
+
+                                    if( !arrayResponse.ok ) {
+                                        failureTracker.mergeUnderAction(action, getWriteFailures(arrayResponse));
                                     }
-                                    break;
+
+                                    setProperty(
+                                        mutableUpdatedItem,
+                                        scopedArray.path,
+                                        arrayResponse.changes.final_items
+                                    )
+
                                 }
+
+                                break;
+                            case 'delete':
+                                deleted = true;
+                                existingIds.delete(pkValue);
+                                break;
+                            // New mutation types bypass WriteStrategy (same as delete/array_scope).
+                            // Future work may extend WriteStrategy if custom strategies need to intercept these.
+                            case 'add_to_set': {
+                                // Read from current state (mutableUpdatedItem if already cloned, else original)
+                                const addSource = mutableUpdatedItem ?? item;
+                                const addResult = applyAddToSet(addSource, action.payload.path as string, action.payload.items as unknown[], action.payload.unique_by, ddl);
+                                if ('error' in addResult) {
+                                    failureTracker.report(action, item, addResult.error);
+                                } else if (addResult.changed) {
+                                    if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                    (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = addResult.value;
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                }
+                                break;
+                            }
+                            case 'push': {
+                                const pushSource = mutableUpdatedItem ?? item;
+                                const pushResult = applyPush(pushSource, action.payload.path as string, action.payload.items as unknown[]);
+                                if ('error' in pushResult) {
+                                    failureTracker.report(action, item, pushResult.error);
+                                } else if (pushResult.changed) {
+                                    if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                    (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = pushResult.value;
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                }
+                                break;
+                            }
+                            case 'pull': {
+                                const pullSource = mutableUpdatedItem ?? item;
+                                const pullResult = applyPull(pullSource, action.payload.path as string, action.payload.items_where as any);
+                                if ('error' in pullResult) {
+                                    failureTracker.report(action, item, pullResult.error);
+                                } else if (pullResult.changed) {
+                                    if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                    (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = pullResult.value;
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                }
+                                break;
+                            }
+                            case 'inc': {
+                                const incSource = mutableUpdatedItem ?? item;
+                                const incResult = applyInc(incSource, action.payload.path as string, action.payload.amount);
+                                if ('error' in incResult) {
+                                    failureTracker.report(action, item, incResult.error);
+                                } else if (incResult.changed) {
+                                    if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                    (mutableUpdatedItem as Record<string, unknown>)[action.payload.path as string] = incResult.value;
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                }
+                                break;
                             }
                         }
+                    }
 
-                        // Now actually commit the change
-                        if( !failureTracker.shouldHalt() ) {
-                            successTracker.report(action, item);
-                            if (deleted) {
-                                deletedHash[pkValue] = item;
-                                if( addedHash[pkValue] ) delete addedHash[pkValue];
-                                if( updatedHash[pkValue] ) delete updatedHash[pkValue];
-                                wipItems.splice(i, 1);
-                                i--;
-                            } else if( mutableUpdatedItem ) {
-                                if (addedHash[pkValue]) {
-                                    addedHash[pkValue] = mutableUpdatedItem;
-                                } else {
+                    // Now actually commit the change
+                    if( !failureTracker.shouldHalt() ) {
+                        successTracker.report(action, item);
+                        if (deleted) {
+                            deletedHash[pkValue] = item;
+                            if( addedHash[pkValue] ) delete addedHash[pkValue];
+                            if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                            wipItems.splice(i, 1);
+                            i--;
+                        } else if( mutableUpdatedItem ) {
+                            if (addedHash[pkValue]) {
+                                addedHash[pkValue] = mutableUpdatedItem;
+                            } else {
 
-                                    updatedHash[pkValue] = mutableUpdatedItem;
+                                updatedHash[pkValue] = mutableUpdatedItem;
 
-                                }
-                                wipItems[i] = mutableUpdatedItem
                             }
+                            wipItems[i] = mutableUpdatedItem
                         }
                     }
                 }

@@ -19,9 +19,6 @@ describe('equivalentCreateOccurs', () => {
                 primary_key: 'id',
                 default_ordering_key: { key: 'id', direction: 1 }
             }
-        },
-        ownership: {
-            type: 'none'
         }
     }
 

@@ -183,10 +183,6 @@ export type WriteError =
       uuid: string;
     }
   | {
-      type: "permission_denied";
-      reason: CorePermissionDeniedReason | (string & {});
-    }
-  | {
       /**
        * The action's `where` clause is invalid against the schema — it references a field that
        * doesn't exist, carries a value whose primitive type contradicts the field, or contains a
@@ -205,18 +201,6 @@ export type WriteError =
       /** `uuid` of the earlier action whose failure blocked this one. */
       blocked_by_action_uuid: string;
     };
-
-/**
- * The set of permission-denied reasons produced by this library.
- * Consumers may pass any string as a reason (e.g. `'not-authenticated'`);
- * core reasons are provided here for autocomplete and exhaustive matching.
- */
-export type CorePermissionDeniedReason =
-  | "no-owner-id"
-  | "not-owner"
-  | "unknown-type"
-  | "invalid-rule"
-  | "expected-owner-email";
 
 /**
  * A `WriteError` enriched with the item context where the error occurred.

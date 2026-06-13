@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { WriteAction, WriteResult } from "./types.ts";
 import type { WriteChanges } from "./writeToItemsArray/types.ts";
 import type { DDL } from "../ddl/types.ts";
-import type { IUser } from "./auth/types.ts";
 import { getWriteFailures, getWriteSuccesses, getWriteErrors, assertWriteArrayScope } from "./helpers.ts";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -23,7 +22,6 @@ export type WriteTestAdapter<T extends Record<string, any>> = {
         writeActions: WriteAction<T>[],
         schema: z.ZodType<T, any, any>,
         ddl: DDL<T>,
-        user?: IUser,
         options?: { atomic?: boolean, attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update' },
     }) => Promise<WriteTestAdapterResult<T>>
 }
@@ -57,7 +55,6 @@ const flatDdl: DDL<Flat> = {
     lists: {
         '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
     },
-    ownership: { type: 'none' },
 };
 
 const NestedSchema = z.object({
@@ -85,47 +82,6 @@ const nestedDdl: DDL<Nested> = {
         'children': { primary_key: 'cid' },
         'children.items': { primary_key: 'iid' },
     },
-    ownership: { type: 'none' },
-};
-
-const OwnerSchema = z.object({
-    id: z.string(),
-    text: z.string().optional(),
-    owner_id: z.string().optional(),
-}).strict();
-type Owner = z.infer<typeof OwnerSchema>;
-
-const ownerDdl: DDL<Owner> = {
-    version: 1,
-    lists: {
-        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
-    },
-    ownership: {
-        type: 'basic',
-        property_type: 'id',
-        path: 'owner_id',
-        format: 'uuid',
-    },
-};
-
-const OwnerEmailSchema = z.object({
-    id: z.string(),
-    text: z.string().optional(),
-    owner_email: z.string().optional(),
-}).strict();
-type OwnerEmail = z.infer<typeof OwnerEmailSchema>;
-
-const ownerEmailDdl: DDL<OwnerEmail> = {
-    version: 1,
-    lists: {
-        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
-    },
-    ownership: {
-        type: 'basic',
-        property_type: 'id',
-        path: 'owner_email',
-        format: 'email',
-    },
 };
 
 const FlatWithSubItemsSchema = z.object({
@@ -146,26 +102,6 @@ const flatWithSubItemsDdl: DDL<FlatWithSubItems> = {
         '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
         'sub_items': { primary_key: 'sid' },
     },
-    ownership: { type: 'none' },
-};
-
-const OwnerScalarArraySchema = z.object({
-    id: z.string(),
-    owner_ids: z.array(z.string()).optional(),
-}).strict();
-type OwnerScalarArray = z.infer<typeof OwnerScalarArraySchema>;
-
-const ownerScalarArrayDdl: DDL<OwnerScalarArray> = {
-    version: 1,
-    lists: {
-        '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } },
-    },
-    ownership: {
-        type: 'basic',
-        property_type: 'id_in_scalar_array',
-        path: 'owner_ids',
-        format: 'uuid',
-    },
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -174,14 +110,6 @@ const ownerScalarArrayDdl: DDL<OwnerScalarArray> = {
 
 function makeAction<T extends Record<string, any>>(uuid: string, payload: WriteAction<T>['payload']): WriteAction<T> {
     return { type: 'write', ts: Date.now(), uuid, payload };
-}
-
-function makeUser(uuid: string, email?: string): IUser {
-    return {
-        getID: () => uuid,
-        getUuid: () => uuid,
-        getEmail: () => email ?? `${uuid}@test.com`,
-    };
 }
 
 /** If adapter returned undefined (unsupported), log + skip. Else run assertion. */
@@ -1954,189 +1882,6 @@ export function standardTests(testConfig: StandardTestConfig) {
                     expect(r.result.ok).toBe(true);
                     expect(r.finalItems[0]!.text).toBe('new');
                 }, implName, 'always-update recovery');
-            });
-        });
-    });
-
-    // ───────────────────────────────────────────────────────────────
-    // 7. Permissions
-    // ───────────────────────────────────────────────────────────────
-
-    describe('7. Permissions', () => {
-
-        describe('7.1 No permissions (type: none)', () => {
-
-            test('all writes succeed without user', async () => {
-                const adapter = createAdapter(FlatSchema, flatDdl);
-                const r = await adapter.apply({
-                    initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1' } })],
-                    schema: FlatSchema,
-                    ddl: flatDdl,
-                    // no user
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                }, implName);
-            });
-        });
-
-        describe('7.2 Basic ownership (id property)', () => {
-
-            test('owner can create (owner_id matches user)', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', owner_id: 'user1' } })],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    user: makeUser('user1'),
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                }, implName);
-            });
-
-            test('owner can update', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [{ id: '1', owner_id: 'user1', text: 'old' }],
-                    writeActions: [makeAction('a1', { type: 'update', data: { text: 'new' }, where: { id: '1' } })],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    user: makeUser('user1'),
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                    expect(r.finalItems[0]!.text).toBe('new');
-                }, implName);
-            });
-
-            test('non-owner create denied: error type permission_denied, reason not-owner', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', owner_id: 'other-user' } })],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    user: makeUser('user1'),
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(false);
-                    const err = getWriteErrors(r.result)[0]!;
-                    expect(err.type).toBe('permission_denied');
-                    if (err.type === 'permission_denied') {
-                        expect(err.reason).toBe('not-owner');
-                    }
-                }, implName);
-            });
-
-            test('non-owner update denied', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [{ id: '1', owner_id: 'other-user' }],
-                    writeActions: [makeAction('a1', { type: 'update', data: { text: 'hack' }, where: { id: '1' } })],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    user: makeUser('user1'),
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(false);
-                    expect(getWriteErrors(r.result)[0]!.type).toBe('permission_denied');
-                }, implName);
-            });
-
-            test('no user provided: reason no-owner-id', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', owner_id: 'someone' } })],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    // no user
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(false);
-                    const err = getWriteErrors(r.result)[0]!;
-                    expect(err.type).toBe('permission_denied');
-                    if (err.type === 'permission_denied') {
-                        expect(err.reason).toBe('no-owner-id');
-                    }
-                }, implName);
-            });
-        });
-
-        describe('7.3 Ownership formats', () => {
-
-            test('email format: matches getEmail()', async () => {
-                const adapter = createAdapter(OwnerEmailSchema, ownerEmailDdl);
-                const r = await adapter.apply({
-                    initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', owner_email: 'user@test.com' } })],
-                    schema: OwnerEmailSchema,
-                    ddl: ownerEmailDdl,
-                    user: makeUser('user1', 'user@test.com'),
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                }, implName, 'email format permission');
-            });
-
-            test('scalar array: user ID found in array at path', async () => {
-                const adapter = createAdapter(OwnerScalarArraySchema, ownerScalarArrayDdl);
-                const r = await adapter.apply({
-                    initialItems: [{ id: '1', owner_ids: ['user1', 'user2'] }],
-                    writeActions: [makeAction('a1', { type: 'update', data: { id: '1' }, where: { id: '1' } })],
-                    schema: OwnerScalarArraySchema,
-                    ddl: ownerScalarArrayDdl,
-                    user: makeUser('user1'),
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                }, implName, 'scalar array permission');
-            });
-        });
-
-        describe('7.5 Permissions + atomic/non-atomic', () => {
-
-            test('non-atomic: actions before permission failure kept', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [{ id: '1', owner_id: 'user1', text: 'old' }],
-                    writeActions: [
-                        makeAction('a1', { type: 'update', data: { text: 'new' }, where: { id: '1' } }),
-                        makeAction('a2', { type: 'create', data: { id: '2', owner_id: 'other-user' } }), // permission denied
-                    ],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    user: makeUser('user1'),
-                    options: { atomic: false },
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(false);
-                    expect(getWriteSuccesses(r.result)).toHaveLength(1);
-                    expect(r.finalItems[0]!.text).toBe('new');
-                }, implName);
-            });
-
-            test('atomic: permission failure rolls back everything', async () => {
-                const adapter = createAdapter(OwnerSchema, ownerDdl);
-                const r = await adapter.apply({
-                    initialItems: [{ id: '1', owner_id: 'user1', text: 'old' }],
-                    writeActions: [
-                        makeAction('a1', { type: 'update', data: { text: 'new' }, where: { id: '1' } }),
-                        makeAction('a2', { type: 'create', data: { id: '2', owner_id: 'other-user' } }), // permission denied
-                    ],
-                    schema: OwnerSchema,
-                    ddl: ownerDdl,
-                    user: makeUser('user1'),
-                    options: { atomic: true },
-                });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(false);
-                    expect(getWriteSuccesses(r.result)).toHaveLength(0);
-                    expect(r.finalItems[0]!.text).toBe('old'); // rolled back
-                }, implName);
             });
         });
     });

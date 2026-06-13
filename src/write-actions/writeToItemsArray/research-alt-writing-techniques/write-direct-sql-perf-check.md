@@ -2,6 +2,8 @@
 
 Assess exactly how much a performance gain it would be to transform a WriteAction into a pure SQL statement vs doing Read Modify Write (RMW).
 
+> ⚠️ **Outdated re: permissions.** This research predates the removal of the ownership/permission layer. References below to permissions, ownership, `DDLPermissions`, `checkPermission`, `IUser`, and owner-field WHERE conditions describe a feature that **no longer exists** — `ddl.ownership`, the `user`/`IUser` parameter, and the whole permission layer were removed (authorization now lives upstream in Casl). Disregard those parts; the rest of the analysis still stands.
+
 # Relevant Files
 
 @./types.ts

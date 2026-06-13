@@ -6,7 +6,6 @@ import type {
 } from "../dot-prop-paths/types.ts";
 import type { IfAny } from "../types.ts";
 import type { EnsureRecord } from "../types.ts";
-import type { OwnershipRule } from "../ownership/types.ts";
 import type { SortEntry } from "../query/types.ts";
 
 /**
@@ -70,8 +69,6 @@ type ListRulesCore<T extends Record<string, any> = Record<string, any>> = {
 
 type DDLRoot<T extends Record<string, any> = Record<string, any>> = {
   version: number;
-  /** Declarative ownership hint — not necessarily enforced by every implementation. */
-  ownership: OwnershipRule<T>;
 };
 export type ListRules<T extends Record<string, any> = Record<string, any>> =
   ListRulesCore<T>;

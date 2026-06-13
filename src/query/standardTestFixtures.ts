@@ -117,7 +117,6 @@ export const tenItems: NumericItem[] = Array.from({ length: 10 }, (_, i) => ({
  */
 export const STANDARD_TEST_DDL: DDL<StandardTestItem> = {
     version: 1,
-    ownership: { type: 'none' },
     lists: {
         '.': {
             primary_key: 'id',

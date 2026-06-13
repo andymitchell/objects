@@ -9,7 +9,6 @@ import type {
 } from "./types.ts";
 import type { resolveDdlListRules } from "./resolveDdlListRules.ts";
 import type { SortEntry } from "../query/types.ts";
-import type { OwnershipRule } from "../ownership/types.ts";
 import type {
   DotPropPathsUnion,
   PrimaryKeyProperties,
@@ -38,9 +37,6 @@ type Deep = {
   groups: { gid: string; items: { iid: string; qty: number }[] }[];
 };
 
-/** Collection with an identifier field usable by a `basic` ownership rule. */
-type Owned = { id: string; owner_id: string };
-
 // ═══════════════════════════════════════════════════════════════════
 // 1. Authoring a DDL document
 // ═══════════════════════════════════════════════════════════════════
@@ -55,27 +51,12 @@ describe("Authoring a DDL document", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
   it("rejects a document that omits the version", () => {
     // @ts-expect-error: version is required
     const _ddl: DDL<Flat> = {
-      lists: {
-        ".": {
-          primary_key: "id",
-          default_ordering_key: { key: "id", direction: 1 },
-        },
-      },
-      ownership: { type: "none" },
-    };
-  });
-
-  it("rejects a document that omits the ownership rule", () => {
-    // @ts-expect-error: ownership is required
-    const _ddl: DDL<Flat> = {
-      version: 1,
       lists: {
         ".": {
           primary_key: "id",
@@ -89,7 +70,6 @@ describe("Authoring a DDL document", () => {
     // @ts-expect-error: lists is required
     const _ddl: DDL<Flat> = {
       version: 1,
-      ownership: { type: "none" },
     };
   });
 
@@ -102,7 +82,6 @@ describe("Authoring a DDL document", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
       // @ts-expect-error: 'extra' is not part of the DDL document
       extra: true,
     };
@@ -112,46 +91,9 @@ describe("Authoring a DDL document", () => {
     const _root: DDLRoot<Flat> = {} as DDL<Flat>;
   });
 
-  it("types the ownership field as the collection's ownership rule", () => {
-    expectTypeOf<DDL<Owned>["ownership"]>().toEqualTypeOf<OwnershipRule<Owned>>();
-  });
-
-  it("accepts a basic ownership rule bound to an identifier field", () => {
-    const _ddl: DDL<Owned> = {
-      version: 1,
-      lists: {
-        ".": {
-          primary_key: "id",
-          default_ordering_key: { key: "id", direction: 1 },
-        },
-      },
-      ownership: {
-        type: "basic",
-        property_type: "id",
-        path: "owner_id",
-        format: "uuid",
-      },
-    };
-  });
-
-  it("rejects a malformed ownership rule", () => {
-    const _ddl: DDL<Owned> = {
-      version: 1,
-      lists: {
-        ".": {
-          primary_key: "id",
-          default_ordering_key: { key: "id", direction: 1 },
-        },
-      },
-      // @ts-expect-error: a 'basic' ownership rule requires property_type, path and format
-      ownership: { type: "basic" },
-    };
-  });
-
   it("never lets a document field degrade to any", () => {
     expectTypeOf<DDL<Flat>["version"]>().not.toBeAny();
     expectTypeOf<DDL<Flat>["lists"]>().not.toBeAny();
-    expectTypeOf<DDL<Flat>["ownership"]>().not.toBeAny();
   });
 });
 
@@ -165,7 +107,6 @@ describe("The list map keys", () => {
       version: 1,
       // @ts-expect-error: the root '.' list is mandatory
       lists: {},
-      ownership: { type: "none" },
     };
   });
 
@@ -188,7 +129,6 @@ describe("The list map keys", () => {
         // @ts-expect-error: 'tags' is a scalar array, not a list scope
         tags: { primary_key: "id" },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -214,7 +154,6 @@ describe("The list map keys", () => {
         // @ts-expect-error: 'nonsense' is not an object-array path of Nested
         nonsense: { primary_key: "rid" },
       },
-      ownership: { type: "none" },
     };
   });
 });
@@ -239,7 +178,6 @@ describe("A list's primary key", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -252,7 +190,6 @@ describe("A list's primary key", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -266,7 +203,6 @@ describe("A list's primary key", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -280,7 +216,6 @@ describe("A list's primary key", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -301,7 +236,6 @@ describe("A list's primary key", () => {
         // @ts-expect-error: 'id' belongs to Nested, not to a row element
         rows: { primary_key: "id" },
       },
-      ownership: { type: "none" },
     };
   });
 });
@@ -326,7 +260,6 @@ describe("Ordering and sortable-key declarations", () => {
           default_ordering_key: { key: "name", direction: -1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -343,7 +276,6 @@ describe("Ordering and sortable-key declarations", () => {
           },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -360,7 +292,6 @@ describe("Ordering and sortable-key declarations", () => {
           },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -381,7 +312,6 @@ describe("Ordering and sortable-key declarations", () => {
           sortable_keys: [{ key: "name" }, { key: "rank", direction: -1 }],
         },
       },
-      ownership: { type: "none" },
     };
     expect(_ddl.lists["."].sortable_keys?.[1]?.direction).toBe(-1);
   });
@@ -397,7 +327,6 @@ describe("Ordering and sortable-key declarations", () => {
           sortable_keys: [{ key: "title", direction: 2 }],
         },
       },
-      ownership: { type: "none" },
     };
     expect(_ddl).toBeDefined();
   });
@@ -412,7 +341,6 @@ describe("Ordering and sortable-key declarations", () => {
           sortable_keys: [],
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -427,7 +355,6 @@ describe("Ordering and sortable-key declarations", () => {
           sortable_keys: [{ key: "nonsense" }],
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -442,7 +369,6 @@ describe("Ordering and sortable-key declarations", () => {
           bogus: true,
         },
       },
-      ownership: { type: "none" },
     };
   });
 });
@@ -479,7 +405,6 @@ describe("Root vs nested list rules", () => {
         // @ts-expect-error: default_ordering_key is mandatory on the root '.' list
         ".": { primary_key: "id" },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -493,7 +418,6 @@ describe("Root vs nested list rules", () => {
         },
         rows: { primary_key: "rid" },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -551,7 +475,6 @@ describe("A DDL for an unconstrained collection (any)", () => {
           default_ordering_key: { key: "id", direction: 1 },
         },
       },
-      ownership: { type: "none" },
     };
   });
 
@@ -562,7 +485,6 @@ describe("A DDL for an unconstrained collection (any)", () => {
         // @ts-expect-error: default_ordering_key is mandatory on the root '.' list
         ".": { primary_key: "id" },
       },
-      ownership: { type: "none" },
     };
   });
 });

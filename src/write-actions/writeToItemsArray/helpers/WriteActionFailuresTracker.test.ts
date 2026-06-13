@@ -309,7 +309,7 @@ describe("accumulating and de-duplicating errors", () => {
     { type: "missing_key", primary_key: "id" },
     { type: "create_duplicated_key", primary_key: "id" },
     { type: "update_altered_key", primary_key: "id" },
-    { type: "permission_denied", reason: "not-owner" },
+    { type: "invalid_filter", reason: "unknown_field" },
   ];
 
   test.each(unrecoverableErrors)(
@@ -576,8 +576,8 @@ describe("counting failed actions", () => {
     tracker.report(action, validFlat, { type: "custom", message: "e1" });
     tracker.report(action, validFlat, { type: "missing_key", primary_key: "id" });
     tracker.report(action, validFlat, {
-      type: "permission_denied",
-      reason: "not-owner",
+      type: "create_duplicated_key",
+      primary_key: "id",
     });
     expect(tracker.length()).toBe(1);
     expect(tracker.get()[0]!.errors.length).toBe(3);

@@ -18,7 +18,6 @@ type Row = z.infer<typeof Schema>;
 
 const ddl: DDL<Row> = {
     version: 1,
-    ownership: { type: "none" },
     lists: { ".": { primary_key: "id", default_ordering_key: { key: "id", direction: 1 } } },
 };
 
@@ -132,7 +131,6 @@ describe("writeToItemsArray — invalid where clause", () => {
             items,
             Schema,
             ddl,
-            undefined,
             { atomic: true },
         );
         expect(result.ok).toBe(false);
@@ -159,7 +157,6 @@ const NestedSchema = z.object({
 type Nested = z.infer<typeof NestedSchema>;
 const nestedDdl: DDL<Nested> = {
     version: 1,
-    ownership: { type: "none" },
     lists: {
         ".": { primary_key: "id", default_ordering_key: { key: "id", direction: 1 } },
         "children": { primary_key: "cid" },
@@ -252,7 +249,7 @@ describe("writeToItemsArray — invalid where nested in array_scope", () => {
             { type: "write", ts: 0, uuid: "a", payload: { type: "create", data: { id: "2" } } } as WriteAction<Nested>,
             nestedAction({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { label: "x" }, where: { ghost: 1 } } }, "b"),
         ];
-        const result = writeToItemsArray(actions, seedNested(), NestedSchema, nestedDdl, undefined, { atomic: true });
+        const result = writeToItemsArray(actions, seedNested(), NestedSchema, nestedDdl, { atomic: true });
 
         expect(result.ok).toBe(false);
         expect(result.changes.final_items.map((r) => r.id)).toEqual(["1"]); // created '2' rolled back
@@ -279,7 +276,6 @@ const SubSchema = z.object({
 type Sub = z.infer<typeof SubSchema>;
 const subDdl: DDL<Sub> = {
     version: 1,
-    ownership: { type: "none" },
     lists: {
         ".": { primary_key: "id", default_ordering_key: { key: "id", direction: 1 } },
         "sub_items": { primary_key: "sid" },

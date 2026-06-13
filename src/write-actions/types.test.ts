@@ -303,13 +303,6 @@ describe("4. WriteError discriminated union", () => {
       }
     });
 
-    it("type:permission_denied -> .reason accessible", () => {
-      const error: WriteError = {} as WriteError;
-      if (error.type === "permission_denied") {
-        const _reason = error.reason;
-      }
-    });
-
     it("type:custom -> .message accessible", () => {
       const error: WriteError = {} as WriteError;
       if (error.type === "custom") {
@@ -353,8 +346,6 @@ describe("4. WriteError discriminated union", () => {
         case "update_altered_key":
           break;
         case "create_duplicated_key":
-          break;
-        case "permission_denied":
           break;
         case "blocked":
           break;

@@ -2,6 +2,8 @@
 
 Assess if it's possible to turn Write Actions into a declarative UPDATE SQL statement for a JSON column.
 
+> ⚠️ **Outdated re: permissions.** This research predates the removal of the ownership/permission layer. References below to permissions, ownership, `DDLPermissions`, `'basic_ownership_property'`, `'opa'`, `checkPermission`, `IUser`, owner-field WHERE conditions, and `transferring_to_path` describe a feature that **no longer exists** — `ddl.ownership`, the `user`/`IUser` parameter, and the whole permission layer were removed (authorization now lives upstream in Casl). Disregard those parts; the rest of the SQL-feasibility analysis still stands.
+
 # CONCLUSION - IMPORTANT
 
 There's only a 1.5x speed advantage to using direct queries, vs RMW (Read objects into memory, Modify with `writeToItemsArray`, Write back to table); and a _lot_ more complexity to maintain (new writing functions, dual paths as the writing functions can't handle every type of WriteAction). 

@@ -43,15 +43,6 @@ export type WriteToItemsArrayOptions = {
      * @default false
      */
     mutate?: boolean
-
-    /**
-     * Whether to enforce ownership checks on write actions.
-     *
-     * Set to `false` to bypass ownership verification (e.g. for admin operations).
-     *
-     * @default true
-     */
-    enforce_ownership?: boolean
 }
 
 

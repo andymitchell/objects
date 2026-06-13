@@ -1,6 +1,5 @@
 import { writeToItemsArray, writeToItemsArrayPreserveInputType } from "./writeToItemsArray/index.ts";
 import { deepEquals } from "./writeToItemsArray/helpers/mutations/index.ts";
-import { isIUser } from "./auth/index.js";
 import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
 import { getWrittenPaths } from "./getWrittenPaths.ts";
 import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteOutcomeOkCoreSchema, WriteOutcomeFailedCoreSchema, WriteOutcomeCoreSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteOutcomeOkCoreSchema, makeWriteOutcomeFailedCoreSchema, makeWriteOutcomeCoreSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
@@ -9,7 +8,6 @@ import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteO
 export {
     writeToItemsArray,
     writeToItemsArrayPreserveInputType,
-    isIUser,
     /**
      * Key-order-independent structural deep-equal. Promoted to the public surface so stores can
      * canonicalise a replayed `WriteAction` against a prior one when detecting `uuid_conflict`
@@ -64,7 +62,6 @@ export type {
     WritePayloadPull,
     WritePayloadInc,
     WriteError,
-    CorePermissionDeniedReason,
     WriteErrorContext,
     WriteAffectedItem,
     WriteOutcomeOk,
@@ -85,10 +82,6 @@ export type {
 
 export type { DDL, DDLRoot, ListRules, ListRulesCore } from '../ddl/types.ts';
 export { resolveDdlListRules } from '../ddl/resolveDdlListRules.ts';
-
-export type { IUser } from "./auth/index.js";
-
-export type { OwnershipRule } from "../ownership/types.ts";
 
 // ─── Testing ───
 // Published so a stackable-collection conformance suite can run the standard write-action

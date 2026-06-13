@@ -14,7 +14,7 @@ import { compileValidateWhereFilter } from "../../where-filter/index.ts";
  * is not depth but that it fails loudly the moment the validator starts rejecting filters the engine accepts.
  */
 const createValidatingAdapter: AdapterFactory = <T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>) => ({
-    apply: async ({ initialItems, writeActions, user, options, schema: configSchema, ddl: configDdl }) => {
+    apply: async ({ initialItems, writeActions, options, schema: configSchema, ddl: configDdl }) => {
         // Directly assert the public validator flags none of the corpus's (all legitimate) top-level wheres.
         const validate = compileValidateWhereFilter(configSchema);
         for (const action of writeActions) {
@@ -29,7 +29,7 @@ const createValidatingAdapter: AdapterFactory = <T extends Record<string, any>>(
 
         // Delegate to the real engine for the actual outcome, so every standard result/changes assertion still holds.
         const items = structuredClone(initialItems);
-        const result = writeToItemsArray(writeActions, items, configSchema, configDdl, user, {
+        const result = writeToItemsArray(writeActions, items, configSchema, configDdl, {
             atomic: options?.atomic,
             attempt_recover_duplicate_create: options?.attempt_recover_duplicate_create,
         });

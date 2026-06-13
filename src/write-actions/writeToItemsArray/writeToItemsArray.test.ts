@@ -37,7 +37,6 @@ const ddl: DDL<Obj> = {
         'children': { primary_key: 'cid' },
         'children.children': { primary_key: 'ccid' },
     },
-    ownership: { type: 'none' },
 };
 
 const obj1: Obj = { id: '1' };
@@ -49,9 +48,9 @@ const obj2: Obj = { id: '2' };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Zod v3/v4 generic variance mismatch
 const createAdapter: AdapterFactory = <T extends Record<string, any>>(schema: z.ZodType<T, any, any>, ddl: DDL<T>) => ({
-    apply: async ({ initialItems, writeActions, user, options, schema: configSchema, ddl: configDdl }) => {
+    apply: async ({ initialItems, writeActions, options, schema: configSchema, ddl: configDdl }) => {
         const items = structuredClone(initialItems);
-        const result = writeToItemsArray(writeActions, items, configSchema, configDdl, user, {
+        const result = writeToItemsArray(writeActions, items, configSchema, configDdl, {
             atomic: options?.atomic,
             attempt_recover_duplicate_create: options?.attempt_recover_duplicate_create,
         });
@@ -136,7 +135,7 @@ describe('writeToItemsArray', () => {
                     const items = [structuredClone(obj1)];
                     const result = writeToItemsArray(
                         [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } }],
-                        items, ObjSchema, ddl, undefined, { mutate: true },
+                        items, ObjSchema, ddl, { mutate: true },
                     );
                     expect(result.changes.final_items).toBe(items);
                 });
@@ -146,7 +145,7 @@ describe('writeToItemsArray', () => {
                     const items = [item1];
                     const result = writeToItemsArray(
                         [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'new' }, where: { id: '1' } } }],
-                        items, ObjSchema, ddl, undefined, { mutate: true },
+                        items, ObjSchema, ddl, { mutate: true },
                     );
                     expect(result.changes.final_items[0]).toBe(item1);
                     expect(item1.text).toBe('new');
@@ -160,7 +159,7 @@ describe('writeToItemsArray', () => {
                     const finalItems = produce(items, draft => {
                         writeToItemsArray(
                             [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'immer' }, where: { id: '1' } } }],
-                            draft as Obj[], ObjSchema, ddl, undefined, { mutate: true },
+                            draft as Obj[], ObjSchema, ddl, { mutate: true },
                         );
                     });
                     expect(finalItems[0]!.text).toBe('immer');
@@ -172,7 +171,7 @@ describe('writeToItemsArray', () => {
                     expect(() => produce(items, draft => {
                         writeToItemsArray(
                             [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } }],
-                            draft as Obj[], ObjSchema, ddl, undefined, { mutate: false },
+                            draft as Obj[], ObjSchema, ddl, { mutate: false },
                         );
                     })).toThrow('When using Immer drafts you need to use mutate.');
                 });
@@ -221,7 +220,7 @@ describe('writeToItemsArray', () => {
                         // @ts-ignore wilfully breaking schema
                         { type: 'write', ts: 0, uuid: '1', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
                     ],
-                    items, ObjSchema, ddl, undefined, { atomic: true },
+                    items, ObjSchema, ddl, { atomic: true },
                 );
                 expect(result.ok).toBe(false);
                 expect(result.changes.final_items).toBe(items);
@@ -243,7 +242,7 @@ describe('writeToItemsArray', () => {
                         // @ts-ignore wilfully breaking schema
                         { type: 'write', ts: 0, uuid: '1', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
                     ],
-                    originalItems, ObjSchema, ddl, undefined, { atomic: true },
+                    originalItems, ObjSchema, ddl, { atomic: true },
                 );
                 expect(result.ok).toBe(false);
                 expect(result.changes.final_items).toBe(originalItems);
@@ -255,7 +254,7 @@ describe('writeToItemsArray', () => {
                 const finalItems = produce(items, draft => {
                     writeToItemsArray(
                         [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '2' } } }],
-                        draft as Obj[], ObjSchema, ddl, undefined, { mutate: true },
+                        draft as Obj[], ObjSchema, ddl, { mutate: true },
                     );
                 });
                 // Immer gives new top-level reference
@@ -309,7 +308,7 @@ describe('writeToItemsArray', () => {
                 const items: Obj[] = [item];
                 const result = writeToItemsArray(
                     [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'update', data: { text: 'changed' }, where: { id: '1' } } }],
-                    items, ObjSchema, ddl, undefined, { mutate: true },
+                    items, ObjSchema, ddl, { mutate: true },
                 );
                 // In mutable mode, the original object should be mutated in-place
                 expect(item.text).toBe('changed');
@@ -378,7 +377,6 @@ describe('writeToItemsArray', () => {
                 const ddlCount: DDL<ObjWithCount> = {
                     version: 1,
                     lists: { '.': { primary_key: 'id', default_ordering_key: { key: 'id', direction: 1 } } },
-                    ownership: { type: 'none' },
                 };
 
                 const item: ObjWithCount = { id: '1', count: 10 };
@@ -397,7 +395,7 @@ describe('writeToItemsArray', () => {
                 const finalItems = produce(items, draft => {
                     writeToItemsArray(
                         [{ type: 'write', ts: 0, uuid: '0', payload: { type: 'push', path: 'arr_items', items: ['b'], where: { id: '1' } } }],
-                        draft as Obj[], ObjSchema, ddl, undefined, { mutate: true },
+                        draft as Obj[], ObjSchema, ddl, { mutate: true },
                     );
                 });
                 expect(finalItems[0]!.arr_items).toEqual(['a', 'b']);
@@ -445,7 +443,7 @@ describe('writeToItemsArray', () => {
                                 }
                             },
                         ],
-                        draft as Obj[], ObjSchema, ddl, undefined, { atomic: true, mutate: true },
+                        draft as Obj[], ObjSchema, ddl, { atomic: true, mutate: true },
                     );
                     expect(result.ok).toBe(false);
                 });

@@ -9,7 +9,14 @@ export type StandardTestConfig = {
     test: typeof test,
     expect: typeof expect,
     matchJavascriptObject: MatchJavascriptObjectInTesting,
-    implementationName?: string
+    implementationName?: string,
+    /**
+     * Opt in (default `false`) when the matcher reports a malformed/contradictory filter by RESOLVING to
+     * `undefined` (errors-as-values) rather than throwing. The validation cases then assert `undefined`
+     * instead of a throw/`false` — strict in BOTH contracts, so an errors-as-values consumer is held to the
+     * same "never a silent match" bar and the default throwing path is byte-for-byte unchanged (no weakening).
+     */
+    errorsAsValues?: boolean
 }
 
 export const ContactSchema = z.object({
@@ -82,7 +89,7 @@ const CachedGmailThreadSchema = z.object({
 type CachedGmailThread = z.infer<typeof CachedGmailThreadSchema>;
 
 export function standardTests(testConfig: StandardTestConfig) {
-    const { test, expect, matchJavascriptObject } = testConfig;
+    const { test, expect, matchJavascriptObject, errorsAsValues } = testConfig;
 
     const implementationName = testConfig.implementationName ?? 'unknown';
 
@@ -97,6 +104,18 @@ export function standardTests(testConfig: StandardTestConfig) {
             return;
         }
         expect(result).toBe(expected);
+    }
+
+    /**
+     * A malformed/contradictory filter that the matcher must REJECT — never silently match it. A throwing
+     * matcher (the default) MUST throw; an errors-as-values matcher (`errorsAsValues`) MUST resolve to
+     * `undefined`. Strict in both contracts (no permissive union, never accepts `true`/`false`), so opting in
+     * leaves the default throwing path byte-for-byte unchanged and weakens no coverage.
+     */
+    async function expectMalformedFilterRejected(call: () => Promise<boolean | undefined>, throwMessage?: string): Promise<void> {
+        if (errorsAsValues) { expect(await call()).toBe(undefined); }
+        else if (throwMessage) { await expect(call()).rejects.toThrow(throwMessage); }
+        else { await expect(call()).rejects.toThrow(); }
     }
 
     /**
@@ -684,7 +703,8 @@ export function standardTests(testConfig: StandardTestConfig) {
                     } catch (e) {
                         // JS implementation throws on type mismatch — that's valid
                     }
-                    expect(result).toBe(false);
+                    if (errorsAsValues) expect(result).toBe(undefined); // schema-contradicting filter → acknowledged-unsupported (invalid_filter), never a silent false
+                    else expect(result).toBe(false);
                 });
             })
 
@@ -3225,54 +3245,65 @@ export function standardTests(testConfig: StandardTestConfig) {
 
         test('undefined filter throws', async () => {
 
-            await expect(matchJavascriptObject(
-                {
-                    contact: {
-                        name: 'Andy',
-                        emailAddress: 'andy@andy.com'
-                    }
-                },
-                // @ts-expect-error
-                undefined,
-                ContactSchema
-            )).rejects.toThrow('filter was not well-defined');
+            await expectMalformedFilterRejected(
+                () => matchJavascriptObject(
+                    {
+                        contact: {
+                            name: 'Andy',
+                            emailAddress: 'andy@andy.com'
+                        }
+                    },
+                    // @ts-expect-error
+                    undefined,
+                    ContactSchema
+                ),
+                'filter was not well-defined',
+            );
 
         });
 
         test('null filter throws', async () => {
-            await expect(matchJavascriptObject(
-                { contact: { name: 'Andy' } },
-                // @ts-ignore
-                null,
-                ContactSchema
-            )).rejects.toThrow();
+            await expectMalformedFilterRejected(
+                () => matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    // @ts-ignore
+                    null,
+                    ContactSchema
+                ),
+            );
         });
 
         test('number as filter throws', async () => {
-            await expect(matchJavascriptObject(
-                { contact: { name: 'Andy' } },
-                // @ts-ignore
-                42,
-                ContactSchema
-            )).rejects.toThrow();
+            await expectMalformedFilterRejected(
+                () => matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    // @ts-ignore
+                    42,
+                    ContactSchema
+                ),
+            );
         });
 
         test('string as filter throws', async () => {
-            await expect(matchJavascriptObject(
-                { contact: { name: 'Andy' } },
-                // @ts-ignore
-                'invalid',
-                ContactSchema
-            )).rejects.toThrow();
+            await expectMalformedFilterRejected(
+                () => matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    // @ts-ignore
+                    'invalid',
+                    ContactSchema
+                ),
+            );
         });
 
         test('array as filter throws', async () => {
-            await expect(matchJavascriptObject(
-                { contact: { name: 'Andy' } },
-                // @ts-ignore
-                [{ 'contact.name': 'Andy' }],
-                ContactSchema
-            )).rejects.toThrow();
+            await expectMalformedFilterRejected(
+                () => matchJavascriptObject(
+                    { contact: { name: 'Andy' } },
+                    // @ts-ignore
+                    [{ 'contact.name': 'Andy' }],
+                    ContactSchema
+                ),
+            );
         });
 
         test('logic operator with object instead of array throws/rejects', async () => {

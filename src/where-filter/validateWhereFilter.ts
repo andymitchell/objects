@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
-import { convertSchemaToDotPropPathTree, type TreeNode } from "../dot-prop-paths/zod.ts";
-import { objectRejectsUnknownKeys } from "../dot-prop-paths/zodIntrospection.ts";
+import { convertSchemaToDotPropPathTree, type TreeNode } from "../dot-prop-paths/schema-tree.ts";
+import { objectRejectsUnknownKeys } from "../zod/introspection.ts";
 import { WhereFilterLogicOperators, ValueComparisonRangeOperators } from "./consts.ts";
 import { isWhereFilterDefinition } from "./schemas.ts";
 import type { WhereFilterDefinition } from "./types.ts";

@@ -19,7 +19,7 @@ import type {
   WritePayloadArrayScope,
   WritePayloadUpdate,
 } from "./types.ts";
-import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/zod.ts";
+import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 import { JsonValueSchema } from "@andyrmitchell/utils/deep-clone-scalar-values";
 

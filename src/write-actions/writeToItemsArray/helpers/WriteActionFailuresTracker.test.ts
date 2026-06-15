@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { expectTypeOf } from "vitest";
 import WriteActionFailuresTracker from "./WriteActionFailuresTracker.ts";
-import { TreeNodeSchema } from "../../../dot-prop-paths/zod.ts";
+import { TreeNodeSchema } from "../../../dot-prop-paths/schema-tree.ts";
 import type {
   WriteAction,
   WriteError,

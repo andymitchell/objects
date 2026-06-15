@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { WritePayload } from "../../types.ts";
 import { compileValidateWhereFilter, type WhereFilterValidationIssue } from "../../../where-filter/validateWhereFilter.ts";
 import matchJavascriptObject from "../../../where-filter/matchJavascriptObject.ts";
-import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/zod.ts";
+import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/schema-tree.ts";
 import { ValueComparisonRangeOperators } from "../../../where-filter/consts.ts";
 import type { WhereFilterDefinition } from "../../../where-filter/types.ts";
 

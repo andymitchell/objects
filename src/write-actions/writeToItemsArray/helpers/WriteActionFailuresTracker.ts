@@ -11,7 +11,7 @@ import {
   type PrimaryKeyGetter,
   makePrimaryKeyGetter,
 } from "../../../utils/getKeyValue.ts";
-import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
+import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import {
   cloneDeepScalarValues,
   type JsonValueCapped,

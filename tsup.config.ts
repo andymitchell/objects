@@ -10,6 +10,7 @@ export default defineConfig([
             'index-objects-delta-testing': 'src/objects-delta/index-testing.ts',
             'index-query': 'src/query/index.ts',
             'index-dot-prop-paths': 'src/dot-prop-paths/index.ts',
+            'index-zod': 'src/zod/index.ts',
             'index-primary-key': 'src/primary-key/index.ts',
             'index-utils': 'src/utils/index.ts',
             'index-ddl': 'src/ddl/index.ts',

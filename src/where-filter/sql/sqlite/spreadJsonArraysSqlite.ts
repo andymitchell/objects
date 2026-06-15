@@ -1,5 +1,5 @@
 
-import type { TreeNode } from "../../../dot-prop-paths/zod.ts";
+import type { TreeNode } from "../../../dot-prop-paths/schema-tree.ts";
 
 type SpreadedJsonArrays = { sql: string, output_column: string, output_identifier: string };
 /**

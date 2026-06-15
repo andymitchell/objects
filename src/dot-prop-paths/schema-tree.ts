@@ -9,7 +9,7 @@ import {
     isTransparentWrapper,
     type ZodKind,
     type AnyZodSchema,
-} from "./zodIntrospection.ts";
+} from "../zod/introspection.ts";
 
 // Re-exported so SQL builders can name expected kinds without reaching into the introspection layer.
 export type { ZodKind };
@@ -216,8 +216,16 @@ export function getZodKindAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPro
 }
 
 
-/** Navigates a Zod schema by dot-prop path and returns the leaf schema, unwrapping arrays and transparent wrappers (optional/nullable/default/catch/readonly) along the way. */
-export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath): AnyZodSchema | undefined {
+/**
+ * Navigates a Zod schema by dot-prop path and returns the leaf schema, unwrapping arrays and transparent
+ * wrappers (optional/nullable/default/catch/readonly) along the way.
+ *
+ * Pass `{ crossArrays: false }` to refuse a path that descends INTO an array element (e.g. `items.name`):
+ * it returns `undefined` instead of unwrapping the array. This matches `DotPropPathsUnion<T>` (which stops at
+ * arrays) and `getProperty` (no array spread) — use it to validate a key that must be a single sortable path,
+ * e.g. a `default_ordering_key`.
+ */
+export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath, options?: { crossArrays?: boolean }): AnyZodSchema | undefined {
     const keys = path.split('.');
     let currentSchema: AnyZodSchema = schema;
 
@@ -227,6 +235,7 @@ export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotP
         while( true ) {
             const currentKind = getZodKind(currentSchema);
             if( currentKind==='array' ) {
+                if( options?.crossArrays === false ) return undefined; // path descends INTO an array element — not a DotPropPathsUnion<T> path, and getProperty cannot sort it
                 currentSchema = getArrayElement(currentSchema);
             } else if( isTransparentWrapper(currentKind) ) {
                 currentSchema = unwrap(currentSchema);

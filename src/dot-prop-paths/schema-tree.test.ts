@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath, TreeNodeSchema } from "./zod.js";
+import { convertSchemaToDotPropPathTree, getZodSchemaAtSchemaDotPropPath, TreeNodeSchema } from "./schema-tree.ts";
 
 describe('Zod test', () => {
 
@@ -420,5 +420,29 @@ describe('migration baseline — walker invariants (kind-free; must survive the 
         const code = getZodSchemaAtSchemaDotPropPath(schema, 'locked.code');
         expect(code?.safeParse(42).success).toBe(true);
         expect(code?.safeParse('x').success).toBe(false);
+    });
+});
+
+describe('getZodSchemaAtSchemaDotPropPath { crossArrays: false }', () => {
+    // Matches DotPropPathsUnion<T> (stops at arrays) + getProperty (no spread) — for validating a single
+    // sortable path like a default_ordering_key, which must not descend into an array element.
+    const s = z.object({
+        id: z.string(),
+        background: z.object({ created_at: z.string() }),
+        children: z.array(z.object({ name: z.string(), age: z.number() })),
+    });
+
+    it('accepts a top-level key and a nested-object path', () => {
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'id', { crossArrays: false })).toBeDefined();
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'background.created_at', { crossArrays: false })).toBeDefined();
+    });
+
+    it('rejects a path that descends INTO an array element (which the array-unwrapping default accepts)', () => {
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'children.age', { crossArrays: false })).toBeUndefined();
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'children.age')).toBeDefined();
+    });
+
+    it('rejects an absent key', () => {
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'nope', { crossArrays: false })).toBeUndefined();
     });
 });

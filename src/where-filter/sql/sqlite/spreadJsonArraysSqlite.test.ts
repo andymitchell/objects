@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/zod.ts";
+import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
 
     test('spreadJsonArraysSqlite 0 array', () => {

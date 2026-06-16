@@ -196,6 +196,21 @@ export type WriteError =
       reason: "unknown_field" | "type_mismatch" | "non_finite" | "malformed";
     }
   | {
+      /**
+       * A written *data* value cannot losslessly round-trip JSON — a non-finite number (`NaN`/`±Infinity`,
+       * which serialises to `null`) or a non-JSON carrier (`bigint`/`symbol`/`function`/`Date`/`Map`/…).
+       * Caught before any mutation; the action is rejected unrecoverably and state is left unchanged.
+       * Distinct from `schema` (a Zod constraint violation on a declared field) and `invalid_filter` (a
+       * `where`-clause fault). A value can pass the Zod schema but still be non-JSON-safe because .passthrough()
+       * and .loose() preserve extra, undeclared fields that the schema would otherwise miss.
+       */
+      type: "invalid_data_value";
+      /** The dot-prop path to the offending value within the payload's data, when one can be singled out. */
+      data_path?: string;
+      /** Why the value cannot be persisted as JSON. */
+      reason: "non_finite" | "malformed";
+    }
+  | {
       /** The action did not run: an earlier action in the same batch failed and blocked it. */
       type: "blocked";
       /** `uuid` of the earlier action whose failure blocked this one. */

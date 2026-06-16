@@ -26,6 +26,7 @@ function isUnrecoverable(type: WriteError["type"]): boolean {
     case "uuid_conflict":
     case "update_altered_key":
     case "invalid_filter":
+    case "invalid_data_value":
       return true;
     case "custom":
     case "blocked":

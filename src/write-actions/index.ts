@@ -18,6 +18,10 @@ export {
     deepEquals,
 }
 
+// ─── Write-time JSON-safety gate (written-data value-side complement to the `where` finiteness gate) ───
+export { findNonJsonValue, findNonJsonValueInPayload } from "./findNonJsonValue.ts";
+export type { NonJsonReason } from "./findNonJsonValue.ts";
+
 // ─── Helpers ───
 export {
     assertWriteArrayScope,

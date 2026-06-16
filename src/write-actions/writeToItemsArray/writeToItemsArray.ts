@@ -4,6 +4,7 @@ import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
 import { compileValidateWhereFilter } from "../../where-filter/validateWhereFilter.ts";
+import { compileValidateWritePayload } from "../validateWritePayload.ts";
 import { preflightActionWhere } from "./helpers/wherePreflight.ts";
 import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
 import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, ItemHash } from "./types.ts";
@@ -134,14 +135,23 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
+ * JSON-safety: every written value must losslessly round-trip JSON (the engine operates on JSON-object items —
+ * in a SQL setting, on values pulled from a JSONB column, never on arbitrary relational rows). Before any
+ * mutation each action's payload values are gated; a non-finite number, or a non-JSON carrier (bigint/Date/Map/…
+ * kept by an open `.passthrough()`/`.loose()` schema), is rejected as an unrecoverable `invalid_data_value`
+ * rather than silently corrupting state or throwing at serialization — the value-side peer of the `where`
+ * finiteness gate. A layer crossing a JSON boundary (e.g. a fetch proxy) runs the same `compileValidateWritePayload`.
+ *
  * @returns A new array (unless `mutate` is used) with the actions applied to its object
- * 
+ *
  * @note 
  */
 export function writeToItemsArray<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(writeActions: WriteAction<T, NoInfer<W>, NoInfer<WF>>[], items: T[], schema: z.ZodType<T, any, any>, ddl: DDL<T>, options?: WriteToItemsArrayOptions): WriteToItemsArrayResult<T, W, WF>  {
 
-    // Wondering if using this in a Read-Modify-Write process (e.g. read items from sql, modify with this, write back to table)
-    // is too slow and you should implement a custom WriteAction-to-SQL converter (or any other target)?
+    // Wondering if using this in a Read-Modify-Write process (e.g. read JSON items from a JSONB column, modify
+    // with this, write them back) is too slow and you should implement a custom WriteAction-to-SQL converter
+    // (or any other target)? Note the engine is JSON-object specific — it mutates JSON-safe values in memory,
+    // so the SQL path is JSONB-only, never a translation to arbitrary relational columns.
     // In testing it only yielded about a 1.5x improvement, but with major dual-path complexity
     // (because it could optimise in some cases but couldn't convert every WriteAction so needed to fall back).
     // The key to making it performant was to batch all the writes in one using `UPDATE WITH VALUES`
@@ -206,6 +216,11 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
     // caught here — at the action level — not at the per-item match site below.
     const validateWhere = compileValidateWhereFilter(schema);
 
+    // The value-side peer of the `where` gate above: validates each action's WRITTEN VALUES round-trip JSON.
+    // `skipSchemaCheck` because the schema's own JSON-safety is the caller's construction-time responsibility
+    // (validateWritePayloadSchema) — here we only gate per-write values, so the compile never throws.
+    const validateWritePayload = compileValidateWritePayload(schema, { skipSchemaCheck: true });
+
     const existingIds = new Set(wipItems.map(item => safeKeyValue(item[rules.primary_key])));
 
     // Now go through the actions
@@ -215,7 +230,17 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
         const action = writeActions[index]!;
         if( failureTracker.shouldHalt() ) break;
 
-
+        // JSON-roundtrip value gate, peer to the `where` preflight below: a non-finite number (serialises to
+        // null) or a non-JSON carrier (bigint/Date/… kept by an open `.passthrough()` schema) cannot round-trip
+        // JSON, so reject the action before any mutation — independent of whether the `where` matches, so the
+        // engine and a fetch-boundary proxy agree. Recurses an `array_scope`'s nested action so a bad nested
+        // value can't slip past a zero-match outer `where`.
+        const dataIssues = validateWritePayload(action.payload as WritePayload<any>);
+        if( dataIssues.length>0 ) {
+            const issue = dataIssues[0]!;
+            failureTracker.reportActionError(action, { type: 'invalid_data_value', reason: issue.reason, data_path: issue.path });
+            continue;
+        }
 
         if (action.payload.type === 'create') {
             const pkValue = pk(action.payload.data, true);

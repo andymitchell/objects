@@ -18,9 +18,9 @@ export {
     deepEquals,
 }
 
-// ─── Write-time JSON-safety gate (written-data value-side complement to the `where` finiteness gate) ───
-export { findNonJsonValue, findNonJsonValueInPayload } from "./findNonJsonValue.ts";
-export type { NonJsonReason } from "./findNonJsonValue.ts";
+// ─── Write-time JSON-roundtrip validation (value-side peer of the `where` finiteness gate in validateWhereFilter) ───
+export { validateWritePayloadSchema, validateWritePayloadValues, compileValidateWritePayload } from "./validateWritePayload.ts";
+export type { WritePayloadValidationIssue, WritePayloadSchemaIssue, WriteSchemaIssueReason, NonJsonReason } from "./validateWritePayload.ts";
 
 // ─── Helpers ───
 export {

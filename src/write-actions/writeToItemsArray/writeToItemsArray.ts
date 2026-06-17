@@ -213,8 +213,11 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
     // Validate each action's `where` against the schema before applying it. Compiled once (walks the
     // schema a single time) and reused per action. An invalid `where` matches no items, so it must be
-    // caught here — at the action level — not at the per-item match site below.
-    const validateWhere = compileValidateWhereFilter(schema);
+    // caught here — at the action level — not at the per-item match site below. `requireSerialisableJsonSubset`
+    // because the engine already gates payload VALUES to the JSON-roundtrip subset (below); holding `where`
+    // operands to the same subset closes the asymmetry, so a non-finite/non-JSON operand can't cross a
+    // serialisation boundary (the engine and a fetch-boundary proxy then agree).
+    const validateWhere = compileValidateWhereFilter(schema, { requireSerialisableJsonSubset: true });
 
     // The value-side peer of the `where` gate above: validates each action's WRITTEN VALUES round-trip JSON.
     // `skipSchemaCheck` because the schema's own JSON-safety is the caller's construction-time responsibility

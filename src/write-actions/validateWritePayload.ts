@@ -50,9 +50,10 @@ import {
   type AnyZodSchema,
   type SchemaChild,
 } from "../zod/introspection.ts";
+import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 
-/** Why a value (or a schema's declared type) cannot losslessly round-trip JSON: a non-finite number, or any other non-JSON carrier. */
-export type NonJsonReason = "non_finite" | "malformed";
+/** Why a value (or a schema's declared type) cannot losslessly round-trip JSON: a non-finite number, or any other non-JSON carrier. Aliases the shared {@link NonJsonValueIssue} reason ({@link findNonJsonValues}) so the value-walk and this module's vocabulary never drift. */
+export type NonJsonReason = NonJsonValueIssue["reason"];
 
 /**
  * One per-write VALUE JSON-roundtrip fault from {@link validateWritePayloadValues}. `path` locates the offending
@@ -91,50 +92,10 @@ export type WritePayloadSchemaIssue = {
 };
 
 // ─────────────────────────────── value safety ───────────────────────────────
-
-/**
- * Collect EVERY value under `value` that cannot round-trip JSON, each tagged with its dot-path beneath `path`.
- * Plain objects/arrays are traversed; a `Date`/`Map`/`Set`/`RegExp`/class instance is `malformed`; a non-finite
- * number is `non_finite`; `null`/`undefined`/`-0` and JSON primitives are safe. Collects all (not first-only) so
- * a proxy can surface every fault at once.
- */
-function collectNonJsonValues(
-  value: unknown,
-  path: string,
-  out: WritePayloadValidationIssue[],
-): void {
-  if (typeof value === "number") {
-    if (!Number.isFinite(value))
-      out.push({ reason: "non_finite", path: path || undefined });
-    return;
-  }
-  if (value === null || value === undefined) return;
-  const t = typeof value;
-  if (t === "string" || t === "boolean") return;
-  if (t === "bigint" || t === "symbol" || t === "function") {
-    out.push({ reason: "malformed", path: path || undefined });
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++)
-      collectNonJsonValues(value[i], path ? `${path}.${i}` : String(i), out);
-    return;
-  }
-  if (t === "object") {
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-      out.push({ reason: "malformed", path: path || undefined }); // Date/Map/Set/RegExp/class instance — not a plain object
-      return;
-    }
-    for (const [key, child] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      collectNonJsonValues(child, path ? `${path}.${key}` : key, out);
-    }
-    return;
-  }
-  out.push({ reason: "malformed", path: path || undefined }); // any other exotic typeof
-}
+// The per-value JSON-roundtrip walk is the shared `findNonJsonValues` (the `SerialisableJsonSubset` predicate).
+// A write-payload value treats `undefined` as a recoverable missing key, so it is NOT flagged here
+// (`flagUndefined` is left off — that is the `where`-operand gate's concern, where a dropped key changes the
+// match set).
 
 /**
  * Checks whether the actual values in one `WritePayload` can cross JSON serialization boundaries losslessly.
@@ -159,14 +120,14 @@ export function validateWritePayloadValues(
   switch (payload.type) {
     case "create":
     case "update":
-      collectNonJsonValues(payload.data, "", out);
+      findNonJsonValues(payload.data, "", out);
       break;
     case "inc":
-      collectNonJsonValues(payload.amount, String(payload.path), out);
+      findNonJsonValues(payload.amount, String(payload.path), out);
       break;
     case "push":
     case "add_to_set":
-      collectNonJsonValues(payload.items, String(payload.path), out);
+      findNonJsonValues(payload.items, String(payload.path), out);
       break;
     case "array_scope":
       return validateWritePayloadValues(payload.action as WritePayload<any>);

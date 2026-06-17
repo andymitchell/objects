@@ -490,3 +490,73 @@ describe("validateWhereFilter — metamorphic (never rejects what the matcher ma
         if (vm(f).length > 0) expect(matchCount(f)).toBe(0);
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SerialisableJsonSubset — the opt-in `requireSerialisableJsonSubset` narrowing.
+// Intent: every operand that cannot losslessly round-trip JSON is rejected on top of the conservative default,
+// in ANY position, even under an open schema — because such an operand silently corrupts across a serialisation
+// boundary (a stacking ICollection forwards `where` over the wire). Off by default; the matcher is unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("validateWhereFilter — requireSerialisableJsonSubset (the serialisable subset)", () => {
+    const sub = (filter: unknown) => validateWhereFilter(wf(filter), Schema, { requireSerialisableJsonSubset: true });
+
+    describe("rejects operands the default (matcher-mirroring) validator deliberately accepts", () => {
+        it("rejects a satisfiable match-all ±Infinity bound (accepted without the flag)", () => {
+            expect(validate({ age: { $lt: Infinity } })).toEqual([]); // default: a legitimate bound
+            expect(sub({ age: { $lt: Infinity } })).toMatchObject([{ reason: "non_finite", path: "age.$lt" }]);
+            expect(sub({ age: { $gte: -Infinity } })).toMatchObject([{ reason: "non_finite", path: "age.$gte" }]);
+        });
+
+        it("rejects a non-finite member of $in (a sibling element rescues it without the flag)", () => {
+            expect(validate({ age: { $in: [1, Infinity] } })).toEqual([]); // default: opaque to finiteness
+            expect(sub({ age: { $in: [1, Infinity] } })).toMatchObject([{ reason: "non_finite", path: "age.$in.1" }]);
+        });
+
+        it("rejects a non-JSON operand under a broadening operator (skipped without the flag)", () => {
+            expect(validate({ age: { $ne: 5n } })).toEqual([]); // default: broadening, never flagged
+            expect(sub({ age: { $ne: 5n } })).toMatchObject([{ reason: "malformed", path: "age.$ne" }]);
+        });
+
+        it("rejects an undefined operand (a documented accepted edge case without the flag)", () => {
+            expect(validate({ nickname: undefined })).toEqual([]); // default: matches missing, accepted
+            expect(sub({ nickname: undefined })).toMatchObject([{ reason: "malformed", path: "nickname" }]);
+        });
+    });
+
+    describe("rejects every non-JSON carrier type, regardless of operator polarity", () => {
+        it("rejects a Date / Map / Set operand", () => {
+            expect(sub({ score: new Date() })).toMatchObject([{ reason: "malformed", path: "score" }]);
+            expect(sub({ score: new Map() })).toMatchObject([{ reason: "malformed", path: "score" }]);
+            expect(sub({ score: new Set() })).toMatchObject([{ reason: "malformed", path: "score" }]);
+            expect(validate({ score: new Date() })).toEqual([]); // default leaves these opaque
+        });
+
+        it("rejects a NaN operand in any position", () => {
+            expect(sub({ age: { $ne: NaN } })).toMatchObject([{ reason: "non_finite", path: "age.$ne" }]);
+        });
+    });
+
+    describe("is schema-independent — catches operands an open schema cannot model", () => {
+        const Loose = z.object({ id: z.string() }).loose();
+        const looseSub = (filter: unknown) =>
+            validateWhereFilter(filter as WhereFilterDefinition<{ id: string }>, Loose, { requireSerialisableJsonSubset: true });
+
+        it("rejects a non-JSON operand on an undeclared key a .loose() schema tolerates", () => {
+            // The schema walk cannot see `ghost` (a loose object's undeclared key), so the default accepts it;
+            // the value walk catches the bigint regardless — proving the gate does not rely on the schema.
+            expect(looseSub({ id: "x" })).toEqual([]);
+            expect(looseSub({ ghost: 5n })).toMatchObject([{ reason: "malformed", path: "ghost" }]);
+            expect(looseSub({ ghost: { $gt: Infinity } })).toMatchObject([{ reason: "non_finite", path: "ghost.$gt" }]);
+        });
+    });
+
+    describe("never false-positives on a legitimate serialisable filter", () => {
+        it("accepts finite bounds, strings, booleans, null, and nested logic", () => {
+            expect(sub({ age: { $gte: 18 } })).toEqual([]);
+            expect(sub({ id: "x", active: true })).toEqual([]);
+            expect(sub({ score: null })).toEqual([]);
+            expect(sub({ $or: [{ id: "x" }, { "contact.phone": "1" }] })).toEqual([]);
+            expect(sub({ age: { $in: [1, 2, 3] } })).toEqual([]);
+        });
+    });
+});

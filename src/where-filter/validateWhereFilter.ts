@@ -4,6 +4,7 @@ import { objectRejectsUnknownKeys } from "../zod/introspection.ts";
 import { WhereFilterLogicOperators, ValueComparisonRangeOperators } from "./consts.ts";
 import { isWhereFilterDefinition } from "./schemas.ts";
 import type { WhereFilterDefinition } from "./types.ts";
+import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 
 /**
  * Validate a `WhereFilterDefinition` against a Zod schema *before* it runs, so a clause that references a
@@ -61,6 +62,14 @@ import type { WhereFilterDefinition } from "./types.ts";
  * mixed-strictness-union parents; and positive contradictions expressed via `$exists:true` / `$type` / `$regex`
  * (e.g. `{age:{$type:'string'}}` on a number field) — these match zero rows but stay unflagged to keep the
  * validator simple and its false-positive surface minimal.
+ *
+ * **Opt-in `SerialisableJsonSubset` (`{ requireSerialisableJsonSubset: true }`).** A *further* narrowing layered
+ * on top of everything above: also reject every operand that cannot losslessly round-trip JSON — a non-finite
+ * number in ANY position (incl. a satisfiable match-all `$lt: Infinity` and an `$in` member), a non-JSON carrier
+ * (`Date`/`bigint`/`Map`/`Set`/`Symbol`), and an `undefined` operand — via a schema-independent value walk
+ * (`../utils/findNonJsonValues.ts`), so it holds even under a `.passthrough()`/`.loose()` schema. Off by default
+ * (the matcher and the bare validator admit these operands); engaged only by callers that cross a serialisation
+ * boundary (e.g. a stacking ICollection's `get`/`keys`/`write`, where the operand is forwarded over a wire).
  */
 
 /** One reason a filter is invalid, with the offending field path (absent for whole-filter `malformed`). */
@@ -105,6 +114,7 @@ type SchemaIndex = { multimap: NodeMultimap; hasChildren: Set<string>; strict: S
  */
 export function compileValidateWhereFilter<T extends Record<string, any>>(
     schema: ZodType<T>,
+    options?: { requireSerialisableJsonSubset?: boolean },
 ): (filter: WhereFilterDefinition<T>) => WhereFilterValidationIssue[] {
     let index: SchemaIndex | undefined;
     try {
@@ -119,14 +129,24 @@ export function compileValidateWhereFilter<T extends Record<string, any>>(
         index = undefined;
     }
     return (filter) => {
-        if (!index) return [];
-        // A filter the matcher would throw on (null / [] / nested-malformed). A throw is never a match, so
-        // reporting it is airtight; checked up-front via the matcher's own predicate so the two stay in sync.
-        if (!isWhereFilterDefinition(filter)) {
-            return [{ reason: "malformed", message: "Filter is not a valid where-filter definition." }];
-        }
         const issues: WhereFilterValidationIssue[] = [];
-        walk(filter as Record<string, unknown>, "", false, index, issues);
+        // Schema-aware checks first (skipped when the schema can't be modelled), so the established field-level
+        // `where_path` stays `issues[0]` for a fault both layers catch.
+        if (index) {
+            // A filter the matcher would throw on (null / [] / nested-malformed). A throw is never a match, so
+            // reporting it is airtight; checked up-front via the matcher's own predicate so the two stay in sync.
+            if (!isWhereFilterDefinition(filter)) {
+                issues.push({ reason: "malformed", message: "Filter is not a valid where-filter definition." });
+            } else {
+                walk(filter as Record<string, unknown>, "", false, index, issues);
+            }
+        }
+        // SerialisableJsonSubset gate (opt-in; see `../utils/findNonJsonValues.ts`). Schema-INDEPENDENT, so it
+        // runs even when the schema can't be modelled, and a `.passthrough()`/`.loose()` schema can't hide a
+        // non-JSON operand from it. It rejects in ANY position — incl. a broadening `$ne` and a satisfiable
+        // match-all bound (`$lt: Infinity`) the conservative schema walk deliberately leaves alone — because
+        // those operands corrupt across a serialisation boundary even though the live matcher satisfies them.
+        if (options?.requireSerialisableJsonSubset) appendNonSerialisableIssues(filter, issues);
         return issues;
     };
 }
@@ -135,8 +155,30 @@ export function compileValidateWhereFilter<T extends Record<string, any>>(
 export function validateWhereFilter<T extends Record<string, any>>(
     filter: WhereFilterDefinition<T>,
     schema: ZodType<T>,
+    options?: { requireSerialisableJsonSubset?: boolean },
 ): WhereFilterValidationIssue[] {
-    return compileValidateWhereFilter(schema)(filter);
+    return compileValidateWhereFilter(schema, options)(filter);
+}
+
+/**
+ * Append a `WhereFilterValidationIssue` for every operand that breaks the `SerialisableJsonSubset` — the
+ * schema-independent half of `requireSerialisableJsonSubset`. Walks the live filter's values (a `where` operand
+ * is dropped to `flagUndefined: true`: an `undefined` operand degrades `{ field: undefined }` to a match-all `{}`
+ * across the boundary), reusing the existing `non_finite`/`malformed` reasons so no new error vocabulary is needed.
+ */
+function appendNonSerialisableIssues(filter: unknown, issues: WhereFilterValidationIssue[]): void {
+    const nonJson: NonJsonValueIssue[] = [];
+    findNonJsonValues(filter, "", nonJson, { flagUndefined: true });
+    for (const { reason, path } of nonJson) {
+        const where = path ? ` on '${path}'` : "";
+        issues.push({
+            reason,
+            path,
+            message: reason === "non_finite"
+                ? `Non-finite operand${where} cannot losslessly round-trip JSON.`
+                : `Non-JSON operand${where} cannot losslessly round-trip JSON.`,
+        });
+    }
 }
 
 /** Join a dot-prop ancestry prefix with a key (`'' + 'a'` → `'a'`; `'children' + 'name'` → `'children.name'`). */

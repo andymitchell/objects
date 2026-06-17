@@ -18,8 +18,12 @@ export {
     deepEquals,
 }
 
-// ─── Write-time JSON-roundtrip validation (value-side peer of the `where` finiteness gate in validateWhereFilter) ───
-export { validateWritePayloadSchema, validateWritePayloadValues, compileValidateWritePayload } from "./validateWritePayload.ts";
+// ─── Write-time JSON-roundtrip validation (the `SerialisableJsonSubset` value-side peer of validateWhereFilter's where gate) ───
+// `validateWriteAction` is the public runtime entry — it validates BOTH the written values AND the top-level
+// `where`, tagging faults as `invalid_data_value` / `invalid_filter`. `validateWritePayloadSchema` is the
+// construction-time schema gate. The per-payload value walk and the compile helper stay internal to the engine.
+export { validateWritePayloadSchema } from "./validateWritePayload.ts";
+export { validateWriteAction } from "./validateWriteAction.ts";
 export type { WritePayloadValidationIssue, WritePayloadSchemaIssue, WriteSchemaIssueReason, NonJsonReason } from "./validateWritePayload.ts";
 
 // ─── Helpers ───

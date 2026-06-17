@@ -72,7 +72,7 @@ function collectWhereIssues(
         // fail at execution (getArrayScopeSchemaAndDDL throws) — skipping here is the conservative path.
         const elementSchema = getZodSchemaAtSchemaDotPropPath(schema, payload.scope);
         if (elementSchema) {
-            issues.push(...collectWhereIssues(payload.action as WritePayload<any>, elementSchema, compileValidateWhereFilter(elementSchema), joinScope(prefix, payload.scope)));
+            issues.push(...collectWhereIssues(payload.action as WritePayload<any>, elementSchema, compileValidateWhereFilter(elementSchema, { requireSerialisableJsonSubset: true }), joinScope(prefix, payload.scope)));
         }
     } else if (payload.type === "pull") {
         // Object-form items_where is a per-element WhereFilter (validated against the element schema); a
@@ -82,7 +82,7 @@ function collectWhereIssues(
             const elementSchema = getZodSchemaAtSchemaDotPropPath(schema, payload.path as string);
             if (elementSchema) {
                 const elementPrefix = joinScope(prefix, payload.path as string);
-                for (const issue of compileValidateWhereFilter(elementSchema)(itemsWhere as WhereFilterDefinition<any>)) {
+                for (const issue of compileValidateWhereFilter(elementSchema, { requireSerialisableJsonSubset: true })(itemsWhere as WhereFilterDefinition<any>)) {
                     issues.push(prefixIssue(issue, elementPrefix));
                 }
             }

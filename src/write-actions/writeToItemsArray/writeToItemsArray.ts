@@ -304,7 +304,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
             // the nested wheres up-front is essential: the per-item recursion only runs for parents matching the
             // outer `where`, so an outer `where` matching nothing would otherwise let a nested invalid `where`
             // slip through as a silent no-op.
-            const whereIssues = preflightActionWhere(action.payload as WritePayload<any>, schema, validateWhere, wipItems);
+            const whereIssues = preflightActionWhere(action.payload as WritePayload<any>, schema, validateWhere, { requireSerialisableJsonSubset: true }, wipItems);
             if( whereIssues.length>0 ) {
                 const issue = whereIssues[0]!;
                 failureTracker.reportActionError(action, { type: 'invalid_filter', where_path: issue.path, reason: issue.reason });

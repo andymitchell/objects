@@ -181,6 +181,20 @@ function appendNonSerialisableIssues(filter: unknown, issues: WhereFilterValidat
     }
 }
 
+/**
+ * Collect ONLY the `SerialisableJsonSubset` operand faults in a filter — the schema-INDEPENDENT half of
+ * `requireSerialisableJsonSubset`, with no schema-aware checks. It is the fallback for a nested `where` whose
+ * element schema cannot be resolved (so `compileValidateWhereFilter` has nothing to index against), letting a
+ * non-JSON operand still be rejected before it crosses a serialisation boundary — e.g. a stacking store's
+ * JSON-roundtripped idempotency ledger, where a `bigint`/`Date` operand would otherwise throw at clone time.
+ * Used by `collectActionWhereIssues`.
+ */
+export function collectNonSerialisableWhereIssues(filter: unknown): WhereFilterValidationIssue[] {
+    const issues: WhereFilterValidationIssue[] = [];
+    appendNonSerialisableIssues(filter, issues);
+    return issues;
+}
+
 /** Join a dot-prop ancestry prefix with a key (`'' + 'a'` → `'a'`; `'children' + 'name'` → `'children.name'`). */
 function joinPath(prefix: string, key: string): string {
     return prefix ? `${prefix}.${key}` : key;

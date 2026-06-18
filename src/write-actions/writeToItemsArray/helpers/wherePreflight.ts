@@ -1,32 +1,39 @@
 import { z } from "zod";
 import type { WritePayload } from "../../types.ts";
-import { compileValidateWhereFilter, type WhereFilterValidationIssue } from "../../../where-filter/validateWhereFilter.ts";
+import { type WhereFilterValidationIssue } from "../../../where-filter/validateWhereFilter.ts";
 import matchJavascriptObject from "../../../where-filter/matchJavascriptObject.ts";
-import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/schema-tree.ts";
 import { ValueComparisonRangeOperators } from "../../../where-filter/consts.ts";
 import type { WhereFilterDefinition } from "../../../where-filter/types.ts";
+import { collectActionWhereIssues } from "../../collectActionWhereIssues.ts";
 
 /**
  * Validate an action's `where` filters BEFORE the action mutates anything, so an invalid filter rejects the
  * action cleanly with zero mutation. Two layers, both required by `writeToItemsArray`'s `invalid_filter`
  * contract:
- *  1. **Static** (`collectWhereIssues`) — schema-aware structural validation (unknown field, type mismatch,
- *     non-finite, malformed) across the whole action tree, data-independent.
+ *  1. **Static** (`collectActionWhereIssues`, shared with `validateWriteAction` so the engine and a stacking
+ *     proxy reject identically) — schema-aware structural validation (unknown field, type mismatch, non-finite,
+ *     malformed) across the whole action tree, data-independent.
  *  2. **Runtime throw-safety** (`actionMatchThrows`) — a `$regex`/range operand can make `matchJavascriptObject`
  *     throw on certain rows; a dry-run over the items catches that up-front, so the mutation pass that follows
  *     is throw-free and never commits a partial change.
  *
+ * `validate` is the root validator compiled once by the caller (`compileValidateWhereFilter(schema, options)`)
+ * and reused across the batch; `options` is threaded to nested levels so the `SerialisableJsonSubset` narrowing
+ * applies consistently top-to-bottom.
+ *
  * @example
- * const issues = preflightActionWhere(payload, schema, compileValidateWhereFilter(schema), items);
+ * const validate = compileValidateWhereFilter(schema, { requireSerialisableJsonSubset: true });
+ * const issues = preflightActionWhere(payload, schema, validate, { requireSerialisableJsonSubset: true }, items);
  * if (issues.length) reject(); // e.g. [{ reason: 'unknown_field', path: 'children.ghost' }]
  */
 export function preflightActionWhere(
     payload: WritePayload<any>,
     schema: z.ZodType<any, any, any>,
     validate: (filter: WhereFilterDefinition<any>) => WhereFilterValidationIssue[],
+    options: { requireSerialisableJsonSubset?: boolean } | undefined,
     items: Record<string, any>[],
 ): WhereFilterValidationIssue[] {
-    const issues = collectWhereIssues(payload, schema, validate, "");
+    const issues = collectActionWhereIssues(payload, schema, validate, options, "");
     if (issues.length > 0) return issues;
     if (whereMightThrow(payload) && actionMatchThrows(payload, items)) {
         return [{ reason: "malformed", message: "Filter operand makes the matcher throw at runtime." }];
@@ -36,61 +43,6 @@ export function preflightActionWhere(
 
 /** Range operators whose operand the matcher feeds to `<`/`>` — a non-number/string operand (or value) makes it throw. */
 const RANGE_OPS = ValueComparisonRangeOperators as readonly string[];
-
-/** Join a scope/path segment onto a dot-prop prefix (`'' + 'children'` → `'children'`). */
-function joinScope(prefix: string, segment: string): string {
-    return prefix ? `${prefix}.${segment}` : segment;
-}
-
-/** Re-root a validation issue under `prefix` so a nested error reports its full scope-chain path (e.g. `children.ghost`). */
-function prefixIssue(issue: WhereFilterValidationIssue, prefix: string): WhereFilterValidationIssue {
-    return prefix && issue.path ? { ...issue, path: joinScope(prefix, issue.path) } : issue;
-}
-
-/**
- * Collect every static invalid-`where` issue in an action's whole filter tree, against the right schema at
- * each level: the payload's own `where`, an `array_scope`'s nested `action.where` at any depth (validated
- * against the scoped element schema), and a `pull`'s object-form `items_where` (against the array element
- * schema). Pure and data-independent, so it runs once up-front — the only way to catch a nested invalid
- * `where` when the outer `where` matches no items (the per-item recursion never runs then).
- */
-function collectWhereIssues(
-    payload: WritePayload<any>,
-    schema: z.ZodType<any, any, any>,
-    validate: (filter: WhereFilterDefinition<any>) => WhereFilterValidationIssue[],
-    prefix: string,
-): WhereFilterValidationIssue[] {
-    const issues: WhereFilterValidationIssue[] = [];
-
-    // Every non-create payload carries `where`; a create has none to validate.
-    if (payload.type !== "create") {
-        for (const issue of validate(payload.where)) issues.push(prefixIssue(issue, prefix));
-    }
-
-    if (payload.type === "array_scope") {
-        // Recurse into the nested action against the scoped element schema. An unresolved scope is left to
-        // fail at execution (getArrayScopeSchemaAndDDL throws) — skipping here is the conservative path.
-        const elementSchema = getZodSchemaAtSchemaDotPropPath(schema, payload.scope);
-        if (elementSchema) {
-            issues.push(...collectWhereIssues(payload.action as WritePayload<any>, elementSchema, compileValidateWhereFilter(elementSchema, { requireSerialisableJsonSubset: true }), joinScope(prefix, payload.scope)));
-        }
-    } else if (payload.type === "pull") {
-        // Object-form items_where is a per-element WhereFilter (validated against the element schema); a
-        // scalar-array value list stays a value list — opaque, exactly as applyPull dispatches on it.
-        const itemsWhere = payload.items_where;
-        if (!Array.isArray(itemsWhere) && itemsWhere !== null && typeof itemsWhere === "object") {
-            const elementSchema = getZodSchemaAtSchemaDotPropPath(schema, payload.path as string);
-            if (elementSchema) {
-                const elementPrefix = joinScope(prefix, payload.path as string);
-                for (const issue of compileValidateWhereFilter(elementSchema, { requireSerialisableJsonSubset: true })(itemsWhere as WhereFilterDefinition<any>)) {
-                    issues.push(prefixIssue(issue, elementPrefix));
-                }
-            }
-        }
-    }
-
-    return issues;
-}
 
 /**
  * True when an action's filters contain an operand the matcher can throw on at runtime — a `$regex` (compiled

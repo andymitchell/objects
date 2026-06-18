@@ -216,6 +216,26 @@ describe("writeToItemsArray — invalid where nested in array_scope", () => {
         expect(result.changes.final_items).toEqual(seedNested()); // nothing mutated
     });
 
+    it("rejects a serialisable-subset operand (a bigint under $ne) nested in array_scope action.where", () => {
+        // $ne broadens (the schema walk leaves it alone), so only the SerialisableJsonSubset gate catches the
+        // bigint — proving the engine holds nested where operands to the JSON-roundtrip subset, not just the schema.
+        const action = nestedAction({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { label: "x" }, where: { cid: { $ne: 5n } } } });
+        const result = writeToItemsArray([action], seedNested(), NestedSchema, nestedDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "malformed", where_path: "children.cid.$ne" });
+        expect(result.changes.final_items).toEqual(seedNested()); // nothing mutated
+    });
+
+    it("rejects a non-JSON carrier (a Date) nested in array_scope action.where", () => {
+        const action = nestedAction({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { label: "x" }, where: { cid: new Date() } } });
+        const result = writeToItemsArray([action], seedNested(), NestedSchema, nestedDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "malformed", where_path: "children.cid" });
+        expect(result.changes.final_items).toEqual(seedNested()); // nothing mutated
+    });
+
     it("propagates a nested array_scope runtime-throwing where (invalid $regex) as invalid_filter, not a silent ok", () => {
         // The nested where compiles a bad regex against a present label, so it throws at match time. The scoped
         // recursion catches it as an itemless invalid_filter; the parent must surface it rather than report ok:true.
@@ -342,5 +362,16 @@ describe("writeToItemsArray — invalid pull.items_where", () => {
 
         expect(result.ok).toBe(true);
         expect(result.changes.final_items[0]!.tags).toEqual(["b"]);
+    });
+
+    it("rejects a serialisable-subset operand (a satisfiable non-finite bound) in an object items_where", () => {
+        // $lt:Infinity is a legitimate match-all bound the schema walk accepts, so only the SerialisableJsonSubset
+        // gate flags it — confirming the engine holds items_where operands to the JSON-roundtrip subset.
+        const items: Sub[] = [{ id: "1", sub_items: [{ sid: "s1", val: 1 }] }];
+        const result = writeToItemsArray([pullAction({ type: "pull", path: "sub_items", items_where: { val: { $lt: Infinity } }, where: { id: "1" } })], items, SubSchema, subDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "non_finite", where_path: "sub_items.val.$lt" });
+        expect(result.changes.final_items[0]!.sub_items).toEqual([{ sid: "s1", val: 1 }]); // unchanged
     });
 });

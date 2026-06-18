@@ -136,6 +136,15 @@ describe("validateWritePayloadValues — do a payload's WRITTEN VALUES round-tri
         it("a bigint in create data → malformed at the field path", () => {
             expect(validateWritePayloadValues({ type: "create", data: { id: "1", big: 5n } })).toEqual([{ reason: "malformed", path: "big" }]);
         });
+        it("a Symbol in create data → malformed at the field path", () => {
+            expect(validateWritePayloadValues({ type: "create", data: { id: "1", sym: Symbol("x") } })).toEqual([{ reason: "malformed", path: "sym" }]);
+        });
+        it("a function in update data → malformed at the field path", () => {
+            expect(validateWritePayloadValues({ type: "update", data: { fn: () => 1 }, where: { id: "1" } })).toEqual([{ reason: "malformed", path: "fn" }]);
+        });
+        it("a function in a push item → malformed at the element index path", () => {
+            expect(validateWritePayloadValues({ type: "push", path: "tags", items: [() => 1], where: { id: "1" } })).toEqual([{ reason: "malformed", path: "tags.0" }]);
+        });
         it("a Date in update data → malformed at the field path", () => {
             expect(validateWritePayloadValues({ type: "update", data: { when: new Date() }, where: { id: "1" } })).toEqual([{ reason: "malformed", path: "when" }]);
         });

@@ -11,6 +11,15 @@ const SUBSET = { requireSerialisableJsonSubset: true } as const;
 /** Build a write action from a (sometimes deliberately out-of-contract) payload, for runtime testing. */
 const wa = (payload: unknown): WriteAction<Row> => ({ type: "write", ts: 0, uuid: "U", payload: payload as WriteAction<Row>["payload"] });
 
+// A schema with an object-array field, so a nested `array_scope.action.where` / `pull.items_where` resolves
+// to the element schema — exercising the whole-tree where gate (F1), not just the top-level `where`.
+const NestedSchema = z.object({
+    id: z.string(),
+    children: z.array(z.object({ cid: z.string(), score: z.number().optional() }).strict()).optional(),
+}).strict();
+type NestedRow = z.infer<typeof NestedSchema>;
+const wn = (payload: unknown): WriteAction<NestedRow> => ({ type: "write", ts: 0, uuid: "U", payload: payload as WriteAction<NestedRow>["payload"] });
+
 describe("validateWriteAction — runtime gate for a whole WriteAction (written values + top-level where)", () => {
     describe("written values — always checked, schema-agnostic (the unconditional JSON-value gate)", () => {
         it("accepts a fully JSON-safe action", () => {
@@ -63,6 +72,40 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
                 expect.objectContaining({ type: "invalid_filter", reason: "malformed", where_path: "count" }),
             ]));
             expect(errs).toHaveLength(2);
+        });
+    });
+
+    // The F1 fix: the gate must span the WHOLE where-tree, not just the top-level `where`. A nested operand the
+    // gate misses would otherwise reach a stacking store's JSON-roundtripped idempotency ledger and throw there.
+    describe("nested where — array_scope.action.where and pull.items_where held to the same subset (F1)", () => {
+        it("rejects a non-JSON (bigint) operand nested in an array_scope action.where, with the full scope-chain where_path", () => {
+            const a = wn({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { cid: { $ne: 5n } } } });
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "children.cid.$ne" }]);
+        });
+
+        it("rejects a satisfiable non-finite bound nested in an array_scope action.where (subset-only — the schema walk accepts $lt:Infinity)", () => {
+            const a = wn({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { score: { $lt: Infinity } } } });
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([{ type: "invalid_filter", reason: "non_finite", where_path: "children.score.$lt" }]);
+        });
+
+        it("rejects a non-JSON (Date) operand in a pull.items_where, scoping the where_path to the array", () => {
+            const a = wn({ type: "pull", path: "children", items_where: { cid: new Date() }, where: { id: "1" } });
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "children.cid" }]);
+        });
+
+        it("rejects an undefined operand nested in an array_scope action.where (a dropped key degrades to match-all)", () => {
+            const a = wn({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "delete", where: { cid: undefined } } });
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "children.cid" }]);
+        });
+
+        it("accepts a clean nested where", () => {
+            const a = wn({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { cid: "c1" } } });
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toEqual([]);
+        });
+
+        it("honours the caller's options at nested levels too — without the flag, a satisfiable nested bound is accepted", () => {
+            const a = wn({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { score: { $lt: Infinity } } } });
+            expect(validateWriteAction(a, NestedSchema)).toEqual([]);
         });
     });
 });

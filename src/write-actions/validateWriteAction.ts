@@ -1,7 +1,8 @@
 import type { ZodType } from "zod";
 import type { WriteAction, WriteError, WritePayload } from "./types.ts";
 import { validateWritePayloadValues } from "./validateWritePayload.ts";
-import { validateWhereFilter } from "../where-filter/validateWhereFilter.ts";
+import { compileValidateWhereFilter } from "../where-filter/validateWhereFilter.ts";
+import { collectActionWhereIssues } from "./collectActionWhereIssues.ts";
 
 /**
  * Validate a whole `WriteAction` at runtime, before it is accepted — the public entry a store calls up-front so
@@ -15,8 +16,10 @@ import { validateWhereFilter } from "../where-filter/validateWhereFilter.ts";
  *
  * Returns canonical `WriteError`s tagged by source — a written-value fault is `invalid_data_value`, a `where`
  * fault is `invalid_filter` — both reusing the existing `non_finite`/`malformed`/… reasons (no new vocabulary).
- * An empty array means the action is valid. Nested element-level filters (`array_scope.action.where`,
- * `pull.items_where`) are validated by the write engine's own preflight, not here.
+ * An empty array means the action is valid. The `where` check spans the WHOLE filter tree — the top-level
+ * `where` AND nested `array_scope.action.where` / `pull.items_where` at any depth (via `collectActionWhereIssues`,
+ * shared with the write engine's preflight so both reject identically) — so the gate is complete: a store can
+ * rely on the cleared action's entire `payload` being JSON-roundtrippable, every nested operand included.
  *
  * @example
  * const errs = validateWriteAction(action, schema, { requireSerialisableJsonSubset: true });
@@ -38,11 +41,11 @@ export function validateWriteAction<T extends Record<string, any>>(
     errors.push({ type: "invalid_data_value", reason: issue.reason, data_path: issue.path });
   }
 
-  // 2. Top-level `where` (every verb except `create` carries one).
-  if (payload.type !== "create") {
-    for (const issue of validateWhereFilter(payload.where, schema, options)) {
-      errors.push({ type: "invalid_filter", reason: issue.reason, where_path: issue.path });
-    }
+  // 2. `where` across the whole tree — the top-level `where` plus nested `array_scope.action.where` /
+  //    `pull.items_where` — sharing the engine's recursion. The root validator is compiled once and reused down
+  //    the tree; a create carries no `where`, so this is a no-op for it.
+  for (const issue of collectActionWhereIssues(payload, schema, compileValidateWhereFilter(schema, options), options)) {
+    errors.push({ type: "invalid_filter", reason: issue.reason, where_path: issue.path });
   }
 
   return errors;

@@ -21,7 +21,7 @@ import type {
 } from "./types.ts";
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
-import { JsonValueSchema } from "@andyrmitchell/utils/deep-clone-scalar-values";
+import { JsonValueSchema } from "@andyrmitchell/utils/clone-to-json-safe";
 
 export function makeWriteActionSchema<
   T extends Record<string, any> = Record<string, any>,

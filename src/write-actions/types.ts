@@ -12,7 +12,7 @@ import type {
   WhereFilterDefinition,
 } from "../where-filter/types.js";
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
-import type { JsonValueCapped } from "@andyrmitchell/utils/deep-clone-scalar-values";
+import type { JsonValueCapped } from "@andyrmitchell/utils/clone-to-json-safe";
 
 export type WritePayloadCreate<W extends Record<string, any>> = {
   type: "create";

@@ -13,9 +13,9 @@ import {
 } from "../../../utils/getKeyValue.ts";
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import {
-  cloneDeepScalarValues,
+  cloneToJsonSafe,
   type JsonValueCapped,
-} from "@andyrmitchell/utils/deep-clone-scalar-values";
+} from "@andyrmitchell/utils/clone-to-json-safe";
 
 /** Error kinds an action can never recover from, however many times it is retried. */
 function isUnrecoverable(type: WriteError["type"]): boolean {
@@ -110,9 +110,10 @@ export default class WriteActionFailuresTracker<
     if (!result.success) {
       let serialisedSchema: JsonValueCapped | undefined;
       try {
-        const serialisedSchemaResult = cloneDeepScalarValues(
+        const serialisedSchemaResult = cloneToJsonSafe(
           convertSchemaToDotPropPathTree(this.schema, { union_aware: true }).root,
-          { skip_circular: true, skip_symbols: true },
+          // Default disallow mode is 'remove' and symbols are dropped by default, leaving JSON-safe data.
+          { skip_circular: true },
         );
 
         serialisedSchema = JSON.parse(JSON.stringify(serialisedSchemaResult));
@@ -243,9 +244,8 @@ export default class WriteActionFailuresTracker<
     // Circular references in stored items are resolved first so serialisation cannot throw.
     return JSON.parse(
       JSON.stringify(
-        cloneDeepScalarValues(this.failures, {
+        cloneToJsonSafe(this.failures, {
           skip_circular: true,
-          skip_symbols: true,
         }),
       ),
     );

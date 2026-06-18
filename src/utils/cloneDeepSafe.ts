@@ -1,7 +1,7 @@
 
 /*
 
-TODO How is this different to the much better tested cloneDeepScalarValues ? 
+TODO How is this different to the much better tested cloneToJsonSafe ?
 */
 
 

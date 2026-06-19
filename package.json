@@ -1,6 +1,6 @@
 {
     "name": "@andymitchell/objects",
-    "version": "1.10.4",
+    "version": "1.10.5",
     "description": "",
     "exports": {
         "./where-filter": {

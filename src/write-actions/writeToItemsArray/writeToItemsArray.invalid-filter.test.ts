@@ -394,6 +394,15 @@ describe("writeToItemsArray — invalid pull.items_where", () => {
         expect(result.changes.final_items[0]!.tags).toEqual(["a", "b"]); // unchanged
     });
 
+    it("recurses into a value-list member object, rejecting a nested non-JSON at its deep path pre-mutation", () => {
+        const items: Sub[] = [{ id: "1", tags: ["a", "b"] }];
+        const result = writeToItemsArray([pullAction({ type: "pull", path: "tags", items_where: [{ x: 5n }], where: { id: "1" } })], items, SubSchema, subDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "malformed", where_path: "items_where.0.x" });
+        expect(result.changes.final_items[0]!.tags).toEqual(["a", "b"]); // unchanged
+    });
+
     it("rejects a serialisable-subset operand (a satisfiable non-finite bound) in an object items_where", () => {
         // $lt:Infinity is a legitimate match-all bound the schema walk accepts, so only the SerialisableJsonSubset
         // gate flags it — confirming the engine holds items_where operands to the JSON-roundtrip subset.

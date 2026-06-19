@@ -143,6 +143,26 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
                 .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" }]);
         });
 
+        it("rejects a -Infinity member as invalid_filter/non_finite (the negative pole of the non-finite family)", () => {
+            expect(validateWriteAction(pullTags([-Infinity]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "non_finite", where_path: "items_where.0" }]);
+        });
+
+        it("rejects a Symbol member as invalid_filter/malformed", () => {
+            expect(validateWriteAction(pullTags([Symbol("s")]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" }]);
+        });
+
+        it("rejects a function member as invalid_filter/malformed", () => {
+            expect(validateWriteAction(pullTags([() => 1]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" }]);
+        });
+
+        it("recurses into a member object, flagging a nested non-JSON at its deep where_path", () => {
+            expect(validateWriteAction(pullTags([{ x: 5n }]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0.x" }]);
+        });
+
         it("indexes the fault to the offending member, not always the first", () => {
             expect(validateWriteAction(pullTags([1, Infinity]), NestedSchema, SUBSET))
                 .toMatchObject([{ type: "invalid_filter", reason: "non_finite", where_path: "items_where.1" }]);

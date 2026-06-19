@@ -195,14 +195,12 @@ isTypeEqual<z.infer<typeof WriteErrorSchema>, WriteError>(true);
 
 // ─── WriteErrorContext ───
 
-export function makeWriteErrorContextSchema<
-  T extends Record<string, any> = Record<string, any>,
->() {
+export function makeWriteErrorContextSchema() {
   return WriteErrorSchema.and(
     z.object({
       item_pk: PrimaryKeyValueSchema.optional(),
     }),
-  ) as z.ZodType<WriteErrorContext<T>>;
+  ) as z.ZodType<WriteErrorContext>;
 }
 
 // ─── WriteAffectedItem ───
@@ -239,9 +237,9 @@ export function makeWriteOutcomeFailedCoreSchema<
     // `errors` is a non-empty tuple `[WriteErrorContext, ...WriteErrorContext[]]`. `z.tuple([x], x)`
     // expresses that in the inferred type natively; v4's `.nonempty()` only enforces ≥1 at runtime
     // (it infers a plain `T[]`, dropping the compile-time guarantee). To relax later, switch to
-    // `z.array(makeWriteErrorContextSchema<T>()).nonempty()` → `WriteErrorContext[]` (then `errors[0]`
+    // `z.array(makeWriteErrorContextSchema()).nonempty()` → `WriteErrorContext[]` (then `errors[0]`
     // becomes possibly-undefined under noUncheckedIndexedAccess).
-    errors: z.tuple([makeWriteErrorContextSchema<T>()], makeWriteErrorContextSchema<T>()),
+    errors: z.tuple([makeWriteErrorContextSchema()], makeWriteErrorContextSchema()),
     unrecoverable: z.boolean().optional(),
     back_off_until_ts: z.number().optional(),
     blocked_by_action_uuid: z.string().optional(),

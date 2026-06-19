@@ -73,7 +73,7 @@ export default class WriteActionFailuresTracker<
     errorDetails: WriteError,
   ): void {
     const itemPk = this.pk(item, true);
-    const errorContext: WriteErrorContext<T> = {
+    const errorContext: WriteErrorContext = {
       ...errorDetails,
       item_pk: itemPk,
     };
@@ -160,7 +160,7 @@ export default class WriteActionFailuresTracker<
    * `affected_items`, de-duplicating identical errors.
    */
   reportActionError(action: WriteAction<T>, errorDetails: WriteError): void {
-    const errorContext: WriteErrorContext<T> = { ...errorDetails };
+    const errorContext: WriteErrorContext = { ...errorDetails };
     let failedAction = this.findAction(action);
     if (failedAction) {
       if (!failedAction.errors.some((x) => deepEql(x, errorContext))) {

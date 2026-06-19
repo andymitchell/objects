@@ -216,14 +216,13 @@ export type WriteError =
     };
 
 /**
- * A `WriteError` enriched with the item context where the error occurred.
+ * A `WriteError` enriched with the scalar locator (`item_pk`) of the item where the error occurred. It carries
+ * no item body — only JSON-safe scalars — so it always serialises.
  *
  * @example
- * const ctx: WriteErrorContext<MyItem> = { type: 'missing_key', primary_key: 'id', item_pk: '123' };
+ * const ctx: WriteErrorContext = { type: 'missing_key', primary_key: 'id', item_pk: '123' };
  */
-export type WriteErrorContext<
-  T extends Record<string, any> = Record<string, any>,
-> = WriteError & {
+export type WriteErrorContext = WriteError & {
   item_pk?: PrimaryKeyValue;
 };
 
@@ -282,7 +281,7 @@ export type WriteOutcomeFailedCore<
   /** The `uuid` of the submitted action that failed — a boundary-safe identifier (the action body is not echoed). */
   action_uuid: string;
   /** The action's errors; always at least one. A blocked action carries a single `blocked` error. */
-  errors: [WriteErrorContext<T>, ...WriteErrorContext<T>[]];
+  errors: [WriteErrorContext, ...WriteErrorContext[]];
   /** True if the action can never succeed (e.g. schema violation, permission denied). */
   unrecoverable?: boolean;
   /** Don't retry until this timestamp. */

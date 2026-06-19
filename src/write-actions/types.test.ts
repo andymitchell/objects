@@ -382,10 +382,10 @@ describe("6. Helper function return types", () => {
     }
   });
 
-  it("getWriteErrors returns WriteErrorContext<T>[]", () => {
+  it("getWriteErrors returns WriteErrorContext[]", () => {
     const result: WriteResult<Flat> = { ok: false, actions: [] };
     const errors = getWriteErrors(result);
-    isTypeEqual<typeof errors, WriteErrorContext<Flat>[]>(true);
+    isTypeEqual<typeof errors, WriteErrorContext[]>(true);
     if (errors[0]) {
       const _type = errors[0].type;
       const _pk = errors[0].item_pk;

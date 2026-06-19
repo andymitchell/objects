@@ -44,6 +44,6 @@ export function getWriteSuccesses<T extends Record<string, any>, W extends Recor
  * const allErrors = getWriteErrors(result);
  * allErrors.forEach(e => console.log(e.type, e.item_pk));
  */
-export function getWriteErrors<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(result: WriteResult<T, W, WF>): WriteErrorContext<T>[] {
+export function getWriteErrors<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(result: WriteResult<T, W, WF>): WriteErrorContext[] {
     return getWriteFailures(result).flatMap(a => a.errors);
 }

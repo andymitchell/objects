@@ -1,99 +1,99 @@
 {
-    "name": "@andymitchell/objects",
-    "version": "2.0.0",
-    "description": "",
-    "exports": {
-        "./where-filter": {
-            "types": "./dist/index-where-filter.d.ts",
-            "default": "./dist/index-where-filter.js"
-        },
-        "./write-actions": {
-            "types": "./dist/index-write-actions.d.ts",
-            "default": "./dist/index-write-actions.js"
-        },
-        "./objects-delta": {
-            "types": "./dist/index-objects-delta.d.ts",
-            "default": "./dist/index-objects-delta.js"
-        },
-        "./objects-delta-testing": {
-            "types": "./dist/index-objects-delta-testing.d.ts",
-            "default": "./dist/index-objects-delta-testing.js"
-        },
-        "./query": {
-            "types": "./dist/index-query.d.ts",
-            "default": "./dist/index-query.js"
-        },
-        "./dot-prop-paths": {
-            "types": "./dist/index-dot-prop-paths.d.ts",
-            "default": "./dist/index-dot-prop-paths.js"
-        },
-        "./zod": {
-            "types": "./dist/index-zod.d.ts",
-            "default": "./dist/index-zod.js"
-        },
-        "./primary-key": {
-            "types": "./dist/index-primary-key.d.ts",
-            "default": "./dist/index-primary-key.js"
-        },
-        "./utils": {
-            "types": "./dist/index-utils.d.ts",
-            "default": "./dist/index-utils.js"
-        },
-        "./ddl": {
-            "types": "./dist/index-ddl.d.ts",
-            "default": "./dist/index-ddl.js"
-        }
+  "name": "@andymitchell/objects",
+  "version": "1.10.7",
+  "description": "",
+  "exports": {
+    "./where-filter": {
+      "types": "./dist/index-where-filter.d.ts",
+      "default": "./dist/index-where-filter.js"
     },
-    "type": "module",
-    "files": [
-        "dist",
-        "README.MD",
-        "LICENSE"
-    ],
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/andymitchell/objects.git"
+    "./write-actions": {
+      "types": "./dist/index-write-actions.d.ts",
+      "default": "./dist/index-write-actions.js"
     },
-    "publishConfig": {
-        "registry": "https://npm.pkg.github.com",
-        "access": "public"
+    "./objects-delta": {
+      "types": "./dist/index-objects-delta.d.ts",
+      "default": "./dist/index-objects-delta.js"
     },
-    "scripts": {
-        "build_release": "npm run build_prepare && np",
-        "build": "tsup",
-        "pkglint": "./build/publint_pipeable.sh",
-        "build_prepare": "npm run build && npm run pkglint",
-        "prepublishOnly": "npm run build_prepare",
-        "test": "vitest",
-        "test:watch": "vitest --watch",
-        "typecheck": "tsc --noEmit"
+    "./objects-delta-testing": {
+      "types": "./dist/index-objects-delta-testing.d.ts",
+      "default": "./dist/index-objects-delta-testing.js"
     },
-    "author": "",
-    "license": "MIT",
-    "sideEffects": false,
-    "devDependencies": {
-        "@andyrmitchell/pg-testable": "^0.5.2",
-        "@andyrmitchell/utils": "^0.30.0",
-        "@types/better-sqlite3": "^7.6.13",
-        "@types/deep-eql": "^4.0.2",
-        "@types/jest": "^29.5.12",
-        "@types/lodash-es": "^4.17.12",
-        "better-sqlite3": "^12.6.2",
-        "ts-essentials": "^10.1.1",
-        "ts-morph": "^26.0.0",
-        "tsup": "^8.5.0",
-        "typescript": "^5.8.3",
-        "vitest": "^4.1.8",
-        "zod": "^4.4.3"
+    "./query": {
+      "types": "./dist/index-query.d.ts",
+      "default": "./dist/index-query.js"
     },
-    "dependencies": {
-        "@andyrmitchell/composite-timestamps": "^0.5.1",
-        "deep-eql": "^5.0.2",
-        "dot-prop": "^9.0.0",
-        "immer": "^10.1.1",
-        "lodash-es": "^4.17.21"
+    "./dot-prop-paths": {
+      "types": "./dist/index-dot-prop-paths.d.ts",
+      "default": "./dist/index-dot-prop-paths.js"
     },
-    "peerDependencies": {
-        "zod": "^4.1.8"
+    "./zod": {
+      "types": "./dist/index-zod.d.ts",
+      "default": "./dist/index-zod.js"
+    },
+    "./primary-key": {
+      "types": "./dist/index-primary-key.d.ts",
+      "default": "./dist/index-primary-key.js"
+    },
+    "./utils": {
+      "types": "./dist/index-utils.d.ts",
+      "default": "./dist/index-utils.js"
+    },
+    "./ddl": {
+      "types": "./dist/index-ddl.d.ts",
+      "default": "./dist/index-ddl.js"
     }
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.MD",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andymitchell/objects.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "scripts": {
+    "build_release": "npm run build_prepare && np",
+    "build": "tsup",
+    "pkglint": "./build/publint_pipeable.sh",
+    "build_prepare": "npm run build && npm run pkglint",
+    "prepublishOnly": "npm run build_prepare",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "author": "",
+  "license": "MIT",
+  "sideEffects": false,
+  "devDependencies": {
+    "@andyrmitchell/pg-testable": "^0.5.2",
+    "@andyrmitchell/utils": "^0.30.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/deep-eql": "^4.0.2",
+    "@types/jest": "^29.5.12",
+    "@types/lodash-es": "^4.17.12",
+    "better-sqlite3": "^12.6.2",
+    "ts-essentials": "^10.1.1",
+    "ts-morph": "^26.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.8",
+    "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "@andyrmitchell/composite-timestamps": "^0.5.1",
+    "deep-eql": "^5.0.2",
+    "dot-prop": "^9.0.0",
+    "immer": "^10.1.1",
+    "lodash-es": "^4.17.21"
+  },
+  "peerDependencies": {
+    "zod": "^4.1.8"
+  }
 }

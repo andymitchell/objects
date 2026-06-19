@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import { z } from "zod";
 import { validateWhereFilter, compileValidateWhereFilter } from "./validateWhereFilter.ts";
 import matchJavascriptObject from "./matchJavascriptObject.ts";
@@ -558,5 +558,19 @@ describe("validateWhereFilter — requireSerialisableJsonSubset (the serialisabl
             expect(sub({ $or: [{ id: "x" }, { "contact.phone": "1" }] })).toEqual([]);
             expect(sub({ age: { $in: [1, 2, 3] } })).toEqual([]);
         });
+    });
+});
+
+describe("compileValidateWhereFilter — typing across the widened (schema | undefined) parameter", () => {
+    it("still infers the row type from a definite schema (the `= any` default must not collapse inference)", () => {
+        const validate = compileValidateWhereFilter(Schema);
+        expectTypeOf(validate).parameter(0).toEqualTypeOf<WhereFilterDefinition<Row>>();
+    });
+
+    it("accepts an absent schema (an unresolved nested scope), returning a usable any-typed validator", () => {
+        const validate = compileValidateWhereFilter(undefined);
+        expectTypeOf(validate).toBeCallableWith({ anything: 1 });
+        // with neither a schema nor the subset flag there is nothing to check → no issues
+        expect(validate({ anything: 1 })).toEqual([]);
     });
 });

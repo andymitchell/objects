@@ -2,10 +2,11 @@ import type { ZodType } from "zod";
 import type { WritePayload } from "./types.ts";
 import {
     compileValidateWhereFilter,
-    collectNonSerialisableWhereIssues,
     type WhereFilterValidationIssue,
 } from "../where-filter/validateWhereFilter.ts";
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.ts";
+import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
+import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
 
 /**
@@ -54,9 +55,9 @@ export function collectActionWhereIssues(
         issues.push(...collectActionWhereIssues(
             payload.action as WritePayload<any>,
             elementSchema,
-            validatorFor(elementSchema, options),
+            compileValidateWhereFilter(elementSchema, options),
             options,
-            joinScope(prefix, payload.scope),
+            joinDotpropPath(prefix, payload.scope),
         ));
     } else if (payload.type === "pull") {
         issues.push(...validatePullItemsWhere(payload.items_where, schema, payload.path as string, options, prefix));
@@ -70,8 +71,9 @@ export function collectActionWhereIssues(
  * an OBJECT-form per-element `WhereFilter` (validated against the array element schema), or a SCALAR value-list
  * ($pullAll-style) whose members are literal match targets. The members are NOT `where` operands, so the filter
  * walk never sees them — yet they ride the JSON-roundtripped idempotency ledger like any operand, so hold each to
- * the `SerialisableJsonSubset` (under the flag), reusing the shared operand walk. Both shapes are the caller's one
- * filter slot, so both surface as `invalid_filter` — a scalar fault at `items_where.<i>`.
+ * the `SerialisableJsonSubset` (under the flag) via the shared value walk (`findNonJsonValues`), the same primitive
+ * the write-payload value-gate uses. Both shapes are the caller's one filter slot, so both surface as
+ * `invalid_filter` — a scalar fault at `items_where.<i>`.
  */
 function validatePullItemsWhere(
     itemsWhere: unknown,
@@ -82,40 +84,37 @@ function validatePullItemsWhere(
 ): WhereFilterValidationIssue[] {
     const issues: WhereFilterValidationIssue[] = [];
     if (Array.isArray(itemsWhere)) {
-        // Scalar value-list: members are match targets, held to the JSON-roundtrip subset (incl. undefined, which
-        // drops to null and silently shifts the removal set) — only under the flag, like the rest of the tree.
+        // Scalar value-list: members are match targets held to the JSON-roundtrip subset only under the flag, like
+        // the rest of the tree. `flagUndefined` is on — an `undefined` member drops to null and silently shifts the
+        // removal set, so it must be rejected. The walk roots at the `items_where` base path, so each fault reports
+        // its full `items_where.<i>` location directly.
         if (options?.requireSerialisableJsonSubset) {
-            const itemsPrefix = joinScope(prefix, "items_where");
-            for (const issue of collectNonSerialisableWhereIssues(itemsWhere)) {
-                issues.push(prefixIssue(issue, itemsPrefix));
+            const base = joinDotpropPath(prefix, "items_where");
+            const nonJson: NonJsonValueIssue[] = [];
+            findNonJsonValues(itemsWhere, base, nonJson, { flagUndefined: true });
+            for (const { reason, path } of nonJson) {
+                const at = path ? ` at '${path}'` : "";
+                issues.push({
+                    reason,
+                    path,
+                    message: reason === "non_finite"
+                        ? `Non-finite value${at} cannot losslessly round-trip JSON.`
+                        : `Non-JSON value${at} cannot losslessly round-trip JSON.`,
+                });
             }
         }
     } else if (itemsWhere !== null && typeof itemsWhere === "object") {
         // Object-form: a per-element WhereFilter validated against the array element schema.
         const elementSchema = schema ? getZodSchemaAtSchemaDotPropPath(schema, fieldPath) : undefined;
-        const elementPrefix = joinScope(prefix, fieldPath);
-        for (const issue of validatorFor(elementSchema, options)(itemsWhere as WhereFilterDefinition<any>)) {
+        const elementPrefix = joinDotpropPath(prefix, fieldPath);
+        for (const issue of compileValidateWhereFilter(elementSchema, options)(itemsWhere as WhereFilterDefinition<any>)) {
             issues.push(prefixIssue(issue, elementPrefix));
         }
     }
     return issues;
 }
 
-/** A validator for a nested level: schema-aware when the element schema resolved, else the schema-independent subset-only walk (a no-op without the flag). */
-function validatorFor(
-    schema: ZodType<any> | undefined,
-    options: { requireSerialisableJsonSubset?: boolean } | undefined,
-): (filter: WhereFilterDefinition<any>) => WhereFilterValidationIssue[] {
-    if (schema) return compileValidateWhereFilter(schema, options);
-    return (filter) => (options?.requireSerialisableJsonSubset ? collectNonSerialisableWhereIssues(filter) : []);
-}
-
-/** Join a scope/path segment onto a dot-prop prefix (`'' + 'children'` → `'children'`). */
-function joinScope(prefix: string, segment: string): string {
-    return prefix ? `${prefix}.${segment}` : segment;
-}
-
 /** Re-root a validation issue under `prefix` so a nested error reports its full scope-chain path (e.g. `children.ghost`). */
 function prefixIssue(issue: WhereFilterValidationIssue, prefix: string): WhereFilterValidationIssue {
-    return prefix && issue.path ? { ...issue, path: joinScope(prefix, issue.path) } : issue;
+    return prefix && issue.path ? { ...issue, path: joinDotpropPath(prefix, issue.path) } : issue;
 }

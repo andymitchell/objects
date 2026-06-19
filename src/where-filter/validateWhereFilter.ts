@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import { convertSchemaToDotPropPathTree, type TreeNode } from "../dot-prop-paths/schema-tree.ts";
+import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
 import { objectRejectsUnknownKeys } from "../zod/introspection.ts";
 import { WhereFilterLogicOperators, ValueComparisonRangeOperators } from "./consts.ts";
 import { isWhereFilterDefinition } from "./schemas.ts";
@@ -104,7 +105,9 @@ type SchemaIndex = { multimap: NodeMultimap; hasChildren: Set<string>; strict: S
 
 /**
  * Build a reusable validator from a schema — mirrors `compileMatchJavascriptObject`. The schema is walked
- * into a node index once; the returned function validates many filters cheaply.
+ * into a node index once; the returned function validates many filters cheaply. Pass `undefined` when no
+ * schema is available (an unresolvable nested scope): it behaves exactly like a schema the walker can't
+ * model — schema-aware checks are skipped and only the opt-in `SerialisableJsonSubset` walk runs.
  *
  * @example
  * const validate = compileValidateWhereFilter(ContactSchema);
@@ -112,21 +115,25 @@ type SchemaIndex = { multimap: NodeMultimap; hasChildren: Set<string>; strict: S
  * validate({ ghost: { $ne: 1 } }); // [] — `$ne` matches missing, so it is not a contradiction
  * validate({ age: { $gte: 18 } }); // []
  */
-export function compileValidateWhereFilter<T extends Record<string, any>>(
-    schema: ZodType<T>,
+export function compileValidateWhereFilter<T extends Record<string, any> = any>(
+    schema: ZodType<T> | undefined,
     options?: { requireSerialisableJsonSubset?: boolean },
 ): (filter: WhereFilterDefinition<T>) => WhereFilterValidationIssue[] {
     let index: SchemaIndex | undefined;
-    try {
-        const { root } = convertSchemaToDotPropPathTree(schema, {
-            union_aware: true, // a dedicated node per union variant — avoids the walker throwing on a union of objects
-            // schema refs retained (not excluded): buildSchemaIndex reads each object node's catchall to fail-allow passthrough/catchall
-            exclude_parent_reference: true,
-        });
-        index = buildSchemaIndex(root);
-    } catch {
-        // A schema the walker can't model → don't validate (accept everything) rather than risk a false reject.
-        index = undefined;
+    // No schema (an unresolvable nested scope) is treated exactly like an unmodellable one: `index` stays
+    // undefined, so the schema-aware checks are skipped and only the opt-in SerialisableJsonSubset walk runs.
+    if (schema) {
+        try {
+            const { root } = convertSchemaToDotPropPathTree(schema, {
+                union_aware: true, // a dedicated node per union variant — avoids the walker throwing on a union of objects
+                // schema refs retained (not excluded): buildSchemaIndex reads each object node's catchall to fail-allow passthrough/catchall
+                exclude_parent_reference: true,
+            });
+            index = buildSchemaIndex(root);
+        } catch {
+            // A schema the walker can't model → don't validate (accept everything) rather than risk a false reject.
+            index = undefined;
+        }
     }
     return (filter) => {
         const issues: WhereFilterValidationIssue[] = [];
@@ -181,25 +188,6 @@ function appendNonSerialisableIssues(filter: unknown, issues: WhereFilterValidat
     }
 }
 
-/**
- * Collect ONLY the `SerialisableJsonSubset` operand faults in a filter — the schema-INDEPENDENT half of
- * `requireSerialisableJsonSubset`, with no schema-aware checks. It is the fallback for a nested `where` whose
- * element schema cannot be resolved (so `compileValidateWhereFilter` has nothing to index against), letting a
- * non-JSON operand still be rejected before it crosses a serialisation boundary — e.g. a stacking store's
- * JSON-roundtripped idempotency ledger, where a `bigint`/`Date` operand would otherwise throw at clone time.
- * Used by `collectActionWhereIssues`.
- */
-export function collectNonSerialisableWhereIssues(filter: unknown): WhereFilterValidationIssue[] {
-    const issues: WhereFilterValidationIssue[] = [];
-    appendNonSerialisableIssues(filter, issues);
-    return issues;
-}
-
-/** Join a dot-prop ancestry prefix with a key (`'' + 'a'` → `'a'`; `'children' + 'name'` → `'children.name'`). */
-function joinPath(prefix: string, key: string): string {
-    return prefix ? `${prefix}.${key}` : key;
-}
-
 /** DFS the schema tree into a multimap (all nodes per path) and a set of paths that have a distinct child path. */
 function buildSchemaIndex(root: TreeNode): SchemaIndex {
     const multimap: NodeMultimap = {};
@@ -245,7 +233,7 @@ function walk(filter: Record<string, unknown> | null | undefined, prefix: string
             for (const sub of value) walk(sub as Record<string, unknown>, prefix, childBroadening, index, issues);
             continue;
         }
-        validateLeaf(joinPath(prefix, key), value, broadening, index, issues);
+        validateLeaf(joinDotpropPath(prefix, key), value, broadening, index, issues);
     }
 }
 

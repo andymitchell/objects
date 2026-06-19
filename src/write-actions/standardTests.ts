@@ -512,7 +512,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                     const failures = getWriteFailures(r.result);
                     expect(failures.length).toBeGreaterThanOrEqual(1);
                     // Second action should be blocked
-                    const blocked = failures.find(f => f.action.uuid === 'a2');
+                    const blocked = failures.find(f => f.action_uuid === 'a2');
                     if (blocked) {
                         expect(blocked.blocked_by_action_uuid).toBe('a1');
                     }
@@ -1236,7 +1236,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     const outcome = r.result.actions[0]!;
                     expect(outcome.ok).toBe(true);
-                    expect(outcome.action.uuid).toBe('uuid-42');
+                    expect(outcome.action_uuid).toBe('uuid-42');
                     if (outcome.ok) {
                         expect(outcome.affected_items).toBeDefined();
                     }
@@ -1288,10 +1288,9 @@ export function standardTests(testConfig: StandardTestConfig) {
                 }, implName);
             });
 
-            test('action uuid and ts from input are preserved in outcome', async () => {
+            test('action uuid from input is preserved in outcome', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const action = makeAction<Flat>('preserve-uuid', { type: 'create', data: { id: '1' } });
-                action.ts = 1234567890;
                 const r = await adapter.apply({
                     initialItems: [],
                     writeActions: [action],
@@ -1300,8 +1299,37 @@ export function standardTests(testConfig: StandardTestConfig) {
                 });
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     const outcome = r.result.actions[0]!;
-                    expect(outcome.action.uuid).toBe('preserve-uuid');
-                    expect(outcome.action.ts).toBe(1234567890);
+                    expect(outcome.action_uuid).toBe('preserve-uuid');
+                }, implName);
+            });
+
+            test('every outcome action_uuid is a submitted action uuid (no synthetic array_scope uuid leaks)', async () => {
+                const adapter = createAdapter(NestedSchema, nestedDdl);
+                // A failing array_scope (duplicate nested PK) folds its recursion's synthetic `uuid+scope`
+                // failures under the parent action; a blocked sibling follows. Neither may surface a synthetic uuid.
+                const submitted = [
+                    makeAction<Nested>('sub-1', assertWriteArrayScope<Nested, 'children'>({
+                        type: 'array_scope',
+                        scope: 'children',
+                        action: { type: 'create', data: { cid: 'c1', items: [] } },
+                        where: { id: '1' },
+                    })),
+                    makeAction<Nested>('sub-2', { type: 'create', data: { id: '2' } }),
+                ];
+                const r = await adapter.apply({
+                    initialItems: [{ id: '1', children: [{ cid: 'c1', items: [] }] }],
+                    writeActions: submitted,
+                    schema: NestedSchema,
+                    ddl: nestedDdl,
+                });
+                expectOrAcknowledgeUnsupported(r, (r) => {
+                    expect(r.result.ok).toBe(false);
+                    const submittedUuids = new Set(submitted.map(a => a.uuid));
+                    for (const outcome of r.result.actions) {
+                        expect(submittedUuids.has(outcome.action_uuid)).toBe(true);
+                    }
+                    // The array_scope failure is reported under its own submitted uuid, never a synthetic `sub-1children`.
+                    expect(r.result.actions.some(o => o.action_uuid === 'sub-1')).toBe(true);
                 }, implName);
             });
         });
@@ -1574,7 +1602,7 @@ export function standardTests(testConfig: StandardTestConfig) {
             });
             expectOrAcknowledgeUnsupported(r, (r) => {
                 const failures = getWriteFailures(r.result);
-                const blocked = failures.find(f => f.action.uuid === 'blocked-uuid');
+                const blocked = failures.find(f => f.action_uuid === 'blocked-uuid');
                 expect(blocked).toBeDefined();
                 expect(blocked!.blocked_by_action_uuid).toBe('fail-uuid');
             }, implName);
@@ -1601,7 +1629,7 @@ export function standardTests(testConfig: StandardTestConfig) {
                 expect(r.result.ok).toBe(false);
                 const successes = getWriteSuccesses(r.result);
                 expect(successes).toHaveLength(1);
-                expect(successes[0]!.action.uuid).toBe('a1');
+                expect(successes[0]!.action_uuid).toBe('a1');
                 expect(r.finalItems.find(x => x.id === '1')).toBeDefined();
             }, implName);
         });

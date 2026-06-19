@@ -283,7 +283,7 @@ describe("writeToItemsArray — invalid where nested in array_scope", () => {
         const result = writeToItemsArray(actions, seedNested(), NestedSchema, nestedDdl);
 
         expect(result.ok).toBe(false);
-        expect(getWriteFailures(result).find((f) => f.action.uuid === "a2")?.blocked_by_action_uuid).toBe("a1");
+        expect(getWriteFailures(result).find((f) => f.action_uuid === "a2")?.blocked_by_action_uuid).toBe("a1");
     });
 });
 

@@ -55,7 +55,7 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     }
 
     private findSuccessfulWriteAction(action:WriteAction<T>, createIfMissing?: boolean) {
-        if( !this.actionsMap[action.uuid] && createIfMissing ) this.actionsMap[action.uuid] = {ok: true, action, affected_items: []};
+        if( !this.actionsMap[action.uuid] && createIfMissing ) this.actionsMap[action.uuid] = {ok: true, action_uuid: action.uuid, affected_items: []};
         return this.actionsMap[action.uuid]!;
     }
 
@@ -480,7 +480,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
     if( failureTracker.length()>0 ) {
         // Mark every subsequent action after the failure as blocked
         const failedActions = failureTracker.get();
-        const failedActionUUID = failedActions[0]!.action.uuid;
+        const failedActionUUID = failedActions[0]!.action_uuid;
         const index = writeActions.findIndex(x => x.uuid===failedActionUUID);
         if( index===-1 ) throw new Error("noop: the failed action should be known to the writeActions.");
 

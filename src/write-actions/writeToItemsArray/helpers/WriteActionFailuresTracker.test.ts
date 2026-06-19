@@ -173,12 +173,12 @@ describe("gating writes on schema validity", () => {
     expect(tracker.get()[0]!.errors[0]!.type).toBe("schema");
   });
 
-  test("the offending item is recorded verbatim alongside the error", () => {
+  test("the offending item is recorded as tested_item on the failed outcome", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     tracker.testSchema(makeAction(invalidFlat), invalidFlat);
-    expect(schemaErrorOf(tracker).tested_item).toEqual(invalidFlat);
+    expect(tracker.get()[0]!.tested_item).toEqual(invalidFlat);
   });
 
   test("the Zod issues are carried through and point at the offending field", () => {
@@ -437,9 +437,9 @@ describe("merging sub-action failures under a parent", () => {
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
-      action: makeAction(subItem, "sub-action"),
+      action_uuid: "sub-action",
       errors: [
-        { type: "custom", message: "sub failure", item_pk: "sub-1", item: subItem },
+        { type: "custom", message: "sub failure", item_pk: "sub-1" },
       ],
       affected_items: [{ item_pk: "sub-1", item: subItem }],
     };
@@ -459,7 +459,7 @@ describe("merging sub-action failures under a parent", () => {
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
-      action: makeAction(subItem, "sub-action"),
+      action_uuid: "sub-action",
       errors: [{ type: "custom", message: "action-level failure" }],
       affected_items: [{ item_pk: "sub-1", item: subItem }],
     };
@@ -475,7 +475,7 @@ describe("merging sub-action failures under a parent", () => {
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
-      action: makeAction(subItem, "sub-action"),
+      action_uuid: "sub-action",
       errors: [{ type: "custom", message: "orphan", item_pk: "sub-1" }],
       affected_items: [{ item_pk: "sub-1" }],
     };
@@ -489,14 +489,14 @@ describe("merging sub-action failures under a parent", () => {
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
-      action: makeAction(subItem, "sub-action"),
+      action_uuid: "sub-action",
       errors: [{ type: "custom", message: "orphan" }], // no item_pk / affected_items → itemless
     };
     const parent = makeAction(validFlat, "parent");
     tracker.mergeUnderAction(parent, [subAction]);
     expect(tracker.length()).toBe(1);
     const failure = tracker.get()[0]!;
-    expect(failure.action.uuid).toBe("parent");
+    expect(failure.action_uuid).toBe("parent");
     expect(failure.errors[0]).toMatchObject({ type: "custom", message: "orphan" });
   });
 
@@ -508,14 +508,14 @@ describe("merging sub-action failures under a parent", () => {
     const subActions: WriteOutcomeFailed<FlatItem>[] = [
       {
         ok: false,
-        action: makeAction(subItem, "sub-a"),
-        errors: [{ type: "custom", message: "a", item_pk: "sub-1", item: subItem }],
+        action_uuid: "sub-a",
+        errors: [{ type: "custom", message: "a", item_pk: "sub-1" }],
         affected_items: [{ item_pk: "sub-1", item: subItem }],
       },
       {
         ok: false,
-        action: makeAction(otherItem, "sub-b"),
-        errors: [{ type: "custom", message: "b", item_pk: "sub-2", item: otherItem }],
+        action_uuid: "sub-b",
+        errors: [{ type: "custom", message: "b", item_pk: "sub-2" }],
         affected_items: [{ item_pk: "sub-2", item: otherItem }],
       },
     ];
@@ -532,9 +532,9 @@ describe("merging sub-action failures under a parent", () => {
     const parent = makeAction(validFlat, "parent");
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
-      action: makeAction(subItem, "sub-action"),
+      action_uuid: "sub-action",
       errors: [
-        { type: "custom", message: "sub failure", item_pk: "sub-1", item: subItem },
+        { type: "custom", message: "sub failure", item_pk: "sub-1" },
       ],
       affected_items: [{ item_pk: "sub-1", item: subItem }],
     };
@@ -549,9 +549,9 @@ describe("merging sub-action failures under a parent", () => {
     });
     const subAction: WriteOutcomeFailed<FlatItem> = {
       ok: false,
-      action: makeAction(subItem, "sub-action"),
+      action_uuid: "sub-action",
       errors: [
-        { type: "schema", issues: [], item_pk: "sub-1", item: subItem },
+        { type: "schema", issues: [], item_pk: "sub-1" },
       ],
       affected_items: [{ item_pk: "sub-1", item: subItem }],
     };
@@ -602,18 +602,18 @@ describe("snapshotting failures through get()", () => {
     expect(tracker.get()).toEqual([]);
   });
 
-  test("a snapshot reproduces the recorded action and its errors", () => {
+  test("a snapshot reports the recorded action uuid and its errors", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
     tracker.report(action, validFlat, { type: "custom", message: "boom" });
     const snapshot = tracker.get();
-    expect(snapshot[0]!.action).toEqual(action);
+    expect(snapshot[0]!.action_uuid).toBe(action.uuid);
     expect(snapshot[0]!.errors[0]!.type).toBe("custom");
   });
 
-  test("a snapshot is a deep copy disconnected from later snapshots", () => {
+  test("a snapshot is a fresh array — pushing to it leaves the tracker's failure count unchanged", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
@@ -622,11 +622,8 @@ describe("snapshotting failures through get()", () => {
       message: "original",
     });
     const first = tracker.get();
-    first[0]!.errors.push({ type: "custom", message: "injected" });
-    first[0]!.action.uuid = "mutated";
-    const second = tracker.get();
-    expect(second[0]!.errors.length).toBe(1);
-    expect(second[0]!.action.uuid).toBe("action-1");
+    first.push(first[0]!);
+    expect(tracker.get().length).toBe(1);
   });
 
   test("repeated snapshots are structurally equal", () => {
@@ -637,30 +634,33 @@ describe("snapshotting failures through get()", () => {
     expect(tracker.get()).toEqual(tracker.get());
   });
 
-  test("a snapshot holds copies, not the live action references", () => {
+  test("a snapshot keeps tested_item raw — a non-JSON value is preserved (not stripped) for a logger to redact", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
-    const action = makeAction(validFlat);
-    tracker.report(action, validFlat, { type: "custom" });
-    expect(tracker.get()[0]!.action).not.toBe(action);
-    expect(tracker.get()[0]!.action).toEqual(action);
+    // A resolved row carrying a non-JSON value (a function) that also fails the schema.
+    const offending = {
+      id: "1",
+      name: "no",
+      doWork: () => "side effect",
+    } as unknown as FlatItem;
+    tracker.testSchema(makeAction(offending), offending);
+    // tested_item is the raw resolved row (same reference) — nothing is dropped or normalised here.
+    expect(tracker.get()[0]!.tested_item).toBe(offending);
   });
 
-  test("a snapshot omits non-JSON values such as functions in a stored item", () => {
+  test("schema-error issues are JSON-safe by construction (no downstream clone needed)", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
-    tracker.report(makeAction(validFlat), validFlat, {
-      type: "schema",
-      issues: [],
-      tested_item: { id: "1", doWork: () => "side effect" },
-    });
-    const error = schemaErrorOf(tracker);
-    expect(error.tested_item).toEqual({ id: "1" });
+    tracker.testSchema(makeAction(invalidFlat), invalidFlat);
+    const issues = schemaErrorOf(tracker).issues;
+    expect(issues.length).toBeGreaterThan(0);
+    expect(() => JSON.stringify(issues)).not.toThrow();
+    expect(JSON.parse(JSON.stringify(issues))).toEqual(issues);
   });
 
-  test("snapshotting a failure whose stored item holds a circular reference succeeds", () => {
+  test("a snapshot of a failure whose item holds a circular reference does not throw", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
@@ -672,12 +672,14 @@ describe("snapshotting failures through get()", () => {
       message: "boom",
     });
     expect(() => tracker.get()).not.toThrow();
-    const error = tracker.get()[0]!.errors[0]!;
-    expect(error.type).toBe("custom");
-    if (error.type === "custom") expect(error.message).toBe("boom");
-    // The non-circular fields of the stored item survive the snapshot.
-    expect(error.item?.id).toBe("1");
-    expect(error.item?.name).toBe("abc");
+    const outcome = tracker.get()[0]!;
+    expect(outcome.errors[0]!.type).toBe("custom");
+    if (outcome.errors[0]!.type === "custom") {
+      expect(outcome.errors[0]!.message).toBe("boom");
+    }
+    // The offending item rides affected_items (raw); its non-circular fields are intact.
+    expect(outcome.affected_items?.[0]?.item?.id).toBe("1");
+    expect(outcome.affected_items?.[0]?.item?.name).toBe("abc");
   });
 });
 

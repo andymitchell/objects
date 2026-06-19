@@ -153,8 +153,6 @@ export type WriteError =
   | {
       type: "schema";
       issues: ZodIssue[];
-      /** The item that was tested in the schema. It should be the same as the reported failed_item, but this removes doubt. */
-      tested_item?: any;
       /** The (Zod) schema that is a jsonified `TreeNode`. `TreeNode` was replaced by JsonValueCapped because consumers (like ICollection) need the errors to be fully serialisable, and TreeNode had a) a Zod schema on it, b) a potentially-cyclical parent */
       serialised_schema?: JsonValueCapped;
     }
@@ -221,13 +219,12 @@ export type WriteError =
  * A `WriteError` enriched with the item context where the error occurred.
  *
  * @example
- * const ctx: WriteErrorContext<MyItem> = { type: 'missing_key', primary_key: 'id', item_pk: '123', item: myItem };
+ * const ctx: WriteErrorContext<MyItem> = { type: 'missing_key', primary_key: 'id', item_pk: '123' };
  */
 export type WriteErrorContext<
   T extends Record<string, any> = Record<string, any>,
 > = WriteError & {
   item_pk?: PrimaryKeyValue;
-  item?: T;
 };
 
 // ─── Affected Items ───
@@ -257,7 +254,7 @@ export type WriteAffectedItem<
  * The boundary-safe atom; `WriteOutcomeOk` composes `affected_items` back on.
  *
  * @example
- * if (outcome.ok) outcome.action.uuid;
+ * if (outcome.ok) outcome.action_uuid;
  */
 export type WriteOutcomeOkCore<
   T extends Record<string, any> = Record<string, any>,
@@ -265,7 +262,8 @@ export type WriteOutcomeOkCore<
   WF extends Record<string, any> = T,
 > = {
   ok: true;
-  action: WriteAction<T, W, WF>;
+  /** The submitted action's `uuid` — a boundary-safe identifier. The full action is not echoed here, so the outcome stays serialisable even when the action carried a non-JSON value. */
+  action_uuid: string;
 };
 
 /**
@@ -281,7 +279,8 @@ export type WriteOutcomeFailedCore<
   WF extends Record<string, any> = T,
 > = {
   ok: false;
-  action: WriteAction<T, W, WF>;
+  /** The `uuid` of the submitted action that failed — a boundary-safe identifier (the action body is not echoed). */
+  action_uuid: string;
   /** The action's errors; always at least one. A blocked action carries a single `blocked` error. */
   errors: [WriteErrorContext<T>, ...WriteErrorContext<T>[]];
   /** True if the action can never succeed (e.g. schema violation, permission denied). */
@@ -331,6 +330,12 @@ export type WriteOutcomeFailed<
   WF extends Record<string, any> = T,
 > = WriteOutcomeFailedCore<T, W, WF> & {
   affected_items?: WriteAffectedItem<T>[];
+  /**
+   * The resolved post-merge item that violated the schema — an in-process diagnostic for logging.
+   * Holds the offending value as-is (which may be non-JSON), so it never crosses a serialisation
+   * boundary: the `*Core` projection drops it, and a logger redacts it when recording.
+   */
+  tested_item?: T;
 };
 
 /**

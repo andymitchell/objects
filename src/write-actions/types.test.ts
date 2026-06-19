@@ -276,12 +276,7 @@ describe("3. WriteResult<T> / WriteOutcome<T> narrowing", () => {
       // Provide a dummy outcome to test compile-time narrowing
       const outcome: WriteOutcome<Flat> = {
         ok: true,
-        action: {
-          type: "write",
-          ts: 0,
-          uuid: "x",
-          payload: { type: "create", data: { id: "1" } },
-        },
+        action_uuid: "x",
       };
       // @ts-expect-error: outcome is WriteOutcome, must narrow to access errors
       const _errors = outcome.errors;
@@ -299,7 +294,6 @@ describe("4. WriteError discriminated union", () => {
       const error: WriteError = {} as WriteError;
       if (error.type === "schema") {
         const _issues = error.issues;
-        const _tested = error.tested_item;
       }
     });
 
@@ -490,5 +484,16 @@ describe("8. Schema <-> Type alignment", () => {
     expect(WriteResultSchema.safeParse({ ok: true, actions: [] }).success).toBe(
       true,
     );
+  });
+
+  it("a schema error without serialised_schema is schema-valid and round-trips (serialised_schema is optional)", () => {
+    // Schema serialisation is best-effort; when it cannot be produced the `schema` error omits
+    // serialised_schema entirely. The error — and a failed outcome carrying it — must still parse
+    // and losslessly round-trip JSON (the boundary safeParses these without any normalising clone).
+    const err = { type: "schema" as const, issues: [] };
+    expect(WriteErrorSchema.safeParse(err).success).toBe(true);
+    const outcome = { ok: false as const, action_uuid: "u1", errors: [err] };
+    expect(WriteOutcomeFailedSchema.safeParse(outcome).success).toBe(true);
+    expect(JSON.parse(JSON.stringify(outcome))).toEqual(outcome);
   });
 });

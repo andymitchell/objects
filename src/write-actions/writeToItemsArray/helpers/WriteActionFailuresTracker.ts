@@ -59,7 +59,7 @@ export default class WriteActionFailuresTracker<
   private findAction(
     action: WriteAction<T>,
   ): WriteOutcomeFailed<T> | undefined {
-    return this.failures.find((x) => deepEql(x.action, action));
+    return this.failures.find((x) => x.action_uuid === action.uuid);
   }
 
   /**
@@ -76,7 +76,6 @@ export default class WriteActionFailuresTracker<
     const errorContext: WriteErrorContext<T> = {
       ...errorDetails,
       item_pk: itemPk,
-      item,
     };
 
     let failedAction = this.findAction(action);
@@ -87,7 +86,7 @@ export default class WriteActionFailuresTracker<
     } else {
       failedAction = {
         ok: false,
-        action,
+        action_uuid: action.uuid,
         errors: [errorContext],
         affected_items: [],
       };
@@ -126,12 +125,26 @@ export default class WriteActionFailuresTracker<
         );
       }
 
+      // Zod issues can embed the offending input/received value, so normalise them to a JSON-safe
+      // form here — the slim error must stay serialisable without relying on a downstream clone.
+      const jsonSafeIssues: z.ZodIssue[] = JSON.parse(
+        JSON.stringify(
+          cloneToJsonSafe(result.error.issues, { skip_circular: true }),
+        ),
+      );
+
       this.record(action, item, {
         type: "schema",
-        issues: result.error.issues,
-        tested_item: item,
-        serialised_schema: serialisedSchema,
+        issues: jsonSafeIssues,
+        // Omit the key when serialisation fell into the catch above: `serialised_schema` is optional,
+        // and an explicit `undefined` would be a spurious key that complicates the JSON round-trip.
+        ...(serialisedSchema !== undefined ? { serialised_schema: serialisedSchema } : {}),
       });
+
+      // The resolved post-merge item is the offending row. Record it on the full outcome as a raw
+      // in-process diagnostic (a logger redacts it), keeping the error itself slim and serialisable.
+      const failedAction = this.findAction(action);
+      if (failedAction) failedAction.tested_item = item;
     }
     return result.success;
   }
@@ -156,7 +169,7 @@ export default class WriteActionFailuresTracker<
     } else {
       failedAction = {
         ok: false,
-        action,
+        action_uuid: action.uuid,
         errors: [errorContext],
         affected_items: [],
       };
@@ -184,7 +197,7 @@ export default class WriteActionFailuresTracker<
     } else {
       failedAction = {
         ok: false,
-        action,
+        action_uuid: action.uuid,
         errors: [{ type: "blocked", blocked_by_action_uuid }],
         affected_items: [],
       };
@@ -210,14 +223,14 @@ export default class WriteActionFailuresTracker<
         // Errors scoped to this item.
         for (const error of subAction.errors) {
           if (error.item_pk === subItem.item_pk) {
-            const { item_pk: _ipk, item: _item, ...errorBase } = error;
+            const { item_pk: _ipk, ...errorBase } = error;
             this.record(action, subItem.item, errorBase);
           }
         }
         // Errors with no item context apply to every merged item.
         for (const error of subAction.errors) {
           if (error.item_pk === undefined) {
-            const { item_pk: _ipk, item: _item, ...errorBase } = error;
+            const { item_pk: _ipk, ...errorBase } = error;
             this.record(action, subItem.item, errorBase);
           }
         }
@@ -227,7 +240,7 @@ export default class WriteActionFailuresTracker<
       if (!subAction.affected_items?.length) {
         for (const error of subAction.errors) {
           if (error.item_pk === undefined) {
-            const { item_pk: _ipk, item: _item, ...errorBase } = error;
+            const { item_pk: _ipk, ...errorBase } = error;
             this.reportActionError(action, errorBase);
           }
         }
@@ -240,14 +253,10 @@ export default class WriteActionFailuresTracker<
   }
 
   get(): WriteOutcomeFailed<T>[] {
-    // Snapshot is JSON-normalised so callers cannot reach tracker state through it.
-    // Circular references in stored items are resolved first so serialisation cannot throw.
-    return JSON.parse(
-      JSON.stringify(
-        cloneToJsonSafe(this.failures, {
-          skip_circular: true,
-        }),
-      ),
-    );
+    // Returns the full failure outcomes without JSON-normalisation. The boundary-safe fields
+    // (`action_uuid`, and the scalar-locator `errors` whose `issues` are already JSON-safe) are
+    // serialisable by construction; `tested_item` deliberately keeps the offending value raw for a
+    // logger to redact downstream. A shallow array copy stops a caller mutating the tracker's list.
+    return [...this.failures];
   }
 }

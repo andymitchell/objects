@@ -158,8 +158,7 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("schema"),
     issues: z.array(z.any()) as z.ZodType<z.ZodIssue[]>,
-    tested_item: z.any(),
-    serialised_schema: JsonValueSchema,
+    serialised_schema: JsonValueSchema.optional(),
   }),
   z.object({
     type: z.literal("missing_key"),
@@ -202,7 +201,6 @@ export function makeWriteErrorContextSchema<
   return WriteErrorSchema.and(
     z.object({
       item_pk: PrimaryKeyValueSchema.optional(),
-      item: (z.any() as z.ZodType<T | undefined>).optional(),
     }),
   ) as z.ZodType<WriteErrorContext<T>>;
 }
@@ -224,7 +222,7 @@ export function makeWriteOutcomeOkCoreSchema<
 >() {
   return z.object({
     ok: z.literal(true),
-    action: makeWriteActionSchema<T>(),
+    action_uuid: z.string(),
   });
 }
 export const WriteOutcomeOkCoreSchema = makeWriteOutcomeOkCoreSchema<any>();
@@ -237,7 +235,7 @@ export function makeWriteOutcomeFailedCoreSchema<
 >() {
   return z.object({
     ok: z.literal(false),
-    action: makeWriteActionSchema<T>(),
+    action_uuid: z.string(),
     // `errors` is a non-empty tuple `[WriteErrorContext, ...WriteErrorContext[]]`. `z.tuple([x], x)`
     // expresses that in the inferred type natively; v4's `.nonempty()` only enforces ≥1 at runtime
     // (it infers a plain `T[]`, dropping the compile-time guarantee). To relax later, switch to
@@ -290,6 +288,7 @@ export function makeWriteOutcomeFailedSchema<
     affected_items: z
       .array(WriteAffectedItemSchema as z.ZodType<WriteAffectedItem<T>>)
       .optional(),
+    tested_item: (z.any() as z.ZodType<T | undefined>).optional(),
   });
 }
 export const WriteOutcomeFailedSchema = makeWriteOutcomeFailedSchema<any>();

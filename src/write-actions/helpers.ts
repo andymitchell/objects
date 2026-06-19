@@ -31,7 +31,7 @@ export function getWriteFailures<T extends Record<string, any>, W extends Record
  *
  * @example
  * const successes = getWriteSuccesses(result);
- * successes.forEach(s => console.log(s.action.uuid));
+ * successes.forEach(s => console.log(s.action_uuid));
  */
 export function getWriteSuccesses<T extends Record<string, any>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(result: WriteResult<T, W, WF>): WriteOutcomeOk<T, W, WF>[] {
     return result.actions.filter((a): a is WriteOutcomeOk<T, W, WF> => a.ok);

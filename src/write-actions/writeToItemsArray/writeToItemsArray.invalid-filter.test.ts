@@ -364,6 +364,36 @@ describe("writeToItemsArray — invalid pull.items_where", () => {
         expect(result.changes.final_items[0]!.tags).toEqual(["b"]);
     });
 
+    // A scalar value-list member is a literal match target, never schema-parsed — so the engine's only defence
+    // against a non-JSON member reaching the JSON-roundtripped idempotency ledger is this static preflight. Each
+    // case rejects pre-mutation (final_items untouched), proving the one shared helper covers the engine too.
+    it("rejects a non-JSON (bigint) value-list member as invalid_filter, mutating nothing", () => {
+        const items: Sub[] = [{ id: "1", tags: ["a", "b"] }];
+        const result = writeToItemsArray([pullAction({ type: "pull", path: "tags", items_where: [5n], where: { id: "1" } })], items, SubSchema, subDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" });
+        expect(result.changes.final_items[0]!.tags).toEqual(["a", "b"]); // apply never ran — preflight rejected pre-mutation
+    });
+
+    it("rejects a non-JSON (Date) value-list member as invalid_filter, mutating nothing", () => {
+        const items: Sub[] = [{ id: "1", tags: ["a", "b"] }];
+        const result = writeToItemsArray([pullAction({ type: "pull", path: "tags", items_where: [new Date()], where: { id: "1" } })], items, SubSchema, subDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" });
+        expect(result.changes.final_items[0]!.tags).toEqual(["a", "b"]); // unchanged
+    });
+
+    it("rejects a non-finite value-list member as invalid_filter (a silent [Infinity]→[null] degrade otherwise), mutating nothing", () => {
+        const items: Sub[] = [{ id: "1", tags: ["a", "b"] }];
+        const result = writeToItemsArray([pullAction({ type: "pull", path: "tags", items_where: [Infinity], where: { id: "1" } })], items, SubSchema, subDdl);
+
+        expect(result.ok).toBe(false);
+        expect(getWriteFailures(result)[0]!.errors[0]).toMatchObject({ type: "invalid_filter", reason: "non_finite", where_path: "items_where.0" });
+        expect(result.changes.final_items[0]!.tags).toEqual(["a", "b"]); // unchanged
+    });
+
     it("rejects a serialisable-subset operand (a satisfiable non-finite bound) in an object items_where", () => {
         // $lt:Infinity is a legitimate match-all bound the schema walk accepts, so only the SerialisableJsonSubset
         // gate flags it — confirming the engine holds items_where operands to the JSON-roundtrip subset.

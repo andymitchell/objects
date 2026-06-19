@@ -59,18 +59,45 @@ export function collectActionWhereIssues(
             joinScope(prefix, payload.scope),
         ));
     } else if (payload.type === "pull") {
-        // Object-form items_where is a per-element WhereFilter (validated against the element schema); a
-        // scalar-array value list stays a value list — opaque, exactly as applyPull dispatches on it.
-        const itemsWhere = payload.items_where;
-        if (!Array.isArray(itemsWhere) && itemsWhere !== null && typeof itemsWhere === "object") {
-            const elementSchema = schema ? getZodSchemaAtSchemaDotPropPath(schema, payload.path as string) : undefined;
-            const elementPrefix = joinScope(prefix, payload.path as string);
-            for (const issue of validatorFor(elementSchema, options)(itemsWhere as WhereFilterDefinition<any>)) {
-                issues.push(prefixIssue(issue, elementPrefix));
-            }
-        }
+        issues.push(...validatePullItemsWhere(payload.items_where, schema, payload.path as string, options, prefix));
     }
 
+    return issues;
+}
+
+/**
+ * Validate a `pull`'s `items_where`, the one slot that takes two shapes (mirroring how `applyPull` dispatches):
+ * an OBJECT-form per-element `WhereFilter` (validated against the array element schema), or a SCALAR value-list
+ * ($pullAll-style) whose members are literal match targets. The members are NOT `where` operands, so the filter
+ * walk never sees them — yet they ride the JSON-roundtripped idempotency ledger like any operand, so hold each to
+ * the `SerialisableJsonSubset` (under the flag), reusing the shared operand walk. Both shapes are the caller's one
+ * filter slot, so both surface as `invalid_filter` — a scalar fault at `items_where.<i>`.
+ */
+function validatePullItemsWhere(
+    itemsWhere: unknown,
+    schema: ZodType<any> | undefined,
+    fieldPath: string,
+    options: { requireSerialisableJsonSubset?: boolean } | undefined,
+    prefix: string,
+): WhereFilterValidationIssue[] {
+    const issues: WhereFilterValidationIssue[] = [];
+    if (Array.isArray(itemsWhere)) {
+        // Scalar value-list: members are match targets, held to the JSON-roundtrip subset (incl. undefined, which
+        // drops to null and silently shifts the removal set) — only under the flag, like the rest of the tree.
+        if (options?.requireSerialisableJsonSubset) {
+            const itemsPrefix = joinScope(prefix, "items_where");
+            for (const issue of collectNonSerialisableWhereIssues(itemsWhere)) {
+                issues.push(prefixIssue(issue, itemsPrefix));
+            }
+        }
+    } else if (itemsWhere !== null && typeof itemsWhere === "object") {
+        // Object-form: a per-element WhereFilter validated against the array element schema.
+        const elementSchema = schema ? getZodSchemaAtSchemaDotPropPath(schema, fieldPath) : undefined;
+        const elementPrefix = joinScope(prefix, fieldPath);
+        for (const issue of validatorFor(elementSchema, options)(itemsWhere as WhereFilterDefinition<any>)) {
+            issues.push(prefixIssue(issue, elementPrefix));
+        }
+    }
     return issues;
 }
 

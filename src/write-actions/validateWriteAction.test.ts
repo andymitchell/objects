@@ -11,11 +11,13 @@ const SUBSET = { requireSerialisableJsonSubset: true } as const;
 /** Build a write action from a (sometimes deliberately out-of-contract) payload, for runtime testing. */
 const wa = (payload: unknown): WriteAction<Row> => ({ type: "write", ts: 0, uuid: "U", payload: payload as WriteAction<Row>["payload"] });
 
-// A schema with an object-array field, so a nested `array_scope.action.where` / `pull.items_where` resolves
-// to the element schema — exercising the whole-tree where gate (F1), not just the top-level `where`.
+// A schema with an object-array field (`children`) so a nested `array_scope.action.where` / object-form
+// `pull.items_where` resolves to the element schema, AND a scalar-array field (`tags`) so a `pull.items_where`
+// is a plain value-list — exercising the whole-tree where gate across BOTH `items_where` shapes.
 const NestedSchema = z.object({
     id: z.string(),
     children: z.array(z.object({ cid: z.string(), score: z.number().optional() }).strict()).optional(),
+    tags: z.array(z.number()).optional(),
 }).strict();
 type NestedRow = z.infer<typeof NestedSchema>;
 const wn = (payload: unknown): WriteAction<NestedRow> => ({ type: "write", ts: 0, uuid: "U", payload: payload as WriteAction<NestedRow>["payload"] });
@@ -106,6 +108,52 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
         it("honours the caller's options at nested levels too — without the flag, a satisfiable nested bound is accepted", () => {
             const a = wn({ type: "array_scope", scope: "children", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { score: { $lt: Infinity } } } });
             expect(validateWriteAction(a, NestedSchema)).toEqual([]);
+        });
+    });
+
+    // A pull on a SCALAR array carries `items_where` as a plain value-list (the match targets applyPull removes by
+    // deepEquals), NOT a where-filter — so the filter walk never inspects its members. Yet they ride the
+    // JSON-roundtripped idempotency ledger like any operand, so a non-JSON member must be rejected up-front, tagged
+    // to the same `invalid_filter`/`items_where.<i>` slot as the rest of the filter tree.
+    describe("scalar pull.items_where — value-list members held to the same subset", () => {
+        const pullTags = (members: unknown[]) => wn({ type: "pull", path: "tags", items_where: members, where: { id: "1" } });
+
+        it("rejects a non-finite member as invalid_filter/non_finite, indexed to its position", () => {
+            expect(validateWriteAction(pullTags([Infinity]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "non_finite", where_path: "items_where.0" }]);
+        });
+
+        it("rejects a NaN member as invalid_filter/non_finite (it degrades to null across the boundary)", () => {
+            expect(validateWriteAction(pullTags([NaN]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "non_finite", where_path: "items_where.0" }]);
+        });
+
+        it("rejects a non-JSON (bigint) member as invalid_filter/malformed", () => {
+            expect(validateWriteAction(pullTags([5n]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" }]);
+        });
+
+        it("rejects a non-JSON (Date) member as invalid_filter/malformed", () => {
+            expect(validateWriteAction(pullTags([new Date()]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" }]);
+        });
+
+        it("rejects an undefined member as invalid_filter/malformed (it shifts the removal set when dropped to null)", () => {
+            expect(validateWriteAction(pullTags([undefined]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "items_where.0" }]);
+        });
+
+        it("indexes the fault to the offending member, not always the first", () => {
+            expect(validateWriteAction(pullTags([1, Infinity]), NestedSchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "non_finite", where_path: "items_where.1" }]);
+        });
+
+        it("accepts a fully JSON-safe value-list (no over-rejection)", () => {
+            expect(validateWriteAction(pullTags([1, 2]), NestedSchema, SUBSET)).toEqual([]);
+        });
+
+        it("leaves the value-list opaque without the flag — the subset narrowing is off by default", () => {
+            expect(validateWriteAction(pullTags([Infinity]), NestedSchema)).toEqual([]);
         });
     });
 });

@@ -112,7 +112,10 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
     if( Array.isArray(object) ) {
         if( dotPath ) {
             for( let i = 0; i < object.length; i++ ) {
-                results = [...results, ..._getPropertySpreadingArrays(object[i], dotPath, traversalPath + `[${i}]`)];
+                // Append in place: `results = [...results, ...sub]` inside a loop re-copies the whole
+                // accumulator each iteration → O(N²), turning a large array spread into a DoS.
+                const sub = _getPropertySpreadingArrays(object[i], dotPath, traversalPath + `[${i}]`);
+                for( const r of sub ) results.push(r);
             }
         } else {
             

@@ -34,7 +34,7 @@ describe('getPropertySpreadingArrays test', () => {
     });
 
     test('non-array items are indexed', () => {
-        
+
         const result = getPropertySpreadingArrays(
             {log: [{id: 1}, {id: 2}]},
             'log.id'
@@ -44,7 +44,21 @@ describe('getPropertySpreadingArrays test', () => {
         ).toEqual([{"path":"log[0].id","value":1},{"path":"log[1].id","value":2}]);
 
     })
-    
+
+    test('large array spread resolves in linear time (no O(N^2) accumulator)', () => {
+        const N = 50_000;
+        const src = { items: Array.from({ length: N }, (_, i) => ({ id: `v${i}` })) };
+
+        const startedAt = Date.now();
+        const result = getPropertySpreadingArrays(src, 'items.id');
+        const elapsedMs = Date.now() - startedAt;
+
+        expect(result).toHaveLength(N);
+        expect(result[0]).toEqual({ path: 'items[0].id', value: 'v0' });
+        // The old `[...results, ...]`-in-a-loop accumulator was O(N^2) and took seconds at this N.
+        expect(elapsedMs).toBeLessThan(1000);
+    })
+
 });
 
 /*

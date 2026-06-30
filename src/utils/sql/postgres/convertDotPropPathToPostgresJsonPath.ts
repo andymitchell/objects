@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
+import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
 import type { DotPropPathConversionResult } from "../types.ts";
 
@@ -63,9 +64,40 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
     }
 
 
-    if( !castingMap[zodKind] ) return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}` } };
+    // An enum has no fixed cast entry — its column type is the scalar kind its members share — so resolve it from
+    // the schema (single-kind enums only: a mixed-scalar enum is routed to the raw-JSONB comparison path upstream
+    // by findMultiScalarUnionPaths and never reaches here). Every other kind keeps its direct map entry, including
+    // the existing treatment of an empty/unmapped cast as an unsupported kind.
+    const mappedCast = zodKind === 'enum' ? enumScalarCast(nodeMapForPath.schema) : castingMap[zodKind];
+
+    if( !mappedCast ) return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}` } };
     if( errorIfNotAsExpected && !errorIfNotAsExpected.includes(zodKind) ) return { success: false, error: { type: 'unexpected_kind', dotPropPath, message: `ZodKind Postgres cast was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${UNSAFE_WARNING}` } };
 
-    const cast = noCasting? '' : (castingMap[zodKind] ?? '');
+    const cast = noCasting? '' : mappedCast;
     return { success: true, expression: `(${columnName}${jsonbPath})${cast}` };
+}
+
+/**
+ * Postgres cast for an enum column, derived from the scalar type its members share.
+ *
+ * An enum has no fixed entry in the kind→cast map because its column type depends on its members: a string enum is
+ * a text column, a native numeric enum a numeric column. Members are read with {@link getEnumValues} (which drops a
+ * numeric enum's reverse-mapping), so this classification matches how `findMultiScalarUnionPaths` decides a field's
+ * shape — a single-scalar-kind enum reaches the cast and is resolved here; a mixed-scalar enum is diverted to the
+ * raw-JSONB comparison path upstream and never does.
+ *
+ * @param schema the enum's Zod schema, taken from the path's TreeNode (`undefined` when the tree was built without
+ * schema references).
+ * @returns the cast — `::text` (string), `::numeric` (number), or `::boolean` (boolean) — or `undefined` for an
+ * empty, mixed-scalar, non-scalar, or schema-less enum, so the caller raises a clean `unsupported_kind` error
+ * instead of emitting a cast that would fail at query time.
+ */
+function enumScalarCast(schema: AnyZodSchema | undefined): string | undefined {
+    if( !schema ) return undefined;
+    const memberKinds = new Set(getEnumValues(schema).map((member) => typeof member));
+    if( memberKinds.size !== 1 ) return undefined; // empty or mixed-scalar enum — no single column type
+    if( memberKinds.has('string') ) return '::text';
+    if( memberKinds.has('number') ) return '::numeric';
+    if( memberKinds.has('boolean') ) return '::boolean';
+    return undefined; // bigint / symbol / object member — not a representable scalar cast
 }

@@ -312,6 +312,31 @@ describe('postgres where clause builder', () => {
         });
     });
 
+    // A BARE enum (not in a multi-scalar union) is a single concrete scalar column: its members share one runtime
+    // type, so the emitter casts the JSONB accessor by that kind — a string enum to ::text, a numeric (TS) enum to
+    // ::numeric — reproducing matchJavascriptObject's strict `===`. Pin the emitted cast so the enum arm cannot
+    // silently regress to the unsupported-kind path (which previously failed the whole clause).
+    describe('a bare enum field is cast by its members\' shared scalar type', () => {
+        test('a string enum casts the JSONB accessor to ::text', () => {
+            const Schema = z.object({ id: z.string(), status: z.enum(['active', 'archived']) });
+            const pm = new PropertyTranslatorPgJsonbSchema(Schema, 'recordColumn');
+            const clause = prepareWhereClauseForPg({ status: 'active' }, pm);
+            expect(clause.success).toBe(true);
+            const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
+            expect(stmt).toContain("->>'status')::text");
+        });
+
+        test('a numeric (TS) enum casts the JSONB accessor to ::numeric', () => {
+            enum Rank { Low = 0, High = 1 }
+            const Schema = z.object({ id: z.string(), rank: z.enum(Rank) });
+            const pm = new PropertyTranslatorPgJsonbSchema(Schema, 'recordColumn');
+            const clause = prepareWhereClauseForPg({ rank: Rank.Low }, pm);
+            expect(clause.success).toBe(true);
+            const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
+            expect(stmt).toContain("->>'rank')::numeric");
+        });
+    });
+
     // A bare `{ secret: null }` filter arrives as `filter === null`, not `{ $eq: null }`, so it misses the
     // multi-scalar branch's operator guards and falls through to the first-arm typed cast — e.g.
     // `((col->>'secret')::boolean) IS NULL`, which cast-errors on a string/number row. A null filter on a

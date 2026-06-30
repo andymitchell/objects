@@ -3837,6 +3837,38 @@ export function standardTests(testConfig: StandardTestConfig) {
                 expect(await matchJavascriptObject({ id: 'empty-el', items: [{ tags: [] }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema)).toBe(true);
             });
         });
+
+        // A bare enum field is a single concrete scalar column — its members share one runtime type — so the
+        // value-driven JS matcher and the schema-driven SQL emitter MUST agree on conforming data. A string enum is
+        // a text column, a native numeric enum a numeric column; the emitter casts by the members' shared kind,
+        // reproducing the JS matcher's strict `===` (a numeric member never matches a same-digit string). (A
+        // mixed-scalar enum is multi-scalar and compared as a raw JSON value — pinned separately.)
+        describe('a bare enum field compares by its members\' shared scalar type (JS = Postgres = SQLite)', () => {
+            const StringEnum = z.object({ id: z.string(), status: z.enum(['active', 'archived']) });
+            type StringRow = z.infer<typeof StringEnum>;
+            const active: StringRow = { id: 'a', status: 'active' };
+            const archived: StringRow = { id: 'b', status: 'archived' };
+
+            test('string-enum equality: the active row matches { status: "active" }, the archived row does not', async () => {
+                expect(await matchJavascriptObject(active, { status: 'active' }, StringEnum)).toBe(true);
+                expect(await matchJavascriptObject(archived, { status: 'active' }, StringEnum)).toBe(false);
+            });
+
+            test('string-enum $in: the active row matches { $in: ["active"] }, the archived row does not', async () => {
+                expect(await matchJavascriptObject(active, { status: { $in: ['active'] } }, StringEnum)).toBe(true);
+                expect(await matchJavascriptObject(archived, { status: { $in: ['active'] } }, StringEnum)).toBe(false);
+            });
+
+            // eslint-disable-next-line no-shadow -- a local TS enum is the only way to produce numeric enum members
+            enum Rank { Low = 0, High = 1 }
+            const NumericEnum = z.object({ id: z.string(), rank: z.enum(Rank) });
+            type NumericRow = z.infer<typeof NumericEnum>;
+
+            test('numeric-enum equality matches by value, never by a same-digit string (strict ===)', async () => {
+                expect(await matchJavascriptObject({ id: 'c', rank: Rank.Low } satisfies NumericRow, { rank: Rank.Low }, NumericEnum)).toBe(true);
+                expect(await matchJavascriptObject({ id: 'd', rank: Rank.High } satisfies NumericRow, { rank: Rank.Low }, NumericEnum)).toBe(false);
+            });
+        });
     });
 
 }

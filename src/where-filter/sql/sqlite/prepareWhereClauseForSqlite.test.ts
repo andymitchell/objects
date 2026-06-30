@@ -211,6 +211,48 @@ describe('sqlite where clause builder', () => {
         });
     });
 
+    // The array operators $in/$nin/$all return from the array-spread branch via the bare json_extract identifier,
+    // BEFORE the multi-scalar strict path — so for a mixed-scalar element array `['7']` would wrongly match
+    // `{ $in: [7] }`. When the element path is multi-scalar they must compare by json_type tag + value (JSON 7 ≠
+    // "7"), matching matchJavascriptObject. (F3 covered $elemMatch / plain containment only.)
+    describe('mixed-scalar array operators ($in/$nin/$all) compare the raw element value', () => {
+        const Schema = z.object({ id: z.string(), tags: z.array(z.union([z.number(), z.string()])) });
+        type Row = z.infer<typeof Schema>;
+
+        test('$in: a numeric element matches { $in: [7] }; a string "7" element does not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '1', tags: [7] }, { tags: { $in: [7] } }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '2', tags: ['7'] }, { tags: { $in: [7] } }, Schema)).toBe(false);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '3', tags: ['7'] }, { tags: { $in: ['7'] } }, Schema)).toBe(true);
+        });
+
+        test('$nin: a numeric element is excluded by { $nin: [7] }; a string "7" element is not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '4', tags: [7] }, { tags: { $nin: [7] } }, Schema)).toBe(false);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '5', tags: ['7'] }, { tags: { $nin: [7] } }, Schema)).toBe(true);
+        });
+
+        test('$all: a numeric element satisfies { $all: [7] }; a string "7" element does not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '6', tags: [7] }, { tags: { $all: [7] } }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '7', tags: ['7'] }, { tags: { $all: [7] } }, Schema)).toBe(false);
+        });
+    });
+
+    // G2: a `string | enum(numericEnum)` field is multi-scalar (a numeric enum is a number, not a string), so a
+    // numeric member must not match a string of the same digits, matching matchJavascriptObject's `===`.
+    describe('a string | numeric-enum field compares by strict JSON value-equality', () => {
+        enum Code { Zero = 0, One = 1 }
+        const Schema = z.object({ id: z.string(), kind: z.union([z.string(), z.enum(Code)]) });
+        type Row = z.infer<typeof Schema>;
+
+        test('a numeric-enum 0 row matches { kind: 0 } but not a string "0" row', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '1', kind: 0 }, { kind: 0 }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '2', kind: '0' }, { kind: 0 }, Schema)).toBe(false);
+        });
+        test('a string "0" row matches { kind: "0" } but the numeric-enum 0 row does not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '3', kind: '0' }, { kind: '0' }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '4', kind: 0 }, { kind: '0' }, Schema)).toBe(false);
+        });
+    });
+
     // A bare `{ secret: null }` filter arrives as `filter === null`, not `{ $eq: null }`, so it misses the
     // multi-scalar branch's operator guards and falls through to the first-arm typed path. A null filter on a
     // multi-scalar field must match JSON null (and a missing path) and return false for any other type, never
@@ -252,6 +294,26 @@ describe('sqlite where clause builder', () => {
         test('{ $eq: NaN } matches no row (nothing equals NaN) — including a JSON-null row', async () => {
             expect(await matchJavascriptObjectInDb<Row>({ id: '4', secret: 7 }, { secret: { $eq: NaN } }, SecretSchema)).toBe(false);
             expect(await matchJavascriptObjectInDb<Row>({ id: '6', secret: null }, { secret: { $eq: NaN } }, SecretSchema)).toBe(false);
+        });
+    });
+
+    // SQLite's identifier does not hard-cast (json_extract is dynamically typed), so a $not guard does not
+    // cast-error the way Postgres's first-arm `::boolean` does. This pins parity with matchJavascriptObject so the
+    // behaviour stays correct if the identifier strategy ever changes.
+    describe('a $not on a multi-scalar field matches a row of another scalar kind (no type conflation)', () => {
+        const BoolFirst = z.object({ id: z.string(), secret: z.union([z.boolean(), z.number(), z.string(), z.null()]) });
+        const StringFirst = z.object({ id: z.string(), secret: z.union([z.string(), z.number(), z.boolean(), z.null()]) });
+        type Row = z.infer<typeof BoolFirst>;
+
+        test('boolean-first union: { $not: { $eq: true } } matches a string row and excludes the true row', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '1', secret: 'hush' }, { secret: { $not: { $eq: true } } }, BoolFirst)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '2', secret: 7 }, { secret: { $not: { $eq: true } } }, BoolFirst)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '3', secret: true }, { secret: { $not: { $eq: true } } }, BoolFirst)).toBe(false);
+        });
+
+        test('string-first union (the other arm order): { $not: { $eq: true } } matches a numeric row and excludes the true row', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '4', secret: 7 }, { secret: { $not: { $eq: true } } }, StringFirst)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '5', secret: true }, { secret: { $not: { $eq: true } } }, StringFirst)).toBe(false);
         });
     });
 

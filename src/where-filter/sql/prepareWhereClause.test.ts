@@ -155,6 +155,33 @@ describe('prepareWhereClause', () => {
         });
     });
 
+    describe('schema-driven rejection of value-normalizing schemas', () => {
+
+        const CoerceSchema = z.object({ id: z.string(), n: z.coerce.number() });
+
+        it('rejects a z.coerce.* field with a schema_normalizes error naming the path (pg)', () => {
+            const result = prepareWhereClause('pg', { n: 1 }, new PropertyTranslatorPgJsonbSchema(CoerceSchema, COLUMN));
+            expect(result.success).toBe(false);
+            if (!result.success) {
+                const normalizes = result.errors.find((e) => e.kind === 'schema_normalizes');
+                expect(normalizes?.kind).toBe('schema_normalizes');
+                if (normalizes?.kind === 'schema_normalizes') expect(normalizes.dotprop_path).toBe('n');
+            }
+        });
+
+        it('rejects a value-normalizing field with a schema_normalizes error (sqlite)', () => {
+            const result = prepareWhereClause('sqlite', { n: 1 }, new PropertyTranslatorSqliteJsonSchema(CoerceSchema, COLUMN));
+            expect(result.success).toBe(false);
+            if (!result.success) expect(result.errors.some((e) => e.kind === 'schema_normalizes')).toBe(true);
+        });
+
+        it('does not reject a plain (non-normalizing) number field', () => {
+            const PlainSchema = z.object({ id: z.string(), n: z.number() });
+            const result = prepareWhereClause('pg', { n: 1 }, new PropertyTranslatorPgJsonbSchema(PlainSchema, COLUMN));
+            expect(result.success).toBe(true);
+        });
+    });
+
     describe('caller contract (compile-time types)', () => {
 
         it('the dialect parameter is exactly the SqlDialect union', () => {
@@ -173,7 +200,7 @@ describe('prepareWhereClause', () => {
             expectTypeOf<Translator['dialect']>().toEqualTypeOf<SqlDialect>();
         });
 
-        it('WhereClauseError union includes dialect_mismatch and schema_ambiguous and is exhaustively narrowable', () => {
+        it('WhereClauseError union includes dialect_mismatch, schema_ambiguous and schema_normalizes and is exhaustively narrowable', () => {
             // Exhaustiveness check: every kind must be handled or this fails to compile.
             const exhaustive = (e: WhereClauseError): string => {
                 switch (e.kind) {
@@ -181,6 +208,7 @@ describe('prepareWhereClause', () => {
                     case 'path_conversion': return e.message;
                     case 'dialect_mismatch': return e.message;
                     case 'schema_ambiguous': return e.message;
+                    case 'schema_normalizes': return e.message;
                     default: {
                         const _never: never = e;
                         return _never;

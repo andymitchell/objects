@@ -325,6 +325,26 @@ describe("findMultiScalarUnionPaths — cross-arm aggregation", () => {
     });
 });
 
+describe("findMultiScalarUnionPaths — enum members classified by runtime value", () => {
+    enum NumE { A = 0, B = 1, C = 2 }
+    enum StrE { A = "a", B = "b" }
+
+    test("flags string | enum(numeric) as multi-scalar — a numeric enum is a number, not a string", () => {
+        const [hit] = findMultiScalarUnionPaths(z.object({ kind: z.union([z.string(), z.enum(NumE)]) }));
+        expect(hit?.dotprop_path).toBe("kind");
+        expect(hit?.scalar_kinds.slice().sort()).toEqual(["number", "string"]);
+    });
+
+    test("does NOT flag string | enum(string) — both arms are string", () => {
+        expect(findMultiScalarUnionPaths(z.object({ kind: z.union([z.string(), z.enum(StrE)]) }))).toEqual([]);
+    });
+
+    test("does NOT flag a bare numeric enum — a single scalar kind", () => {
+        expect(findMultiScalarUnionPaths(z.object({ kind: z.enum(NumE) }))).toEqual([]);
+        expect(findShapeAmbiguousPaths(z.object({ kind: z.enum(NumE) }))).toEqual([]);
+    });
+});
+
 /**
  * The load-bearing decision is that `scalar|object` (no array) is representable and must NOT be rejected. The real
  * `ContactSchema.contact.locations` is exactly that — an array whose element is `string | number | object` — and is

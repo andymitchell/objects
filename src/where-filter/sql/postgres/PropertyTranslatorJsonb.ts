@@ -5,6 +5,7 @@ import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValu
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/schema-tree.ts";
 import { findShapeAmbiguousPaths, findMultiScalarUnionPaths } from "../../../dot-prop-paths/shape-ambiguity.ts";
+import { findNormalizingPaths } from "../../../dot-prop-paths/schema-normalization.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.ts";
 import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
@@ -177,15 +178,28 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     }
                 }
                 const saResolved = sa;
+                // A mixed-scalar element array compares the RAW JSONB element value (JSON 7 ≠ "7"), not the text
+                // identifier — so $in/$nin/$all stay type-faithful like matchJavascriptObject. Without this the text
+                // `#>> '{}'` identifier coerces a numeric filter against a string element. (F3 covered $elemMatch /
+                // plain containment only.)
+                const multiScalarElement = this.multiScalarPaths.has(dotpropPath);
                 // $in on array: at least one element must be in the list
                 if (isValueComparisonIn(filter)) {
                     if (filter.$in.length === 0) return '1 = 0';
+                    if (multiScalarElement) {
+                        const vals = filter.$in.map(v => this.toJsonbParam(v, statementArguments));
+                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} IN (${vals.join(', ')}))`;
+                    }
                     const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
                     return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
                 // $nin on array: no element may be in the list
                 if (isValueComparisonNin(filter)) {
                     if (filter.$nin.length === 0) return '1 = 1';
+                    if (multiScalarElement) {
+                        const vals = filter.$nin.map(v => this.toJsonbParam(v, statementArguments));
+                        return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} IN (${vals.join(', ')}))`;
+                    }
                     const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
                     return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
@@ -196,6 +210,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                             // Object element: use @> containment on the raw JSONB element
                             const placeholder = this.generatePlaceholder(v, statementArguments);
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} @> ${placeholder}::jsonb)`;
+                        }
+                        if (multiScalarElement && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${this.toJsonbParam(v, statementArguments)})`;
                         }
                         const placeholder = this.generatePlaceholder(v, statementArguments);
                         return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
@@ -403,7 +420,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         if (isValueComparisonNot(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
             const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter, customRawJsonbIdentifier);
-            return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
+            // A top-level multi-scalar field has no single column type — the outer null-guard must read the raw
+            // (uncast) JSONB, or a first-arm cast (e.g. ::boolean) errors on a row of another scalar kind even though
+            // the inner comparison is already raw. Mirrors the bare-null fix. (A spread element guards via its
+            // uncast text identifier, which does not cast-error.)
+            const guardIdentifier = (this.multiScalarPaths.has(dotpropPath) && customSqlIdentifier === undefined)
+                ? this.rawJsonbAccessor(dotpropPath)
+                : sqlIdentifier;
+            return optionalWrapperNullMatches(guardIdentifier, `NOT (${innerSql})`);
         }
         // $exists — use jsonb_typeof on the raw jsonb value (-> not ->>) so JSON null
         // (a present value) is distinguished from a missing path. `->>` text-extracts
@@ -530,11 +554,18 @@ export class PropertyTranslatorPgJsonbSchema<T extends Record<string, any> = Rec
     constructor(schema: z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?: boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
-        this.schemaErrors = findShapeAmbiguousPaths(schema).map((a): WhereClauseError => ({
-            kind: 'schema_ambiguous',
-            dotprop_path: a.dotprop_path,
-            message: `Field '${a.dotprop_path}' has a shape-ambiguous schema (an array coexists with a non-array variant: ${a.arm_kinds.join(' | ')}); a schema-driven SQL engine cannot represent it.`,
-        }));
+        this.schemaErrors = [
+            ...findShapeAmbiguousPaths(schema).map((a): WhereClauseError => ({
+                kind: 'schema_ambiguous',
+                dotprop_path: a.dotprop_path,
+                message: `Field '${a.dotprop_path}' has a shape-ambiguous schema (an array coexists with a non-array variant: ${a.arm_kinds.join(' | ')}); a schema-driven SQL engine cannot represent it.`,
+            })),
+            ...findNormalizingPaths(schema).map((n): WhereClauseError => ({
+                kind: 'schema_normalizes',
+                dotprop_path: n.dotprop_path,
+                message: `Field '${n.dotprop_path}' has a value-normalizing schema (${n.reason}); a schema-driven SQL engine compares the raw stored value and cannot replicate the coercion/transform.`,
+            })),
+        ];
         this.multiScalarPaths = new Set(findMultiScalarUnionPaths(schema).map((m) => m.dotprop_path));
     }
 }

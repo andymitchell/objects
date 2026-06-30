@@ -5,6 +5,7 @@ import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValu
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/schema-tree.ts";
 import { findShapeAmbiguousPaths, findMultiScalarUnionPaths } from "../../../dot-prop-paths/shape-ambiguity.ts";
+import { findNormalizingPaths } from "../../../dot-prop-paths/schema-normalization.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.ts";
 import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
@@ -72,6 +73,19 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         }
         statementArguments.push(value);
         return '?';
+    }
+
+    /**
+     * Strict JSON value-equality of a multi-scalar value: the json_type tag plus the value, so a number, boolean and
+     * string of the same digits never coerce together (matching matchJavascriptObject's `===`). json_extract alone
+     * returns 1 for both JSON `true` and `1`, so the type tag is load-bearing. Shared by the leaf comparison and the
+     * array-operator ($in/$nin/$all) spread paths.
+     */
+    protected strictMultiScalarMatch(typeExpr: string, valueExpr: string, v: string | number | boolean, statementArguments: PreparedStatementArgument[]): string {
+        if (typeof v === 'boolean') return `${typeExpr} = '${v ? 'true' : 'false'}'`;
+        const ph = this.generatePlaceholder(v, statementArguments);
+        if (typeof v === 'number') return `(${typeExpr} IN ('integer', 'real') AND ${valueExpr} = ${ph})`;
+        return `(${typeExpr} = 'text' AND ${valueExpr} = ${ph})`;
     }
 
     /**
@@ -144,13 +158,27 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                     }
                 }
                 const saResolved = sa;
+                // A mixed-scalar element array compares each element by strict JSON value-equality (json_type tag +
+                // value, so JSON 7 ≠ "7"), not the bare json_extract identifier — keeping $in/$nin/$all faithful to
+                // matchJavascriptObject. (F3 covered $elemMatch / plain containment only.)
+                const multiScalarElement = this.multiScalarPaths.has(dotpropPath);
                 // $in on array: at least one element must be in the list
                 if (isValueComparisonIn(filter)) {
+                    if (multiScalarElement) {
+                        if (filter.$in.length === 0) return '1 = 0';
+                        const conds = filter.$in.map(v => this.strictMultiScalarMatch(saResolved.output_type, saResolved.output_column, v, statementArguments));
+                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE (${conds.join(' OR ')}))`;
+                    }
                     const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
                     return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
                 // $nin on array: no element may be in the list
                 if (isValueComparisonNin(filter)) {
+                    if (multiScalarElement) {
+                        if (filter.$nin.length === 0) return '1 = 1';
+                        const conds = filter.$nin.map(v => this.strictMultiScalarMatch(saResolved.output_type, saResolved.output_column, v, statementArguments));
+                        return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE (${conds.join(' OR ')}))`;
+                    }
                     const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
                     return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
                 }
@@ -165,6 +193,10 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                                 return `json_extract(${saResolved.output_column}, '$.${k}') = ${placeholder}`;
                             });
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${keyConditions.join(' AND ')})`;
+                        }
+                        if (multiScalarElement && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+                            const strictCond = this.strictMultiScalarMatch(saResolved.output_type, saResolved.output_column, v, statementArguments);
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${strictCond})`;
                         }
                         const placeholder = this.generatePlaceholder(v, statementArguments);
                         return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
@@ -284,12 +316,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             const jsonPath = '$.' + dotpropPath.split('.').join('.');
             const typeExpr = customSpread?.typeExpr ?? `json_type(${this.sqlColumnName}, '${jsonPath}')`;
             const valueExpr = customSpread?.valueExpr ?? `json_extract(${this.sqlColumnName}, '${jsonPath}')`;
-            const strict = (v: string | number | boolean): string => {
-                if (typeof v === 'boolean') return `${typeExpr} = '${v ? 'true' : 'false'}'`;
-                const ph = this.generatePlaceholder(v, statementArguments);
-                if (typeof v === 'number') return `(${typeExpr} IN ('integer', 'real') AND ${valueExpr} = ${ph})`;
-                return `(${typeExpr} = 'text' AND ${valueExpr} = ${ph})`;
-            };
+            const strict = (v: string | number | boolean): string => this.strictMultiScalarMatch(typeExpr, valueExpr, v, statementArguments);
             if (isValueComparisonEq(filter)) {
                 if (filter.$eq === null) return `(${typeExpr} IS NULL OR ${typeExpr} = 'null')`;
                 // Nothing equals NaN — short-circuit to a constant rather than the strict comparison. See MONGO-DIVERGENCES.md §7.
@@ -509,11 +536,18 @@ export class PropertyTranslatorSqliteJsonSchema<T extends Record<string, any> = 
     constructor(schema: z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?: boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
-        this.schemaErrors = findShapeAmbiguousPaths(schema).map((a): WhereClauseError => ({
-            kind: 'schema_ambiguous',
-            dotprop_path: a.dotprop_path,
-            message: `Field '${a.dotprop_path}' has a shape-ambiguous schema (an array coexists with a non-array variant: ${a.arm_kinds.join(' | ')}); a schema-driven SQL engine cannot represent it.`,
-        }));
+        this.schemaErrors = [
+            ...findShapeAmbiguousPaths(schema).map((a): WhereClauseError => ({
+                kind: 'schema_ambiguous',
+                dotprop_path: a.dotprop_path,
+                message: `Field '${a.dotprop_path}' has a shape-ambiguous schema (an array coexists with a non-array variant: ${a.arm_kinds.join(' | ')}); a schema-driven SQL engine cannot represent it.`,
+            })),
+            ...findNormalizingPaths(schema).map((n): WhereClauseError => ({
+                kind: 'schema_normalizes',
+                dotprop_path: n.dotprop_path,
+                message: `Field '${n.dotprop_path}' has a value-normalizing schema (${n.reason}); a schema-driven SQL engine compares the raw stored value and cannot replicate the coercion/transform.`,
+            })),
+        ];
         this.multiScalarPaths = new Set(findMultiScalarUnionPaths(schema).map((m) => m.dotprop_path));
     }
 }

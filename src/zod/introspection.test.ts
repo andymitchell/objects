@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { objectRejectsUnknownKeys, getSchemaChildren, getLiteralValues, getZodKind } from "./introspection.ts";
+import { objectRejectsUnknownKeys, getSchemaChildren, getLiteralValues, getEnumValues, getZodKind } from "./introspection.ts";
 
 /**
  * `objectRejectsUnknownKeys` reads zod's UNDOCUMENTED `_zod.def.catchall`. These tests pin its behaviour to
@@ -133,5 +133,36 @@ describe("getLiteralValues (pinned to the installed zod)", () => {
         const big = getLiteralValues(z.literal(5n));
         expect(big.length).toBe(1);
         expect(typeof big[0]).toBe("bigint");
+    });
+});
+
+/**
+ * `getEnumValues` reads `_zod.def.entries`. Pinned because a native numeric enum's reverse mapping makes the
+ * accepted values un-readable from the entries object alone — so a consumer deciding a column's scalar kind can
+ * tell a numeric enum from a string one.
+ */
+describe("getEnumValues (pinned to the installed zod)", () => {
+    it("returns a string enum's string members", () => {
+        expect([...getEnumValues(z.enum(["a", "b"]))].sort()).toEqual(["a", "b"]);
+    });
+
+    it("returns a native numeric enum's numbers (not the reverse-mapped member names)", () => {
+        enum NumE { A = 0, B = 1, C = 2 }
+        const vals = getEnumValues(z.enum(NumE));
+        expect([...vals].sort()).toEqual([0, 1, 2]);
+        expect(vals.every((v) => typeof v === "number")).toBe(true);
+    });
+
+    it("returns a native string enum's string values (not its keys)", () => {
+        enum StrE { A = "a", B = "b" }
+        expect([...getEnumValues(z.enum(StrE))].sort()).toEqual(["a", "b"]);
+    });
+
+    it("returns both runtime types for a mixed enum", () => {
+        enum MixedE { A = "a", B = 1 }
+        const vals = getEnumValues(z.enum(MixedE));
+        expect(vals).toContain("a");
+        expect(vals).toContain(1);
+        expect(new Set(vals.map((v) => typeof v))).toEqual(new Set(["string", "number"]));
     });
 });

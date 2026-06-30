@@ -242,6 +242,49 @@ describe('postgres where clause builder', () => {
         });
     });
 
+    // The array operators $in/$nin/$all return from the array-spread branch via the text identifier, BEFORE the
+    // multi-scalar raw path — so for a mixed-scalar element array `['7']` would wrongly match `{ $in: [7] }`. When
+    // the element path is multi-scalar they must compare the raw JSON element value (numeric 7 ≠ string "7"),
+    // matching matchJavascriptObject's intersection/`===` semantics.
+    describe('mixed-scalar array operators ($in/$nin/$all) compare the raw element value', () => {
+        const Schema = z.object({ id: z.string(), tags: z.array(z.union([z.number(), z.string()])) });
+        type Row = z.infer<typeof Schema>;
+
+        test('$in: a numeric element matches { $in: [7] }; a string "7" element does not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '1', tags: [7] }, { tags: { $in: [7] } }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '2', tags: ['7'] }, { tags: { $in: [7] } }, Schema)).toBe(false);
+            // and symmetrically, the string element matches the string filter
+            expect(await matchJavascriptObjectInDb<Row>({ id: '3', tags: ['7'] }, { tags: { $in: ['7'] } }, Schema)).toBe(true);
+        });
+
+        test('$nin: a numeric element is excluded by { $nin: [7] }; a string "7" element is not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '4', tags: [7] }, { tags: { $nin: [7] } }, Schema)).toBe(false);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '5', tags: ['7'] }, { tags: { $nin: [7] } }, Schema)).toBe(true);
+        });
+
+        test('$all: a numeric element satisfies { $all: [7] }; a string "7" element does not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '6', tags: [7] }, { tags: { $all: [7] } }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '7', tags: ['7'] }, { tags: { $all: [7] } }, Schema)).toBe(false);
+        });
+    });
+
+    // G2: a `string | enum(numericEnum)` field is multi-scalar (a numeric enum is a number, not a string), so a
+    // numeric member must not match a string of the same digits, matching matchJavascriptObject's `===`.
+    describe('a string | numeric-enum field compares by strict JSON value-equality', () => {
+        enum Code { Zero = 0, One = 1 }
+        const Schema = z.object({ id: z.string(), kind: z.union([z.string(), z.enum(Code)]) });
+        type Row = z.infer<typeof Schema>;
+
+        test('a numeric-enum 0 row matches { kind: 0 } but not a string "0" row', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '1', kind: 0 }, { kind: 0 }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '2', kind: '0' }, { kind: 0 }, Schema)).toBe(false);
+        });
+        test('a string "0" row matches { kind: "0" } but the numeric-enum 0 row does not', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '3', kind: '0' }, { kind: '0' }, Schema)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '4', kind: 0 }, { kind: '0' }, Schema)).toBe(false);
+        });
+    });
+
     // A bare `{ secret: null }` filter arrives as `filter === null`, not `{ $eq: null }`, so it misses the
     // multi-scalar branch's operator guards and falls through to the first-arm typed cast — e.g.
     // `((col->>'secret')::boolean) IS NULL`, which cast-errors on a string/number row. A null filter on a
@@ -284,6 +327,26 @@ describe('postgres where clause builder', () => {
         test('{ $eq: NaN } matches no row (nothing equals NaN) — including a JSON-null row', async () => {
             expect(await matchJavascriptObjectInDb<Row>({ id: '4', secret: 7 }, { secret: { $eq: NaN } }, SecretSchema)).toBe(false);
             expect(await matchJavascriptObjectInDb<Row>({ id: '6', secret: null }, { secret: { $eq: NaN } }, SecretSchema)).toBe(false);
+        });
+    });
+
+    // The $not handler builds its outer null-guard from the first-arm cast (e.g. `((col->>'secret')::boolean) IS
+    // NULL`), which cast-errors on a row of another scalar kind — even though the inner comparison is already raw.
+    // On a multi-scalar field the guard must read the raw (uncast) JSONB, mirroring the bare-null fix.
+    describe('a $not on a multi-scalar field does not cast-error on a row of another scalar kind', () => {
+        const BoolFirst = z.object({ id: z.string(), secret: z.union([z.boolean(), z.number(), z.string(), z.null()]) });
+        const StringFirst = z.object({ id: z.string(), secret: z.union([z.string(), z.number(), z.boolean(), z.null()]) });
+        type Row = z.infer<typeof BoolFirst>;
+
+        test('boolean-first union: { $not: { $eq: true } } matches a string row (without cast-erroring) and excludes the true row', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '1', secret: 'hush' }, { secret: { $not: { $eq: true } } }, BoolFirst)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '2', secret: 7 }, { secret: { $not: { $eq: true } } }, BoolFirst)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '3', secret: true }, { secret: { $not: { $eq: true } } }, BoolFirst)).toBe(false);
+        });
+
+        test('string-first union (the other arm order): { $not: { $eq: true } } matches a numeric row and excludes the true row', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: '4', secret: 7 }, { secret: { $not: { $eq: true } } }, StringFirst)).toBe(true);
+            expect(await matchJavascriptObjectInDb<Row>({ id: '5', secret: true }, { secret: { $not: { $eq: true } } }, StringFirst)).toBe(false);
         });
     });
 

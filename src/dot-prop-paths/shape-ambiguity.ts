@@ -7,6 +7,7 @@ import {
     getUnionOptions,
     isDiscriminatedUnion,
     getLiteralValues,
+    getEnumValues,
     type ZodKind,
     type AnyZodSchema,
 } from "../zod/introspection.ts";
@@ -168,7 +169,9 @@ function flatten(schemas: readonly AnyZodSchema[]): AnyZodSchema[] {
  *
  * Why: a tuple is an array and a discriminated union is an object for representability — leaving them opaque (their
  * old `other` classification) silently hid `tuple | object` and `discriminatedUnion | array` collisions. Their
- * contents stay opaque (not descended) so a bare tuple/DU is one category and is not over-flagged.
+ * contents stay opaque (not descended) so a bare tuple/DU is one category and is not over-flagged. An enum is
+ * classified by its members' runtime types (a numeric enum is number-scalar), so a `string | enum(numeric)` union is
+ * correctly seen as multi-scalar rather than one string column.
  */
 function occupantShapes(flat: readonly AnyZodSchema[]): Occupant[] {
     const out: Occupant[] = [];
@@ -180,7 +183,7 @@ function occupantShapes(flat: readonly AnyZodSchema[]): Occupant[] {
         else if (kind === "null" || kind === "undefined" || kind === "void") out.push({ category: "null" });
         else if (kind === "string" || kind === "number" || kind === "boolean")
             out.push({ category: "scalar", scalarKind: kind });
-        else if (kind === "enum") out.push({ category: "scalar", scalarKind: "string" }); // enum members are scalar (typed as string)
+        else if (kind === "enum") out.push(...getEnumValues(schema).map(literalShape)); // classify by member runtime type — a numeric enum is number-scalar, not string
         else if (kind === "literal") out.push(...getLiteralValues(schema).map(literalShape));
         else out.push({ category: "other" }); // lazy, bigint, date, custom, … contribute no representable shape
     }

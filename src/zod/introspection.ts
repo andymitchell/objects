@@ -260,6 +260,28 @@ export function getLiteralValues(schema: AnyZodSchema): readonly unknown[] {
 }
 
 /**
+ * Return the values a Zod enum accepts, by their runtime type.
+ *
+ * Enum kind alone is not enough to know a member's scalar type: a native (TS) numeric enum stores a reverse mapping
+ * on `_zod.def.entries` (`{ 0: 'A', A: 0 }`), so reading the entry values directly would surface the member-name
+ * strings as well as the numbers. This filters the candidate entry values by what the schema actually parses, so a
+ * numeric enum returns its numbers, a string enum its strings, and a mixed enum both. Use when an enum member's
+ * runtime TYPE matters (e.g. deciding a column's scalar kind), not just that the field is an enum.
+ *
+ * Reads private `_zod.def.entries`; pinned tests guard the installed Zod shape.
+ *
+ * @example
+ * getEnumValues(z.enum(["a", "b"])); // ["a", "b"]
+ * // enum NumE { A = 0, B = 1 }
+ * getEnumValues(z.enum(NumE)); // [0, 1]
+ */
+export function getEnumValues(schema: AnyZodSchema): readonly unknown[] {
+    const entries = (schema._zod.def as z.core.$ZodTypeDef & { entries?: Record<string, unknown> }).entries ?? {};
+    const candidates = [...new Set(Object.values(entries))];
+    return candidates.filter((v) => schema.safeParse(v).success);
+}
+
+/**
  * Return the fixed item schemas and optional rest schema of a tuple.
  *
  * Fixed tuple positions become keyed `item` edges; the rest schema becomes an `element` edge.

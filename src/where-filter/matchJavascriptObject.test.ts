@@ -88,6 +88,30 @@ describe('testMatchJavascriptObject', () => {
                 matchJavascriptObjectReal({ id: '1', owner: 'alice' }, { owner: 'alice' }, { universalSchemaConformance: { schema: AmbiguousOwner, objectValidatedAgainstSchema: true } }),
             ).toThrow(/shape-ambiguous/i);
         });
+
+        const CoerceNumber = z.object({ id: z.string(), n: z.coerce.number() });
+        const TransformField = z.object({ id: z.string(), s: z.string().transform((v) => v.length) });
+
+        test('rejects a value-normalizing (z.coerce.*) schema, even when the object itself is fine', () => {
+            // The matcher compares the ORIGINAL value; coerce would let the stored string '1' pass against 1, which
+            // a ::numeric cast also matches but the matcher's strict === does not — so the schema is unrepresentable.
+            expect(() =>
+                matchJavascriptObjectReal({ id: '1', n: 1 }, { n: 1 }, { universalSchemaConformance: { schema: CoerceNumber } }),
+            ).toThrow(/value-normalizing/i);
+        });
+
+        test('rejects a value-normalizing (.transform()) schema', () => {
+            expect(() =>
+                // @ts-expect-error — the transformed output type differs from the input; the filter shape is irrelevant because the schema is rejected first
+                matchJavascriptObjectReal({ id: '1', s: 'abc' }, { s: 3 }, { universalSchemaConformance: { schema: TransformField } }),
+            ).toThrow(/value-normalizing/i);
+        });
+
+        test('the value-normalization check always runs, even under the objectValidatedAgainstSchema bypass', () => {
+            expect(() =>
+                matchJavascriptObjectReal({ id: '1', n: 1 }, { n: 1 }, { universalSchemaConformance: { schema: CoerceNumber, objectValidatedAgainstSchema: true } }),
+            ).toThrow(/value-normalizing/i);
+        });
     });
 
 })

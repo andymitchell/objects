@@ -1,6 +1,7 @@
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
 import { findShapeAmbiguousPaths } from "../dot-prop-paths/shape-ambiguity.ts";
+import { findNormalizingPaths } from "../dot-prop-paths/schema-normalization.ts";
 import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectOptions, MatchJavascriptObjectWithFilter, ObjOrDraft, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
@@ -48,17 +49,18 @@ export type { ObjOrDraft };
  * data conforms to a concrete schema; they diverge on non-conforming data — e.g. a row `{ owner: ['a','b'] }`
  * where the schema declares `owner: z.string()`, which the value-driven matcher accepts by array containment
  * but SQL (bound to a scalar column) does not — or on a shape-ambiguous schema such as
- * `owner: z.union([z.string(), z.array(z.string())])` (`string | array`). This mode closes the gap by throwing
- * on a shape-ambiguous leaf (unrepresentable in SQL) and validating the object against the schema first
- * (throwing if it does not conform); `objectValidatedAgainstSchema: true` skips the per-object check as a perf
- * bypass (the ambiguity check always runs).
+ * `owner: z.union([z.string(), z.array(z.string())])` (`string | array`). They also diverge on a value-normalizing
+ * schema such as `z.coerce.number()`, which accepts the stored string `'1'` the matcher's strict `===` rejects but a
+ * `::numeric` cast matches. This mode closes the gap by throwing on a shape-ambiguous or value-normalizing leaf
+ * (unrepresentable in SQL) and validating the object against the schema first (throwing if it does not conform);
+ * `objectValidatedAgainstSchema: true` skips the per-object check as a perf bypass (the schema-shape checks always run).
  *
  * @param object  The object to test. Must be a plain object.
  * @param filter  The `WhereFilterDefinition` describing the match criteria.
  * @param options Optional; see `universalSchemaConformance` above.
  * @returns `true` if the object matches the filter, `false` otherwise.
  * @throws If `object` is not a plain object, the filter is malformed, or — in conformance mode — the schema is
- *   shape-ambiguous or the object does not conform to it.
+ *   shape-ambiguous or value-normalizing, or the object does not conform to it.
  *
  * @example
  * matchJavascriptObject({ name: 'Alice', age: 30 }, { age: { $gte: 18 } });   // true
@@ -87,6 +89,12 @@ const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<
         const ambiguous = findShapeAmbiguousPaths(conformance.schema);
         if( ambiguous.length>0 ) {
             throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a shape-ambiguous schema (a schema-driven backend cannot represent a scalar|array field): ${ambiguous.map(a => a.dotprop_path).join(', ')}`);
+        }
+        // A value-normalizing schema (coerce/transform/pipe) is matched here against the ORIGINAL value, while a
+        // schema-driven backend casts — so they would disagree even on conforming data. Reject it like ambiguity.
+        const normalizing = findNormalizingPaths(conformance.schema);
+        if( normalizing.length>0 ) {
+            throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a value-normalizing schema (a schema-driven backend compares the raw stored value, not the coerced/transformed one): ${normalizing.map(n => n.dotprop_path).join(', ')}`);
         }
         if( !conformance.objectValidatedAgainstSchema && !conformance.schema.safeParse(object).success ) {
             throw new Error("matchJavascriptObject: object does not conform to the universalSchemaConformance schema");

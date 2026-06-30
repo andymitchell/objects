@@ -9,5 +9,5 @@
  * `./introspection.ts`); this barrel keeps the external surface minimal.
  */
 
-export { getZodKind, getSchemaChildren, getLiteralValues } from "./introspection.ts";
+export { getZodKind, getSchemaChildren, getLiteralValues, getEnumValues } from "./introspection.ts";
 export type { ZodKind, AnyZodSchema, SchemaChild, SchemaRelation } from "./introspection.ts";

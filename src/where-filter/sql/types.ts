@@ -71,8 +71,19 @@ export type WhereClauseSchemaAmbiguityError = {
     message: string;
 };
 
+/**
+ * Error when a field's schema normalizes the value on parse — a `z.coerce.*` flag or a transform / pipe /
+ * preprocess node (e.g. `z.coerce.number()`). A schema-driven SQL emitter compares the raw stored value, so a
+ * schema that rewrites it would silently diverge from the value-driven matcher; the whole clause is rejected.
+ */
+export type WhereClauseSchemaNormalizationError = {
+    kind: 'schema_normalizes';
+    dotprop_path: string;
+    message: string;
+};
+
 /** Discriminated union of where-clause compilation errors. All variants carry `.message` for uniform access. */
-export type WhereClauseError = WhereClauseFilterError | WhereClausePathError | WhereClauseDialectMismatchError | WhereClauseSchemaAmbiguityError;
+export type WhereClauseError = WhereClauseFilterError | WhereClausePathError | WhereClauseDialectMismatchError | WhereClauseSchemaAmbiguityError | WhereClauseSchemaNormalizationError;
 
 /**
  * Discriminated union result from SQL where-clause builders.

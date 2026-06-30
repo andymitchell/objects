@@ -15,7 +15,7 @@ import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-t
 import {
   cloneToJsonSafe,
   type JsonValueCapped,
-} from "@andyrmitchell/utils/clone-to-json-safe";
+} from "@andymitchell/clone-to-json-safe";
 
 /** Error kinds an action can never recover from, however many times it is retried. */
 function isUnrecoverable(type: WriteError["type"]): boolean {

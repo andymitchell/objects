@@ -72,6 +72,7 @@
   "license": "MIT",
   "sideEffects": false,
   "devDependencies": {
+    "@andymitchell/clone-to-json-safe": "^0.1.1",
     "@andyrmitchell/pg-testable": "^0.5.2",
     "@andyrmitchell/utils": "^0.30.0",
     "@types/better-sqlite3": "^7.6.13",

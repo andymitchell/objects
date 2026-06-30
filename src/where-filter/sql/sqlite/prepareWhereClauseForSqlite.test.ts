@@ -187,6 +187,23 @@ describe('sqlite where clause builder', () => {
         });
     });
 
+    // White-box pin for the null-row fix. SQLite's json_each is lenient on a non-array (the spread is left
+    // unguarded — its behaviour is pinned cross-engine in standardTests), but json_array_length returns 0 for a
+    // non-array, so {$size:0} would spuriously match a JSON null. The emitter must json_type-guard $size so a
+    // non-array yields false; this asserts that guard is present so a refactor cannot silently drop it.
+    describe('the SQL for a `null | array` path type-guards $size against a non-array', () => {
+        const Schema = z.object({ id: z.string(), tags: z.union([z.literal(null), z.array(z.string())]) });
+
+        test('$size guards json_array_length with a json_type check, so a JSON-null row cannot satisfy {$size:0}', () => {
+            const pm = new PropertyTranslatorSqliteJsonSchema(Schema, 'recordColumn');
+            const clause = prepareWhereClauseForSqlite({ tags: { $size: 0 } }, pm);
+            expect(clause.success).toBe(true);
+            const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
+            expect(stmt).toContain("json_type(recordColumn, '$.tags') = 'array'");
+            expect(stmt).toContain("json_array_length(recordColumn, '$.tags')");
+        });
+    });
+
     // A multi-scalar union BELOW an array is reached via the json_each spread, which exposes the element as
     // `<alias>.value` (+ `<alias>.type`). The strict json_type/json_extract comparison must use that spread
     // element — `<alias>.value` alone conflates JSON true with 1 (SQLite stores both as 1), so the json_each

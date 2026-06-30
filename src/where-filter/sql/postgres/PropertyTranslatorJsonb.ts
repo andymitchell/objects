@@ -89,6 +89,17 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         return `${this.sqlColumnName}->${jsonbPath}`;
     }
 
+    /**
+     * Compare an array field's length, guarding the array-only `jsonb_array_length` against a non-array value.
+     * A `null | array` (or optional) field can hold a JSON null at runtime, on which `jsonb_array_length` errors
+     * ("cannot get array length of a scalar"). A `CASE` — not `AND`, since Postgres does not guarantee operand
+     * evaluation order and could still run the length function on the null — yields `false` for any non-array,
+     * reproducing the value-driven JS matcher, which never reports a size for a non-array.
+     */
+    private arraySizeEquals(jsonbPath: string, placeholder: string): string {
+        return `CASE WHEN jsonb_typeof(${jsonbPath}) = 'array' THEN jsonb_array_length(${jsonbPath}) = ${placeholder} ELSE false END`;
+    }
+
     /** Bind a scalar value and wrap it as JSONB of its own type, so equality stays type-faithful (JSON `true` ≠ `1` ≠ `"true"`). */
     private toJsonbParam(value: string | number | boolean, statementArguments: PreparedStatementArgument[]): string {
         const placeholder = this.generatePlaceholder(value, statementArguments);
@@ -228,7 +239,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     }
                     const jsonbPath = sizeResult.expression;
                     const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
-                    return `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
+                    return this.arraySizeEquals(jsonbPath, placeholder);
                 }
                 // $not + $size on array
                 if (isValueComparisonNot(filter) && isArrayValueComparisonSize(filter.$not)) {
@@ -239,7 +250,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     }
                     const jsonbPath = sizeResult.expression;
                     const placeholder = this.generatePlaceholder(filter.$not.$size, statementArguments);
-                    const sizeSql = `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
+                    const sizeSql = this.arraySizeEquals(jsonbPath, placeholder);
                     return `(${jsonbPath} IS NULL OR NOT (${sizeSql}))`;
                 }
                 // $exists on array

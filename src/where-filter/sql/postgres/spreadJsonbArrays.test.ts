@@ -61,7 +61,7 @@ import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
 
         expect(sa).toEqual(
             {
-                "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1",
+                "sql": "jsonb_array_elements(CASE WHEN jsonb_typeof(recordColumn->'contact'->'children') = 'array' THEN recordColumn->'contact'->'children' ELSE '[]'::jsonb END) AS recordColumn1",
                 "output_column": "recordColumn1",
                 "output_identifier": "recordColumn1 #>> '{}'"
             }
@@ -98,7 +98,7 @@ import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
 
         expect(sa).toEqual(
             {
-                "sql": "jsonb_array_elements(recordColumn->'contact'->'children') AS recordColumn1 CROSS JOIN jsonb_array_elements(recordColumn1->'family'->'grandchildren') AS recordColumn2",
+                "sql": "jsonb_array_elements(CASE WHEN jsonb_typeof(recordColumn->'contact'->'children') = 'array' THEN recordColumn->'contact'->'children' ELSE '[]'::jsonb END) AS recordColumn1 CROSS JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(recordColumn1->'family'->'grandchildren') = 'array' THEN recordColumn1->'family'->'grandchildren' ELSE '[]'::jsonb END) AS recordColumn2",
                 "output_column": "recordColumn2",
                 "output_identifier": "recordColumn2 #>> '{}'"
             }

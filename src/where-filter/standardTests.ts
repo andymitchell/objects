@@ -3772,6 +3772,71 @@ export function standardTests(testConfig: StandardTestConfig) {
             const result = await matchJavascriptObject(obj, { owner: 'alice' }, schema);
             expectOrAcknowledgeUnsupported(result, true, 'scalar|array ambiguous schema: schema-driven SQL cannot represent it (returns undefined); JS duck-types to true — see MONGO-DIVERGENCES.md (value-driven JS vs schema-driven SQL)');
         });
+
+        // A nullable array (`null | array`) is the ONE array/non-array union that is not shape-ambiguous, so it
+        // reaches the schema-driven SQL emitter, which decides to spread it. A row whose value is genuinely `null`
+        // (a conforming value) must be EXCLUDED — exactly as the value-driven JS oracle excludes it (null is not an
+        // array). The two evaluators MUST agree here (conforming data), so these assert directly: the SQL emitter
+        // must neither throw (Postgres ran an array function — jsonb_array_elements / jsonb_array_length — on a JSON
+        // null) nor spuriously match (SQLite json_array_length('null') is 0, which must not satisfy $size: 0).
+        describe('a null-valued row under a `null | array` field is excluded by every array operator (JS = Postgres = SQLite)', () => {
+            const Schema = z.object({ id: z.string(), tags: z.union([z.literal(null), z.array(z.string())]) });
+            type Row = z.infer<typeof Schema>;
+            const nullRow: Row = { id: 'null-row', tags: null };
+            const hasShared: Row = { id: 'has', tags: ['shared', 'x'] };
+            const noShared: Row = { id: 'no', tags: ['other'] };
+
+            test('$in: a present element matches, an absent one does not, and the null row is excluded (never throws)', async () => {
+                expect(await matchJavascriptObject(hasShared, { tags: { $in: ['shared'] } }, Schema)).toBe(true);
+                expect(await matchJavascriptObject(noShared, { tags: { $in: ['shared'] } }, Schema)).toBe(false);
+                expect(await matchJavascriptObject(nullRow, { tags: { $in: ['shared'] } }, Schema)).toBe(false);
+            });
+
+            test('plain containment {tags:"shared"}: the array row matches, the null row is excluded', async () => {
+                expect(await matchJavascriptObject(hasShared, { tags: 'shared' }, Schema)).toBe(true);
+                expect(await matchJavascriptObject(nullRow, { tags: 'shared' }, Schema)).toBe(false);
+            });
+
+            test('$elemMatch: the array row matches, the null row is excluded', async () => {
+                expect(await matchJavascriptObject(hasShared, { tags: { $elemMatch: 'shared' } }, Schema)).toBe(true);
+                expect(await matchJavascriptObject(nullRow, { tags: { $elemMatch: 'shared' } }, Schema)).toBe(false);
+            });
+
+            test('$all: the array row matches, the null row is excluded', async () => {
+                expect(await matchJavascriptObject(hasShared, { tags: { $all: ['shared'] } }, Schema)).toBe(true);
+                expect(await matchJavascriptObject(nullRow, { tags: { $all: ['shared'] } }, Schema)).toBe(false);
+            });
+
+            test('$nin: the null row is INCLUDED — null is in no exclusion list (matches the JS oracle)', async () => {
+                expect(await matchJavascriptObject(noShared, { tags: { $nin: ['shared'] } }, Schema)).toBe(true);
+                expect(await matchJavascriptObject(hasShared, { tags: { $nin: ['shared'] } }, Schema)).toBe(false);
+                expect(await matchJavascriptObject(nullRow, { tags: { $nin: ['shared'] } }, Schema)).toBe(true);
+            });
+
+            test('$size: null is not an array of any length, so {$size: 0} and {$size: 1} both exclude it', async () => {
+                expect(await matchJavascriptObject(hasShared, { tags: { $size: 2 } }, Schema)).toBe(true);
+                expect(await matchJavascriptObject(nullRow, { tags: { $size: 0 } }, Schema)).toBe(false);
+                expect(await matchJavascriptObject(nullRow, { tags: { $size: 1 } }, Schema)).toBe(false);
+            });
+
+            test('$not + $size: the null row matches (it is not an array of that length)', async () => {
+                expect(await matchJavascriptObject(hasShared, { tags: { $not: { $size: 2 } } }, Schema)).toBe(false);
+                expect(await matchJavascriptObject(nullRow, { tags: { $not: { $size: 0 } } }, Schema)).toBe(true);
+            });
+        });
+
+        // The same nullable array nested under an array element, queried through $elemMatch, reaches the emitter's
+        // recursive comparison path (a distinct $size emitter from the top-level array branch). A `null` element
+        // value must still be excluded, not throw / spuriously match.
+        describe('a null-valued `null | array` nested under an array element ($elemMatch recursion) is excluded', () => {
+            const Schema = z.object({ id: z.string(), items: z.array(z.object({ tags: z.union([z.literal(null), z.array(z.string())]) })) });
+            type Row = z.infer<typeof Schema>;
+
+            test('{items:{$elemMatch:{tags:{$size:0}}}}: a null `tags` is not a 0-length array (excluded); a real [] element still matches', async () => {
+                expect(await matchJavascriptObject({ id: 'null-el', items: [{ tags: null }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema)).toBe(false);
+                expect(await matchJavascriptObject({ id: 'empty-el', items: [{ tags: [] }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema)).toBe(true);
+            });
+        });
     });
 
 }

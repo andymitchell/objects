@@ -65,6 +65,16 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         return result.expression;
     }
 
+    /**
+     * Compare an array field's length, guarding the array-only `json_array_length` against a non-array value.
+     * Unlike Postgres, SQLite's `json_array_length` does not error on a non-array — it returns 0 — so a `null |
+     * array` field holding a JSON null would make `{ $size: 0 }` spuriously match. The json_type guard makes any
+     * non-array yield false, reproducing the value-driven JS matcher, which never reports a size for a non-array.
+     */
+    private arraySizeEquals(jsonPath: string, placeholder: string): string {
+        return `(json_type(${this.sqlColumnName}, '${jsonPath}') = 'array' AND json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder})`;
+    }
+
     /** Pushes a value into the statementArguments array and returns `?`. Objects/arrays are JSON.stringify'd first. */
     protected generatePlaceholder(value: PreparedStatementArgumentOrObject, statementArguments: PreparedStatementArgument[]): string {
         if (isPlainObject(value) || Array.isArray(value)) value = JSON.stringify(value);
@@ -207,13 +217,13 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 if (isArrayValueComparisonSize(filter)) {
                     const jsonPath = '$.' + dotpropPath.split('.').join('.');
                     const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
-                    return `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+                    return this.arraySizeEquals(jsonPath, placeholder);
                 }
                 // $not + $size on array
                 if (isValueComparisonNot(filter) && isArrayValueComparisonSize(filter.$not)) {
                     const jsonPath = '$.' + dotpropPath.split('.').join('.');
                     const placeholder = this.generatePlaceholder(filter.$not.$size, statementArguments);
-                    const sizeSql = `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+                    const sizeSql = this.arraySizeEquals(jsonPath, placeholder);
                     return `(json_type(${this.sqlColumnName}, '${jsonPath}') IS NULL OR NOT (${sizeSql}))`;
                 }
                 // $exists on array
@@ -411,7 +421,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         if (isArrayValueComparisonSize(filter)) {
             const jsonPath = '$.' + dotpropPath.split('.').join('.');
             const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
-            return `json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
+            return this.arraySizeEquals(jsonPath, placeholder);
         }
         // $regex — SQLite has no native regex; translate simple patterns to LIKE (best-effort).
         // $options: 'i' is a no-op because SQLite LIKE is already ASCII case-insensitive.

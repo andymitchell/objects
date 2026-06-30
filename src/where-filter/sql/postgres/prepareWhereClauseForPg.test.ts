@@ -217,6 +217,33 @@ describe('postgres where clause builder', () => {
         });
     });
 
+    // White-box pins for the null-row fix: a nullable-array path spreads (jsonb_array_elements) and sizes
+    // (jsonb_array_length), both of which error on a JSON null. The emitter must type-guard each so a null-valued
+    // row contributes nothing instead of throwing. These assert the guard is present in the generated SQL (the
+    // cross-engine behaviour is pinned in standardTests); without it a future refactor could silently drop it.
+    describe('the SQL for a `null | array` path type-guards the array-only operations', () => {
+        const Schema = z.object({ id: z.string(), tags: z.union([z.literal(null), z.array(z.string())]) });
+
+        test('a spreading operator guards jsonb_array_elements: a non-array source coerces to an empty array', () => {
+            const pm = new PropertyTranslatorPgJsonbSchema(Schema, 'recordColumn');
+            const clause = prepareWhereClauseForPg({ tags: { $in: ['shared'] } }, pm);
+            expect(clause.success).toBe(true);
+            const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
+            expect(stmt).toContain("jsonb_array_elements(CASE WHEN jsonb_typeof(");
+            expect(stmt).toContain("ELSE '[]'::jsonb END)");
+        });
+
+        test('$size guards jsonb_array_length with a CASE so a non-array yields false, never an error', () => {
+            const pm = new PropertyTranslatorPgJsonbSchema(Schema, 'recordColumn');
+            const clause = prepareWhereClauseForPg({ tags: { $size: 0 } }, pm);
+            expect(clause.success).toBe(true);
+            const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
+            expect(stmt).toContain("CASE WHEN jsonb_typeof(");
+            expect(stmt).toContain("THEN jsonb_array_length(");
+            expect(stmt).toContain("ELSE false END");
+        });
+    });
+
     // A multi-scalar union BELOW an array is reached via the array spread, which supplies a spread-element
     // identifier. The strict raw-JSON value comparison (JSON true ≠ 1 ≠ "true", 7 ≠ "7") must apply to that
     // spread element too — matching matchJavascriptObject's `===`. Without it the spread falls back to a typed

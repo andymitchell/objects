@@ -27,6 +27,13 @@ export { isPreparedStatementArgument } from '../../utils/sql/types.ts';
 export interface IPropertyTranslator<T extends Record<string, any>> {
     /** SQL dialect this translator emits — used by `prepareWhereClause` to detect mismatched pairings. */
     readonly dialect: SqlDialect;
+    /**
+     * Schema-level errors found when the translator was built from a Zod schema (currently: a shape-ambiguous
+     * `scalar | array` field). When present and non-empty, `compileWhereFilter` short-circuits to
+     * `{ success: false, errors }` before walking the filter. Undefined for translators built from a pre-derived
+     * node map (no schema to inspect).
+     */
+    readonly schemaErrors?: WhereClauseError[];
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string;
 }
 
@@ -53,8 +60,19 @@ export type WhereClauseDialectMismatchError = {
     message: string;
 };
 
+/**
+ * Error when a field's schema is shape-ambiguous — it admits both a scalar and an array at the same path
+ * (e.g. `z.union([z.string(), z.array(z.string())])`). A schema-driven SQL emitter cannot decide whether to
+ * text-compare the field or spread it as an array, so the whole clause is rejected rather than guessing.
+ */
+export type WhereClauseSchemaAmbiguityError = {
+    kind: 'schema_ambiguous';
+    dotprop_path: string;
+    message: string;
+};
+
 /** Discriminated union of where-clause compilation errors. All variants carry `.message` for uniform access. */
-export type WhereClauseError = WhereClauseFilterError | WhereClausePathError | WhereClauseDialectMismatchError;
+export type WhereClauseError = WhereClauseFilterError | WhereClausePathError | WhereClauseDialectMismatchError | WhereClauseSchemaAmbiguityError;
 
 /**
  * Discriminated union result from SQL where-clause builders.

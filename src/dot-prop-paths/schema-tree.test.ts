@@ -212,17 +212,23 @@ describe('Zod test', () => {
 
         const SHARED_OPTS = { exclude_parent_reference: true, exclude_schema_reference: true };
 
-        test('a union of objects throws without the option', () => {
-            // The flat-map walker cannot place two object shapes at one dot-prop path.
+        test('a union of objects under a key flattens to the first variant without the option (no throw)', () => {
+            // The flat map cannot hold two shapes at one path, so the first variant wins rather than throwing;
+            // a schema-driven consumer separately rejects a genuinely ambiguous scalar|array union via
+            // findShapeAmbiguousPaths. Only a non-union duplicate (a real bug) still throws.
             const schema = z.object({
                 k: z.union([z.object({ a: z.string() }), z.object({ a: z.number() })]),
             });
-            expect(() => convertSchemaToDotPropPathTree(schema)).toThrow();
+            const { map } = convertSchemaToDotPropPathTree(schema);
+            expect(map['k']?.kind).toBe('object');
+            expect(map['k.a']?.kind).toBe('string'); // first variant wins in the flat map
         });
 
-        test('a top-level union throws without the option', () => {
+        test('a top-level union no longer throws without the option (variant fields register in the flat map)', () => {
             const schema = z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]);
-            expect(() => convertSchemaToDotPropPathTree(schema)).toThrow();
+            const { map } = convertSchemaToDotPropPathTree(schema);
+            expect(map['a']?.kind).toBe('string');
+            expect(map['b']?.kind).toBe('string');
         });
 
         test('a top-level union becomes a ZodUnion node with one subtree per variant', () => {
@@ -420,6 +426,48 @@ describe('migration baseline — walker invariants (kind-free; must survive the 
         const code = getZodSchemaAtSchemaDotPropPath(schema, 'locked.code');
         expect(code?.safeParse(42).success).toBe(true);
         expect(code?.safeParse('x').success).toBe(false);
+    });
+});
+
+describe('a nullable array keeps its array shape in the flat map regardless of union arm order', () => {
+    // The schema-driven SQL builder reads the flat map to decide whether to spread a field as an array.
+    // A nullable array (`array | null`, `literal(null) | array`) is the one array/non-array union that is
+    // NOT shape-ambiguous, so it reaches the builder — but its null arm carries no array metadata. First-arm
+    // -wins would let a leading null/literal-null arm mask the array, silently demoting an array field to a
+    // scalar one (PG then errors on the literal path; SQLite text-compares the whole array). The map must keep
+    // the array arm whichever order the union declares it (shape precedence: array > object > scalar > null).
+    const arrayKindAtField = (fieldSchema: z.ZodType): string | undefined => {
+        const { map } = convertSchemaToDotPropPathTree(z.object({ field: fieldSchema }));
+        return map['field']?.kind;
+    };
+
+    test('z.null() declared before the array arm still resolves to the array shape', () => {
+        expect(arrayKindAtField(z.union([z.null(), z.array(z.string())]))).toBe('array');
+    });
+
+    test('z.literal(null) declared before the array arm still resolves to the array shape', () => {
+        expect(arrayKindAtField(z.union([z.literal(null), z.array(z.string())]))).toBe('array');
+    });
+
+    test('the array arm declared first resolves to the array shape (regression: this order always worked)', () => {
+        expect(arrayKindAtField(z.union([z.array(z.string()), z.null()]))).toBe('array');
+        expect(arrayKindAtField(z.union([z.array(z.string()), z.literal(null)]))).toBe('array');
+    });
+
+    test('the array element is still discovered beneath the array even when the null arm comes first', () => {
+        const { map } = convertSchemaToDotPropPathTree(z.object({ field: z.union([z.literal(null), z.array(z.string())]) }));
+        expect(map['field']?.kind).toBe('array');
+        // The nameless string element is a child of the array node, so the builder can cast/spread it.
+        expect(map['field']?.children.some(c => c.kind === 'string' && c.nameless_array_element === true)).toBe(true);
+    });
+
+    test('two flattened object variants still tie to the first (precedence only overrides a strictly lower shape)', () => {
+        // Guard the precedence rule does NOT disturb equal-shape collisions: object-vs-object stays first-wins.
+        const { map } = convertSchemaToDotPropPathTree(z.object({
+            k: z.union([z.object({ a: z.string() }), z.object({ a: z.number() })]),
+        }));
+        expect(map['k']?.kind).toBe('object');
+        expect(map['k.a']?.kind).toBe('string');
     });
 });
 

@@ -128,6 +128,33 @@ describe('prepareWhereClause', () => {
         });
     });
 
+    describe('schema-driven rejection of shape-ambiguous schemas', () => {
+
+        const AmbiguousSchema = z.object({ id: z.string(), owner: z.union([z.string(), z.array(z.string())]) });
+
+        it('rejects a scalar|array field with a schema_ambiguous error naming the path (pg)', () => {
+            const result = prepareWhereClause('pg', { owner: 'a' }, new PropertyTranslatorPgJsonbSchema(AmbiguousSchema, COLUMN));
+            expect(result.success).toBe(false);
+            if (!result.success) {
+                const ambiguous = result.errors.find((e) => e.kind === 'schema_ambiguous');
+                expect(ambiguous?.kind).toBe('schema_ambiguous');
+                if (ambiguous?.kind === 'schema_ambiguous') expect(ambiguous.dotprop_path).toBe('owner');
+            }
+        });
+
+        it('rejects a scalar|array field with a schema_ambiguous error (sqlite)', () => {
+            const result = prepareWhereClause('sqlite', { owner: 'a' }, new PropertyTranslatorSqliteJsonSchema(AmbiguousSchema, COLUMN));
+            expect(result.success).toBe(false);
+            if (!result.success) expect(result.errors.some((e) => e.kind === 'schema_ambiguous')).toBe(true);
+        });
+
+        it('does not reject a concrete array-only schema', () => {
+            const ConcreteSchema = z.object({ id: z.string(), owners: z.array(z.string()) });
+            const result = prepareWhereClause('pg', { owners: 'a' }, new PropertyTranslatorPgJsonbSchema(ConcreteSchema, COLUMN));
+            expect(result.success).toBe(true);
+        });
+    });
+
     describe('caller contract (compile-time types)', () => {
 
         it('the dialect parameter is exactly the SqlDialect union', () => {
@@ -146,13 +173,14 @@ describe('prepareWhereClause', () => {
             expectTypeOf<Translator['dialect']>().toEqualTypeOf<SqlDialect>();
         });
 
-        it('WhereClauseError union includes dialect_mismatch and is exhaustively narrowable', () => {
+        it('WhereClauseError union includes dialect_mismatch and schema_ambiguous and is exhaustively narrowable', () => {
             // Exhaustiveness check: every kind must be handled or this fails to compile.
             const exhaustive = (e: WhereClauseError): string => {
                 switch (e.kind) {
                     case 'filter': return e.message;
                     case 'path_conversion': return e.message;
                     case 'dialect_mismatch': return e.message;
+                    case 'schema_ambiguous': return e.message;
                     default: {
                         const _never: never = e;
                         return _never;

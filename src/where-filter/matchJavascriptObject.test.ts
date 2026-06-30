@@ -1,4 +1,5 @@
 import { createDraft } from "immer";
+import { z } from "zod";
 import matchJavascriptObjectReal, { compileMatchJavascriptObject, type ObjOrDraft } from "./matchJavascriptObject.js";
 import { type WhereFilterDefinition } from "./types.js";
 import { standardTests } from "./standardTests.js";
@@ -49,7 +50,46 @@ describe('testMatchJavascriptObject', () => {
 
         expect(result).toBe(true);
     });
-    
+
+    describe('universalSchemaConformance — holds the value-driven matcher to the schema-driven SQL contract', () => {
+        const ScalarOwner = z.object({ id: z.string(), owner: z.string() });
+        const AmbiguousOwner = z.object({ id: z.string(), owner: z.union([z.string(), z.array(z.string())]) });
+
+        test('without the option, the matcher duck-types an array under a scalar filter (the divergence it guards)', () => {
+            expect(matchJavascriptObjectReal({ id: '1', owner: ['alice', 'bob'] }, { owner: 'alice' })).toBe(true);
+        });
+
+        test('rejects a shape-ambiguous (scalar | array) schema, even when the object itself is fine', () => {
+            expect(() =>
+                matchJavascriptObjectReal({ id: '1', owner: 'alice' }, { owner: 'alice' }, { universalSchemaConformance: { schema: AmbiguousOwner } }),
+            ).toThrow(/shape-ambiguous/i);
+        });
+
+        test('rejects an object that does not conform to the schema (array under a scalar-declared field)', () => {
+            expect(() =>
+                // @ts-expect-error — array data deliberately violates the scalar schema; the type system rejects it at compile time, the runtime must reject it too
+                matchJavascriptObjectReal({ id: '1', owner: ['alice', 'bob'] }, { owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner } }),
+            ).toThrow(/does not conform/i);
+        });
+
+        test('matches a conforming object exactly as the default matcher would', () => {
+            expect(matchJavascriptObjectReal({ id: '1', owner: 'alice' }, { owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner } })).toBe(true);
+            expect(matchJavascriptObjectReal({ id: '1', owner: 'bob' }, { owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner } })).toBe(false);
+        });
+
+        test('objectValidatedAgainstSchema:true bypasses per-object validation (duck-types again) but still rejects an ambiguous schema', () => {
+            // Bypass: the non-conforming array object is no longer rejected — it duck-types like the default.
+            expect(
+                // @ts-expect-error — array data deliberately violates the scalar schema; the bypass skips validation so it duck-types rather than being rejected
+                matchJavascriptObjectReal({ id: '1', owner: ['alice', 'bob'] }, { owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner, objectValidatedAgainstSchema: true } }),
+            ).toBe(true);
+            // But the schema-ambiguity check always runs, bypass or not.
+            expect(() =>
+                matchJavascriptObjectReal({ id: '1', owner: 'alice' }, { owner: 'alice' }, { universalSchemaConformance: { schema: AmbiguousOwner, objectValidatedAgainstSchema: true } }),
+            ).toThrow(/shape-ambiguous/i);
+        });
+    });
+
 })
 
 

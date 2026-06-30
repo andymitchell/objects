@@ -100,3 +100,22 @@ These are not missing features (subset gaps). These are cases where the same syn
 **Rationale**: Conforming would require encoding NaN/Infinity as JSON sentinel objects (e.g. `{"$$nan":true}`, `{"$$inf":"+"}`) and wrapping every numeric SQL comparison in `CASE WHEN` to detect them. Cost: ~2–3× SQL text per numeric op + a breaking storage-format change (existing JSON-`null` data is ambiguous about whether it was originally null vs NaN/Infinity, and stays as null forever). NaN/Infinity in stored data are typically code smells; consumers should reject them at input via `z.number().finite()` rather than expecting the SQL impl to preserve them.
 
 **Tests**: see "Numeric edge values (NaN, Infinity, -0)" sub-block in `standardTests.ts`.
+
+---
+
+## 8. Value-driven JS matcher vs schema-driven SQL emitter (non-conforming or shape-ambiguous data)
+
+**MongoDB**: Value-driven and duck-typing. A scalar equality `{ owner: 'a' }` also matches a document whose `owner` is the array `['a', 'b']` (array containment), and `$in` matches an array by intersection — the match depends on the runtime value, never a declared schema.
+
+**WhereFilterDefinition (JS)**: `matchJavascriptObject` is value-driven too — it duck-types the runtime value and so conforms with MongoDB (an array under a scalar filter matches by containment).
+
+**WhereFilterDefinition (SQL — Postgres + SQLite)**: The SQL emitter is **schema-driven** — it decides whether a field is a scalar (text-compare) or an array (spread via `jsonb_array_elements` / `json_each`) purely from the declared Zod schema, never the row. The JS and SQL results are therefore identical **only when the data conforms to a concrete schema** (scalar-data + scalar-schema, or array-data + array-schema). They diverge when:
+
+- **Data does not conform** — e.g. a row `{ owner: ['a','b'] }` under a schema declaring `owner: z.string()`. JS matches `{ owner: 'a' }` by array containment; the scalar-bound SQL does not.
+- **The schema is shape-ambiguous** — e.g. `owner: z.union([z.string(), z.array(z.string())])` (`scalar | array`). The emitter cannot decide whether to text-compare or spread, so `prepareWhereClause` returns `{ success: false, errors: [{ kind: 'schema_ambiguous', … }] }` rather than guessing (`findShapeAmbiguousPaths` detects it at translator construction).
+
+**Resolution**: Pass `universalSchemaConformance: { schema }` to `matchJavascriptObject` to hold the JS matcher to the same lowest-common-denominator contract — it rejects a shape-ambiguous schema and validates the object against the schema first (throwing rather than duck-typing non-conforming data), so JS and SQL agree by construction. `objectValidatedAgainstSchema: true` skips the per-object check (perf bypass); the shape-ambiguity check always runs.
+
+**Rationale**: A schema-driven engine (SQL, or any backend bound to declared columns) fundamentally cannot duck-type per row. A `scalar | array` field is also a genuine footgun — it silently turns a scalar equality into an array-containment match — so rejecting it (rather than picking an arm) is the safe lowest-common-denominator.
+
+**Tests**: "10. Schema conformance (value-driven JS vs schema-driven SQL)" in `standardTests.ts`; `matchJavascriptObject.test.ts` "universalSchemaConformance …"; `prepareWhereClause.test.ts` "schema-driven rejection of shape-ambiguous schemas".

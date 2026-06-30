@@ -3747,4 +3747,31 @@ export function standardTests(testConfig: StandardTestConfig) {
 
     });
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 10. Schema conformance — value-driven JS vs schema-driven SQL
+    // ═══════════════════════════════════════════════════════════════════
+
+    describe('10. Schema conformance (value-driven JS vs schema-driven SQL)', () => {
+
+        // The JS matcher is value-driven and duck-types from the runtime value; the SQL emitter is
+        // schema-driven and decides array-vs-scalar from the declared schema. They agree only when the data
+        // conforms to a concrete schema. These two cases pin where they part — see MONGO-DIVERGENCES.md
+        // "value-driven JS matcher vs schema-driven SQL emitter".
+
+        test('array data under a scalar-declared field: JS matches by containment, schema-driven SQL does not', async () => {
+            const schema = z.object({ id: z.string(), owner: z.string() });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately non-conforming: a scalar-declared field holding array data, the exact gap this documents
+            const obj = { id: '1', owner: ['alice', 'bob'] } as any;
+            const result = await matchJavascriptObject(obj, { owner: 'alice' }, schema);
+            expectOrAcknowledgeDivergence(result, true, 'array under a scalar-declared field: value-driven JS containment vs schema-driven SQL — see MONGO-DIVERGENCES.md (value-driven JS vs schema-driven SQL)');
+        });
+
+        test('a shape-ambiguous (scalar | array) schema is unrepresentable in schema-driven SQL (rejected), while JS still duck-types', async () => {
+            const schema = z.object({ id: z.string(), owner: z.union([z.string(), z.array(z.string())]) });
+            const obj: z.infer<typeof schema> = { id: '1', owner: ['alice', 'bob'] };
+            const result = await matchJavascriptObject(obj, { owner: 'alice' }, schema);
+            expectOrAcknowledgeUnsupported(result, true, 'scalar|array ambiguous schema: schema-driven SQL cannot represent it (returns undefined); JS duck-types to true — see MONGO-DIVERGENCES.md (value-driven JS vs schema-driven SQL)');
+        });
+    });
+
 }

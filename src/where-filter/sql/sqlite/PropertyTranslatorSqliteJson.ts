@@ -4,6 +4,7 @@ import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFil
 import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/schema-tree.ts";
+import { findShapeAmbiguousPaths, findMultiScalarUnionPaths } from "../../../dot-prop-paths/shape-ambiguity.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.ts";
 import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
@@ -22,6 +23,10 @@ import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
  */
 class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<string, any>> implements IPropertyTranslator<T> {
     readonly dialect: SqlDialect = 'sqlite';
+    /** Schema-level errors found at construction from a Zod schema (shape-ambiguous fields); see {@link IPropertyTranslator}. */
+    schemaErrors: WhereClauseError[] = [];
+    /** Dot-prop paths whose union mixes ≥2 scalar kinds — compared via json_type + json_extract, not a single cast (see {@link generateComparison}). */
+    protected multiScalarPaths: Set<string> = new Set();
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;
@@ -208,7 +213,11 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                         if (testArrayContainsString) {
                             return this.generateComparison(dotpropPath, elemVal, statementArguments, undefined, testArrayContainsString);
                         } else {
-                            subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, sa.output_column);
+                            // A multi-scalar element compares as a raw JSON value: pass the json_each value/type
+                            // columns so generateComparison's strict branch stays type-faithful (range/$regex still
+                            // fall through to the typed sa.output_column identifier).
+                            const customSpread = this.multiScalarPaths.has(dotpropPath) ? { valueExpr: sa.output_column, typeExpr: sa.output_type } : undefined;
+                            subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, sa.output_column, undefined, undefined, undefined, customSpread);
                         }
                     }
                 } else {
@@ -223,7 +232,8 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                         return `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${result})`;
 
                     } else {
-                        subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier);
+                        const customSpread = this.multiScalarPaths.has(dotpropPath) ? { valueExpr: sa.output_column, typeExpr: sa.output_type } : undefined;
+                        subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier, undefined, undefined, undefined, customSpread);
                     }
                 }
             }
@@ -241,7 +251,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
      * $eq → =, range → >/</>=/<= , $regex → LIKE (best-effort), scalar → =, object/array → json()=json(?), undefined → IS NULL.
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
-    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
+    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>, customSpread?: { valueExpr: string, typeExpr: string }): string {
 
         /**
          * Forces leaf comparisons to a definite TRUE/FALSE so any enclosing NOT
@@ -262,6 +272,48 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
             if (!this.nodeMap[dotpropPath]) return query;
             return `(${sqlIdentifier} IS NULL OR ${query})`;
+        }
+
+        // Multi-scalar union field (e.g. boolean|number|string): compare by strict JSON value-equality via
+        // json_type + json_extract, so a number, boolean and string are never coerced together (matching
+        // matchJavascriptObject's `===`). json_extract alone returns 1 for both JSON `true` and `1`, so the type
+        // tag is load-bearing. Applies to a top-level field (json_type/json_extract on the path) and to an
+        // array-spread element (the caller passes the json_each value/type columns as customSpread); the
+        // string-containment shortcut (handled below) and range/$regex operators fall through to the typed path.
+        if (this.multiScalarPaths.has(dotpropPath) && !testArrayContainsString && (customSqlIdentifier === undefined || customSpread !== undefined)) {
+            const jsonPath = '$.' + dotpropPath.split('.').join('.');
+            const typeExpr = customSpread?.typeExpr ?? `json_type(${this.sqlColumnName}, '${jsonPath}')`;
+            const valueExpr = customSpread?.valueExpr ?? `json_extract(${this.sqlColumnName}, '${jsonPath}')`;
+            const strict = (v: string | number | boolean): string => {
+                if (typeof v === 'boolean') return `${typeExpr} = '${v ? 'true' : 'false'}'`;
+                const ph = this.generatePlaceholder(v, statementArguments);
+                if (typeof v === 'number') return `(${typeExpr} IN ('integer', 'real') AND ${valueExpr} = ${ph})`;
+                return `(${typeExpr} = 'text' AND ${valueExpr} = ${ph})`;
+            };
+            if (isValueComparisonEq(filter)) {
+                if (filter.$eq === null) return `(${typeExpr} IS NULL OR ${typeExpr} = 'null')`;
+                // Nothing equals NaN — short-circuit to a constant rather than the strict comparison. See MONGO-DIVERGENCES.md §7.
+                if (typeof filter.$eq === 'number' && Number.isNaN(filter.$eq)) return '1 = 0';
+                return strict(filter.$eq);
+            }
+            if (isValueComparisonNe(filter)) {
+                if (filter.$ne === null) return '1 = 1'; // "ne matches missing" — $ne null matches every value
+                // NaN equals nothing, so $ne: NaN matches every value — short-circuit before the strict path. See MONGO-DIVERGENCES.md §7.
+                if (typeof filter.$ne === 'number' && Number.isNaN(filter.$ne)) return '1 = 1';
+                return `(${typeExpr} IS NULL OR NOT (${strict(filter.$ne)}))`;
+            }
+            if (isValueComparisonIn(filter)) {
+                if (filter.$in.length === 0) return '1 = 0';
+                return `(${filter.$in.map(strict).join(' OR ')})`;
+            }
+            if (isValueComparisonNin(filter)) {
+                if (filter.$nin.length === 0) return '1 = 1';
+                return `(${typeExpr} IS NULL OR NOT (${filter.$nin.map(strict).join(' OR ')}))`;
+            }
+            if (isValueComparisonScalar(filter)) {
+                return strict(filter);
+            }
+            // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
         }
 
         // $ne
@@ -289,7 +341,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         // $not — negate inner comparison
         if (isValueComparisonNot(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter);
+            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter, customSpread);
             return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
         }
         // $exists — use json_type to distinguish JSON null (a present value) from a
@@ -457,6 +509,12 @@ export class PropertyTranslatorSqliteJsonSchema<T extends Record<string, any> = 
     constructor(schema: z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?: boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
+        this.schemaErrors = findShapeAmbiguousPaths(schema).map((a): WhereClauseError => ({
+            kind: 'schema_ambiguous',
+            dotprop_path: a.dotprop_path,
+            message: `Field '${a.dotprop_path}' has a shape-ambiguous schema (an array coexists with a non-array variant: ${a.arm_kinds.join(' | ')}); a schema-driven SQL engine cannot represent it.`,
+        }));
+        this.multiScalarPaths = new Set(findMultiScalarUnionPaths(schema).map((m) => m.dotprop_path));
     }
 }
 

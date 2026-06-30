@@ -4,6 +4,7 @@ import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFil
 import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/schema-tree.ts";
+import { findShapeAmbiguousPaths, findMultiScalarUnionPaths } from "../../../dot-prop-paths/shape-ambiguity.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.ts";
 import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
@@ -29,6 +30,10 @@ function mapTypeToPostgres(typeName: string): string {
  */
 class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string, any>> implements IPropertyTranslator<T> {
     readonly dialect: SqlDialect = 'pg';
+    /** Schema-level errors found at construction from a Zod schema (shape-ambiguous fields); see {@link IPropertyTranslator}. */
+    schemaErrors: WhereClauseError[] = [];
+    /** Dot-prop paths whose union mixes ≥2 scalar kinds — compared as raw JSON values, not a single typed cast (see {@link generateComparison}). */
+    protected multiScalarPaths: Set<string> = new Set();
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
     protected doNotSpreadArray: boolean;
@@ -75,6 +80,19 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         }
         statementArguments.push(value);
         return `$${statementArguments.length}`;
+    }
+
+    /** Build the raw JSONB accessor (`col->'a'->'b'`) for a dot-prop path — for type-faithful value comparison of a multi-scalar union. */
+    private rawJsonbAccessor(dotpropPath: string): string {
+        const jsonbPath = dotpropPath.split('.').map(p => `'${p}'`).join('->');
+        return `${this.sqlColumnName}->${jsonbPath}`;
+    }
+
+    /** Bind a scalar value and wrap it as JSONB of its own type, so equality stays type-faithful (JSON `true` ≠ `1` ≠ `"true"`). */
+    private toJsonbParam(value: string | number | boolean, statementArguments: PreparedStatementArgument[]): string {
+        const placeholder = this.generatePlaceholder(value, statementArguments);
+        const cast = typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'numeric' : 'text';
+        return `to_jsonb(${placeholder}::${cast})`;
     }
 
     /**
@@ -253,7 +271,11 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                             } else if (typeof elemVal === 'number') {
                                 customId = `(${sa.output_identifier})::numeric`;
                             }
-                            subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, customId);
+                            // A multi-scalar element compares as a raw JSON value: pass the element's raw JSONB
+                            // column so generateComparison's strict branch stays type-faithful (range/$regex still
+                            // fall through to the typed customId above).
+                            const rawJsonbId = this.multiScalarPaths.has(dotpropPath) ? sa.output_column : undefined;
+                            subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, customId, undefined, undefined, undefined, rawJsonbId);
                         }
                     }
                 } else {
@@ -268,7 +290,8 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                         return `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${result})`;
 
                     } else {
-                        subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier);
+                        const rawJsonbId = this.multiScalarPaths.has(dotpropPath) ? sa.output_column : undefined;
+                        subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier, undefined, undefined, undefined, rawJsonbId);
                     }
                 }
             }
@@ -288,7 +311,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      * Emits a leaf-level SQL comparison for a single value ($eq → =, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
      * Wraps optional/nullable paths with an IS NOT NULL guard.
      */
-    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>): string {
+    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>, customRawJsonbIdentifier?: string): string {
 
         /**
          * Forces leaf comparisons to a definite TRUE/FALSE so any enclosing NOT
@@ -308,6 +331,48 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
             if (!this.nodeMap[dotpropPath]) return query;
             return `(${sqlIdentifier} IS NULL OR ${query})`;
+        }
+
+        // Multi-scalar union field (e.g. boolean|number|string): compare as a raw JSON value so JSON `true` ≠ `1`
+        // ≠ `"true"`, matching matchJavascriptObject's strict `===`. The schema gives no single column type, so a
+        // typed cast would coerce across scalar kinds and can cast-error on arbitrary strings. Applies to a
+        // top-level field (raw accessor) and to an array-spread element (the caller passes the element's raw
+        // JSONB column as customRawJsonbIdentifier); the string-containment shortcut (handled below) and
+        // range/$regex operators fall through to the typed path.
+        if (this.multiScalarPaths.has(dotpropPath) && !testArrayContainsString && (customSqlIdentifier === undefined || customRawJsonbIdentifier !== undefined)) {
+            const rawId = customRawJsonbIdentifier ?? this.rawJsonbAccessor(dotpropPath);
+            // A bare `{ field: null }` arrives as the JSON value `null` (not `{ $eq: null }`, which the param type
+            // omits — hence the unknown widening); treat it identically — match SQL NULL (missing path) or JSON
+            // null — so it never reaches the first-arm typed cast that would error on a string/number row.
+            const filterValue: unknown = filter;
+            if (filterValue === null) return `(${rawId} IS NULL OR ${rawId} = 'null'::jsonb)`;
+            if (isValueComparisonEq(filter)) {
+                if (filter.$eq === null) return `(${rawId} IS NULL OR ${rawId} = 'null'::jsonb)`;
+                // Nothing equals NaN — short-circuit to a constant rather than binding NaN as jsonb. See MONGO-DIVERGENCES.md §7.
+                if (typeof filter.$eq === 'number' && Number.isNaN(filter.$eq)) return '1 = 0';
+                return `(${rawId} IS NOT NULL AND ${rawId} = ${this.toJsonbParam(filter.$eq, statementArguments)})`;
+            }
+            if (isValueComparisonNe(filter)) {
+                // "ne matches missing" like matchJavascriptObject; `$ne: null` matches every value.
+                if (filter.$ne === null) return '1 = 1';
+                // NaN equals nothing, so $ne: NaN matches every value — short-circuit before the strict path. See MONGO-DIVERGENCES.md §7.
+                if (typeof filter.$ne === 'number' && Number.isNaN(filter.$ne)) return '1 = 1';
+                return `(${rawId} IS NULL OR ${rawId} != ${this.toJsonbParam(filter.$ne, statementArguments)})`;
+            }
+            if (isValueComparisonIn(filter)) {
+                if (filter.$in.length === 0) return '1 = 0';
+                const vals = filter.$in.map(v => this.toJsonbParam(v, statementArguments));
+                return `(${rawId} IS NOT NULL AND ${rawId} IN (${vals.join(', ')}))`;
+            }
+            if (isValueComparisonNin(filter)) {
+                if (filter.$nin.length === 0) return '1 = 1';
+                const vals = filter.$nin.map(v => this.toJsonbParam(v, statementArguments));
+                return `(${rawId} IS NULL OR ${rawId} NOT IN (${vals.join(', ')}))`;
+            }
+            if (isValueComparisonScalar(filter)) {
+                return `(${rawId} IS NOT NULL AND ${rawId} = ${this.toJsonbParam(filter, statementArguments)})`;
+            }
+            // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
         }
 
         // $ne
@@ -337,7 +402,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         // $not — negate inner comparison
         if (isValueComparisonNot(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter);
+            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter, customRawJsonbIdentifier);
             return optionalWrapperNullMatches(sqlIdentifier, `NOT (${innerSql})`);
         }
         // $exists — use jsonb_typeof on the raw jsonb value (-> not ->>) so JSON null
@@ -465,6 +530,12 @@ export class PropertyTranslatorPgJsonbSchema<T extends Record<string, any> = Rec
     constructor(schema: z.ZodSchema<T>, sqlColumnName: string, doNotSpreadArray?: boolean) {
         const result = convertSchemaToDotPropPathTree(schema);
         super(result.map, sqlColumnName, doNotSpreadArray);
+        this.schemaErrors = findShapeAmbiguousPaths(schema).map((a): WhereClauseError => ({
+            kind: 'schema_ambiguous',
+            dotprop_path: a.dotprop_path,
+            message: `Field '${a.dotprop_path}' has a shape-ambiguous schema (an array coexists with a non-array variant: ${a.arm_kinds.join(' | ')}); a schema-driven SQL engine cannot represent it.`,
+        }));
+        this.multiScalarPaths = new Set(findMultiScalarUnionPaths(schema).map((m) => m.dotprop_path));
     }
 }
 /**

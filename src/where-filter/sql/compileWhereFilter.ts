@@ -16,6 +16,11 @@ import type { IPropertyTranslator, PreparedWhereClauseResult, PreparedStatementA
  */
 export function compileWhereFilter<T extends Record<string, any> = any>(filter: WhereFilterDefinition<T>, propertySqlMap: IPropertyTranslator<T>): PreparedWhereClauseResult {
     const errors: WhereClauseError[] = [];
+    // A schema-driven translator may have found a shape-ambiguous (`scalar | array`) field at construction;
+    // that whole-schema defect makes every clause untranslatable, so reject before walking the filter.
+    if (propertySqlMap.schemaErrors && propertySqlMap.schemaErrors.length > 0) {
+        return { success: false, errors: [...propertySqlMap.schemaErrors] };
+    }
     if (!isWhereFilterDefinition(filter)) {
         errors.push({
             kind: 'filter',

@@ -1,6 +1,7 @@
 import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPropertySimpleDot.js";
 import isPlainObject from "../utils/isPlainObject.js";
-import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectWithFilter, ObjOrDraft, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
+import { findShapeAmbiguousPaths } from "../dot-prop-paths/shape-ambiguity.ts";
+import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectOptions, MatchJavascriptObjectWithFilter, ObjOrDraft, ValueComparisonFlexi, WhereFilterDefinition } from "./types.js";
 import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonRangeFlexi, isValueComparisonScalar } from "./typeguards.ts";
@@ -33,32 +34,67 @@ A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse 
 export type { ObjOrDraft };
 
 /**
- * Checks if a single JavaScript object matches a given filter condition.
+ * Checks whether a single plain JavaScript object matches a Mongo-style `WhereFilterDefinition`.
  *
- * @template T - The type of the object being tested.
- * @param {ObjOrDraft<T>} object - The object to test. Must be a plain object.
- * @param {WhereFilterDefinition<T>} filter - The filter definition describing the conditions the object must meet.
- * @returns {boolean} - Returns true if the object matches the filter, false otherwise.
+ * This is where-filter's in-memory matcher — the JS evaluator of the same query language its SQL emitters
+ * (`prepareWhereClause`) compile, so one filter can run client-side here or as SQL. Like MongoDB it is
+ * value-driven and duck-types: `{owner:'a'}` also matches a row whose `owner` is `['a','b']` (array
+ * containment), and `$in` matches an array by intersection. Throws if `object` is not a plain object.
  *
- * @throws {Error} - Throws an error if the input is not a plain JavaScript object.
+ * @remarks
+ * **Universal schema conformance (optional).** Pass `universalSchemaConformance: { schema }` to make this
+ * matcher behave like the schema-driven SQL emitter — the lowest-common-denominator contract across
+ * where-filter backends. The default value-driven matcher and the schema-driven SQL emitter agree only when
+ * data conforms to a concrete schema; they diverge on non-conforming data — e.g. a row `{ owner: ['a','b'] }`
+ * where the schema declares `owner: z.string()`, which the value-driven matcher accepts by array containment
+ * but SQL (bound to a scalar column) does not — or on a shape-ambiguous schema such as
+ * `owner: z.union([z.string(), z.array(z.string())])` (`string | array`). This mode closes the gap by throwing
+ * on a shape-ambiguous leaf (unrepresentable in SQL) and validating the object against the schema first
+ * (throwing if it does not conform); `objectValidatedAgainstSchema: true` skips the per-object check as a perf
+ * bypass (the ambiguity check always runs).
+ *
+ * @param object  The object to test. Must be a plain object.
+ * @param filter  The `WhereFilterDefinition` describing the match criteria.
+ * @param options Optional; see `universalSchemaConformance` above.
+ * @returns `true` if the object matches the filter, `false` otherwise.
+ * @throws If `object` is not a plain object, the filter is malformed, or — in conformance mode — the schema is
+ *   shape-ambiguous or the object does not conform to it.
  *
  * @example
- * const user = { name: 'Alice', age: 30 };
- * const filter = { age: { $gte: 18 } };
- * matchJavascriptObject(user, filter); // true
+ * matchJavascriptObject({ name: 'Alice', age: 30 }, { age: { $gte: 18 } });   // true
+ * matchJavascriptObject({ owner: ['alice', 'bob'] }, { owner: 'alice' });      // true (array containment)
+ *
+ * @example
+ * // Universal schema conformance — behaves like the SQL backend, refusing to duck-type non-conforming data.
+ * const schema = z.object({ id: z.string(), owner: z.string() });
+ * matchJavascriptObject({ owner: ['a','b'] }, { owner: 'a' }, { universalSchemaConformance: { schema } }); // throws — array under a scalar field
  */
-const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>):boolean => {
+const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>, options?:MatchJavascriptObjectOptions<T>):boolean => {
     if( !isPlainObject(object) ) {
         let json: string = process.env.NODE_ENV==='test'? safeJson(object) : 'redacted';
         throw new Error("matchJavascriptObject requires plain object. Received: "+json)
     }
-    
+
     if( !isWhereFilterDefinition(filter) ) {
         throw new Error("matchJavascriptObject filter was not well-defined. Received: "+safeJson(filter));
     }
 
+    const conformance = options?.universalSchemaConformance;
+    if( conformance ) {
+        // Hold the value-driven matcher to the schema-driven SQL contract: a scalar|array schema is
+        // unrepresentable downstream, and a non-conforming object would be duck-typed to a result SQL cannot
+        // reproduce. Reject both up-front (consistent with the matcher already throwing on invalid input).
+        const ambiguous = findShapeAmbiguousPaths(conformance.schema);
+        if( ambiguous.length>0 ) {
+            throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a shape-ambiguous schema (a schema-driven backend cannot represent a scalar|array field): ${ambiguous.map(a => a.dotprop_path).join(', ')}`);
+        }
+        if( !conformance.objectValidatedAgainstSchema && !conformance.schema.safeParse(object).success ) {
+            throw new Error("matchJavascriptObject: object does not conform to the universalSchemaConformance schema");
+        }
+    }
+
     return _matchJavascriptObject(object, filter, [filter]);
-    
+
 }
 export default matchJavascriptObject;
 

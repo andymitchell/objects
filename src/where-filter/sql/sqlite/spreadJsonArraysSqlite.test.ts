@@ -61,7 +61,8 @@ import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
             {
                 "sql": "json_each(recordColumn, '$.contact.children') AS je1",
                 "output_column": "je1.value",
-                "output_identifier": "je1.value"
+                "output_identifier": "je1.value",
+                "output_type": "je1.type"
             }
         )
 
@@ -97,7 +98,8 @@ import { spreadJsonArraysSqlite } from "./spreadJsonArraysSqlite.ts";
             {
                 "sql": "json_each(recordColumn, '$.contact.children') AS je1 CROSS JOIN json_each(je1.value, '$.family.grandchildren') AS je2",
                 "output_column": "je2.value",
-                "output_identifier": "je2.value"
+                "output_identifier": "je2.value",
+                "output_type": "je2.type"
             }
         )
 

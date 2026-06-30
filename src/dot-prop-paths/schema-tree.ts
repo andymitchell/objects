@@ -85,6 +85,18 @@ export function convertSchemaToDotPropPathTree(
     const root = _convertSchemaToDotPropPathTree('', schema, map, options);
     return {root, map};
 }
+/**
+ * Rank a node's shape so that when flattened union variants collide at one dot-prop path the most array-like
+ * shape is kept in the flat map. An array (or tuple) outranks every non-array, so a nullable array
+ * (`array | null`, `literal(null) | array`) — the one array/non-array union that is NOT rejected as
+ * shape-ambiguous — keeps its array metadata regardless of arm order, rather than a leading null arm masking it
+ * and demoting the field to a scalar the SQL builder won't spread. Equal ranks keep the first variant (so a
+ * scalar|scalar or object|object union is unaffected); a genuinely shape-ambiguous array/scalar or array/object
+ * union is rejected upstream by findShapeAmbiguousPaths before the tree is ever consumed.
+ */
+function shapePrecedence(node: TreeNode): number {
+    return (node.kind === 'array' || node.kind === 'tuple') ? 1 : 0;
+}
 function _convertSchemaToDotPropPathTree(
     key: string,
     schema: AnyZodSchema,
@@ -109,14 +121,20 @@ function _convertSchemaToDotPropPathTree(
         if( map[newNode.dotprop_path] ) {
             // Sibling nodes legitimately share a dot-prop path in two cases: array elements (one
             // per element type) and union variants (one subtree per variant, plus any fields the
-            // variants have in common). The flat map keeps the first node at a shared path; the
-            // tree retains every sibling. Any other collision throws.
+            // variants have in common). The flat map keeps the highest-precedence shape at a shared
+            // path; the tree retains every sibling. Any other collision throws.
             if( parent?.kind==='array' ) {
                 newNode.nameless_array_element = true;
             } else if( parent?.kind==='union' ) {
                 newNode.union_variant = true;
             } else if( !withinUnion ) {
                 throw new Error("Duplicate dotprop_path that is not in an array");
+            } else if( shapePrecedence(newNode) > shapePrecedence(map[newNode.dotprop_path]!) ) {
+                // Flattened union variants share this path. A nullable array (`array | null`,
+                // `literal(null) | array`) reaches here because it is not shape-ambiguous, and first-arm-wins
+                // would let a leading null arm mask the array — losing the metadata the SQL builder needs to
+                // spread it. Keep the array shape so the union's arm order is irrelevant downstream.
+                map[newNode.dotprop_path] = newNode;
             }
         } else {
             map[newNode.dotprop_path] = newNode;
@@ -180,9 +198,14 @@ function _convertSchemaToDotPropPathTree(
                 _convertSchemaToDotPropPathTree('', unionSchema, map, options, node, parentsIncludeArray, undefined, true);
             }
         } else {
-            // The variants pass through as direct children of the union's parent.
+            // The variants pass through as direct children of the union's parent. Mark the descent
+            // `withinUnion` so a variant re-registering the parent's path — a `string | string[]` field,
+            // or two object variants sharing a key — is tolerated (first node wins in the flat map) rather
+            // than throwing; only a genuine non-union collision is a bug worth the throw. A schema-driven
+            // SQL caller separately rejects a shape-ambiguous (`scalar | array`) union up-front via
+            // findShapeAmbiguousPaths; here we only need the tree to build without crashing.
             for( const unionSchema of unionSchemas ) {
-                _convertSchemaToDotPropPathTree(key, unionSchema, map, options, parent, parentsIncludeArray, undefined, withinUnion);
+                _convertSchemaToDotPropPathTree(key, unionSchema, map, options, parent, parentsIncludeArray, undefined, true);
             }
             node = parent!;
         }

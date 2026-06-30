@@ -1,6 +1,7 @@
 
 
 import type { Draft } from "immer";
+import type { ZodType } from "zod";
 import type { DotPropPathsIncArrayUnion, DotPropPathToArraySpreadingArrays, PathValueIncDiscrimatedUnions } from '../dot-prop-paths/types.js';
 import type { ValueComparisonRangeOperators, WhereFilterLogicOperators } from './consts.ts';
 
@@ -138,7 +139,25 @@ export type PartialObjectFilterStrict<T extends Record<string, any>, ISD extends
 
 
 export type MatchJavascriptObject<T extends Record<string, any> = Record<string, any>> = (object:ObjOrDraft<T>) => boolean;
-export type MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>) => boolean;
+
+/**
+ * Opt-in conformance options for `matchJavascriptObject`. When supplied, the value-driven matcher is held to
+ * the same lowest-common-denominator contract as the schema-driven SQL emitter: a shape-ambiguous
+ * (`scalar | array`) schema is rejected, and the object is validated against the schema before matching.
+ */
+export type UniversalSchemaConformance<T extends Record<string, any> = Record<string, any>> = {
+    /** The Zod schema the object must conform to (and that must not be shape-ambiguous). */
+    schema: ZodType<T>;
+    /** Default `false`. `true` asserts the object is already validated, skipping the per-object check (perf bypass) — the shape-ambiguity check always runs. */
+    objectValidatedAgainstSchema?: boolean;
+};
+
+/** Options bag for `matchJavascriptObject`'s optional third argument. */
+export type MatchJavascriptObjectOptions<T extends Record<string, any> = Record<string, any>> = {
+    universalSchemaConformance?: UniversalSchemaConformance<T>;
+};
+
+export type MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>, options?:MatchJavascriptObjectOptions<T>) => boolean;
 
 
 

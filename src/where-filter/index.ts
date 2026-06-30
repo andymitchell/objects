@@ -20,6 +20,11 @@ import {
 } from './sql/index.ts';
 import type { IPropertyTranslator, PreparedWhereClauseStatement, PreparedWhereClauseResult, SqlDialect, WhereClauseError } from './sql/index.ts';
 
+// Schema shape-ambiguity detector — re-exported so a consumer building a schema-driven backend (or
+// enforcing universal schema conformance on this matcher) can reject a `scalar | array` field up-front.
+import { findShapeAmbiguousPaths } from '../dot-prop-paths/shape-ambiguity.ts';
+import type { ShapeAmbiguity } from '../dot-prop-paths/shape-ambiguity.ts';
+
 export {
     matchJavascriptObject,
     filterJavascriptObjects,
@@ -39,6 +44,7 @@ export {
     compileValidateWhereFilter,
     convertDotPropPathToPostgresJsonPath,
     convertDotPropPathToSqliteJsonPath,
+    findShapeAmbiguousPaths,
 };
 
 export type {
@@ -55,6 +61,7 @@ export type {
     WhereFilterValidationIssue,
     IPropertyTranslator,
     SqlDialect,
+    ShapeAmbiguity,
 };
 
 // ─── Testing ───

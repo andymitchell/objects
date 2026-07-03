@@ -248,7 +248,9 @@ function touchableIndices(items: Record<string, any>[], payload: OraclePayload, 
                 if (!matchJavascriptObject(it, payload.where)) return;
                 const inner = payload.action.type === "create"
                     ? true
-                    : touchableIndices(childArray(it, payload.scope), payload.action, d, childPath, includeDelete).length > 0;
+                    // A nested delete is an element-removal (a parent modification), so it always contributes —
+                    // only a top-level delete is gated; force `true` when descending. Mirrors the impl.
+                    : touchableIndices(childArray(it, payload.scope), payload.action, d, childPath, true).length > 0;
                 if (inner) idx.push(i);
             });
             return idx;
@@ -274,17 +276,16 @@ export function requiredRootIds(ds: Obj[], actions: WriteAction<Obj>[], d: DDL<O
 }
 
 /**
- * Per the spec, `includeDelete:false` ignores a deletion — a top-level delete, or an `array_scope` whose leaf
- * action is a delete (a scoped child-removal). Derived from the semantics, not copied from the implementation.
+ * Per the spec, `includeRowDeletes:false` suppresses only a TOP-LEVEL `delete` (a whole-row deletion). A delete
+ * nested inside an `array_scope` is an element-removal — a modification of the parent row — so it is NOT
+ * suppressed and still contributes its parent. Derived from the semantics, not copied from the implementation.
  */
 function isSuppressedUnderExclusion(payload: OraclePayload): boolean {
-    if (payload.type === "delete") return true;
-    if (payload.type === "array_scope") return isSuppressedUnderExclusion(payload.action);
-    return false;
+    return payload.type === "delete";
 }
 
 /**
- * Remove exactly the actions that `includeDelete:false` suppresses. Lets a test assert the metamorphic relation
+ * Remove exactly the actions that `includeRowDeletes:false` suppresses. Lets a test assert the metamorphic relation
  * `fn(B, false)` selects the same rows as `fn(stripDeletes(B), true)` — a stronger, correct alternative to a naive
  * `⊆` (which fails because an all-suppressed batch collapses to `undefined` = match-all, the top of the lattice).
  */

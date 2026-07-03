@@ -307,7 +307,7 @@ describe("combineWriteActionsWhereFilters", () => {
         });
     });
 
-    describe("when deletes are excluded (includeDelete=false)", () => {
+    describe("when top-level deletes are excluded (includeRowDeletes=false)", () => {
         it("drops a delete-only batch to no filter", () => {
             const res = combineWriteActionsWhereFilters(ddl, [wa({ type: "delete", where: { id: "r1" } })], false);
             expect(res.success).toBe(true);
@@ -324,6 +324,18 @@ describe("combineWriteActionsWhereFilters", () => {
             if (!res.success) return;
             expect(missingCoverage(res.filter, ["r2"])).toEqual([]);
             expect(matchedIds(res.filter).has("r1")).toBe(false);   // the excluded delete's row is not selected
+        });
+        it("still selects the parent of a scoped delete — a child-removal is a modification, not a row deletion", () => {
+            // Excluding row-deletes suppresses only whole-row deletes. A delete nested in an array_scope removes a
+            // child element, which modifies (not deletes) r1 — so r1 must still be pre-read even under exclusion.
+            const action = wa(assertWriteArrayScope<Obj, "children">({
+                type: "array_scope", scope: "children", where: { id: "r1" },
+                action: { type: "delete", where: { cid: "a1" } },
+            }));
+            const res = combineWriteActionsWhereFilters(ddl, [action], false);
+            expect(res.success).toBe(true);
+            if (!res.success) return;
+            expect(missingCoverage(res.filter, ["r1"])).toEqual([]);
         });
         it("ignoring deletes selects exactly what removing them from the batch would, and stays sound", () => {
             for (const seed of SEEDS) {
@@ -438,7 +450,7 @@ describe("combineWriteActionsWhereFilters", () => {
                 void res.filter;
             }
         });
-        it("makes includeDelete optional — a two-argument call type-checks", () => {
+        it("makes includeRowDeletes optional — a two-argument call type-checks", () => {
             const res = combineWriteActionsWhereFilters<Obj>(ddl, []);
             expectTypeOf(res).toEqualTypeOf<CombineWriteActionsWhereFiltersResult<Obj>>();
             // A defaulted parameter reflects as optional → `boolean | undefined`, not `boolean` (Finding 4).

@@ -26,6 +26,10 @@ export { validateWritePayloadSchema } from "./validateWritePayload.ts";
 export { validateWriteAction } from "./validateWriteAction.ts";
 export type { WritePayloadValidationIssue, WritePayloadSchemaIssue, WriteSchemaIssueReason, NonJsonReason } from "./validateWritePayload.ts";
 
+// ─── Read-set derivation (pre-read the rows a write batch could touch) ───
+export { combineWriteActionsWhereFilters } from "./combineWriteActionsWhereFilters.ts";
+export type { CombineWriteActionsWhereFiltersResult } from "./combineWriteActionsWhereFilters.ts";
+
 // ─── Helpers ───
 export {
     assertWriteArrayScope,

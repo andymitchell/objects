@@ -67,8 +67,11 @@ export function registerNullishMatrix(ctx: SectionCtx): void {
 
         test('15.E4 a {field: undefined} filter never matches', async () => {
             const result = await matchJavascriptObject({ id: 'x', n: 5 }, { n: undefined } as unknown as WhereFilterDefinition, NullishGridSchema);
-            // JS: undefined filter value never matches; SQL treats it as IS NULL → divergence #8 sub-note.
-            expectOrAcknowledgeDivergence(result, false, '#8 {field: undefined} never matches (JS) vs SQL IS NULL');
+            // Every engine returns false, for any row: JS treats an undefined filter value as "never matches",
+            // and the SQL emitter compiles a bare `undefined` to a self-contradictory `(f IS NOT NULL AND f IS
+            // NULL)` guard (always false — NOT a plain IS NULL, so it does not spuriously match null/missing
+            // rows). No cross-engine divergence exists here, so this is pinned strictly, not acknowledged.
+            expectOrAcknowledgeUnsupported(result, false);
         });
 
         test('15.E6a $exists:false on an explicit null is false', async () => {

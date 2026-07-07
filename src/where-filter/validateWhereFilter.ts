@@ -137,23 +137,24 @@ export function compileValidateWhereFilter<T extends Record<string, any> = any>(
     }
     return (filter) => {
         const issues: WhereFilterValidationIssue[] = [];
-        // Schema-aware checks first (skipped when the schema can't be modelled), so the established field-level
-        // `where_path` stays `issues[0]` for a fault both layers catch.
-        if (index) {
-            // A filter the matcher would throw on (null / [] / nested-malformed). A throw is never a match, so
-            // reporting it is airtight; checked up-front via the matcher's own predicate so the two stay in sync.
-            if (!isWhereFilterDefinition(filter)) {
-                issues.push({ reason: "malformed", message: "Filter is not a valid where-filter definition." });
-            } else {
-                walk(filter as Record<string, unknown>, "", false, index, issues);
-            }
-        }
+        // Precise passes first, so a localisable fault keeps its field-level `where_path`.
+        // The schema-aware walk pins a bad operand to its `path`; it is safe to run on any input (it no-ops on a
+        // non-object) so it runs BEFORE the structural gate check — the gate is now strict and, run first, would
+        // pre-empt the walk with a coarse path-less `malformed` on every malformed filter the walk could localise.
+        if (index) walk(filter as Record<string, unknown>, "", false, index, issues);
         // SerialisableJsonSubset gate (opt-in; see `../utils/findNonJsonValues.ts`). Schema-INDEPENDENT, so it
         // runs even when the schema can't be modelled, and a `.passthrough()`/`.loose()` schema can't hide a
         // non-JSON operand from it. It rejects in ANY position — incl. a broadening `$ne` and a satisfiable
         // match-all bound (`$lt: Infinity`) the conservative schema walk deliberately leaves alone — because
         // those operands corrupt across a serialisation boundary even though the live matcher satisfies them.
         if (options?.requireSerialisableJsonSubset) appendNonSerialisableIssues(filter, issues);
+        // Coarse fallback: a structurally-invalid filter the matcher would throw on (null / [] / a non-array
+        // logic arm / an unknown operator) that neither precise pass could localise gets ONE path-less
+        // `malformed`. Only when nothing more specific fired — a filter whose fault the walk pinned keeps its
+        // precise, path-tagged issue. Checked via the matcher's own predicate so the two stay in sync.
+        if (index && issues.length === 0 && !isWhereFilterDefinition(filter)) {
+            issues.push({ reason: "malformed", message: "Filter is not a valid where-filter definition." });
+        }
         return issues;
     };
 }

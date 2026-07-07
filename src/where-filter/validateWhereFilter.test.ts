@@ -400,11 +400,11 @@ describe("validateWhereFilter — malformed operands (flagged statically, regard
     });
 });
 
-describe("validateWhereFilter — malformed operands rescued by short-circuit/broadening are NOT flagged (fuzz regressions)", () => {
-    // Each shape was false-positived before the polarity gate: the matcher short-circuits ($or.some / $nor.some
-    // / $and.every) or $not matches a missing field, so the malformed operand is never evaluated and the filter
-    // MATCHES the row below. Flagging any would be a false positive. (A malformed operand a row actually reaches
-    // is caught by the write engine's runtime dry-run, covered in the invalid-filter write tests.)
+describe("validateWhereFilter — a structurally-VALID operand that only throws at eval is rescued by short-circuit (NOT flagged)", () => {
+    // An uncompilable `$regex` is a well-formed operand (a string) — the gate accepts it, and it throws only if
+    // the matcher actually runs it. Under `$or`/`$nor`/`$not` the matcher short-circuits past the arm, so the
+    // filter MATCHES the row below and, mirroring the matcher, the validator must not flag it. (A malformed
+    // operand a row actually reaches is caught by the write engine's runtime dry-run.)
     const S = z.object({
         id: z.string(),
         age: z.number().optional(),
@@ -414,19 +414,29 @@ describe("validateWhereFilter — malformed operands rescued by short-circuit/br
     const v = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, S);
     const row = { id: "x" }; // age / flag / note absent
 
-    const rescued: unknown[] = [
+    const rescuedByShortCircuit: unknown[] = [
         { $or: [{ id: "x" }, { id: { $regex: "[" } }] }, // $or matches via the first arm; regex arm short-circuited
-        { $or: [{ id: "x" }, { age: { $gt: undefined } }] },
         { $nor: [{ note: { $regex: "[" } }] }, // note absent → regex never compiled → $nor matches
-        { $nor: [{ age: { $lt: true } }] },
-        { $nor: [{ id: "y" }, { flag: true, age: { $gt: true } }] }, // age clause short-circuited by flag:true failing
         { note: { $not: { $regex: "[" } } }, // $not matches the missing note
-        { age: { $not: { $gt: undefined } } },
     ];
-
-    it.each(rescued.map((f, i) => [i, f] as const))("#%i: matcher matches the row, so validator must not flag", (_i, f) => {
+    it.each(rescuedByShortCircuit.map((f, i) => [i, f] as const))("#%i: matcher matches the row, so validator must not flag", (_i, f) => {
         expect(matchJavascriptObject(row, f as WhereFilterDefinition<typeof row>)).toBe(true);
         expect(v(f)).toEqual([]);
+    });
+
+    // A non-number/string range operand is STRUCTURALLY malformed. A malformed clause makes the WHOLE filter
+    // invalid — the gate rejects it even where a logic arm would short-circuit past that clause — so the matcher
+    // throws and the validator flags it. Metamorphic safety still holds: a throw is neither a match nor a
+    // no-match, so a flagged-yet-would-throw filter never contradicts "flagged ⟹ matches zero rows".
+    const rejectedMalformedArm: unknown[] = [
+        { $or: [{ id: "x" }, { age: { $gt: undefined } }] },
+        { $nor: [{ age: { $lt: true } }] },
+        { $nor: [{ id: "y" }, { flag: true, age: { $gt: true } }] },
+        { age: { $not: { $gt: undefined } } },
+    ];
+    it.each(rejectedMalformedArm.map((f, i) => [i, f] as const))("#%i: a malformed range operand invalidates the whole filter — matcher throws, validator flags", (_i, f) => {
+        expect(() => matchJavascriptObject(row, f as WhereFilterDefinition<typeof row>)).toThrow();
+        expect(v(f)).toMatchObject([{ reason: "malformed" }]);
     });
 });
 
@@ -512,23 +522,26 @@ describe("validateWhereFilter — requireSerialisableJsonSubset (the serialisabl
             expect(sub({ age: { $in: [1, Infinity] } })).toMatchObject([{ reason: "non_finite", path: "age.$in.1" }]);
         });
 
-        it("rejects a non-JSON operand under a broadening operator (skipped without the flag)", () => {
-            expect(validate({ age: { $ne: 5n } })).toEqual([]); // default: broadening, never flagged
-            expect(sub({ age: { $ne: 5n } })).toMatchObject([{ reason: "malformed", path: "age.$ne" }]);
-        });
-
         it("rejects an undefined operand (a documented accepted edge case without the flag)", () => {
             expect(validate({ nickname: undefined })).toEqual([]); // default: matches missing, accepted
             expect(sub({ nickname: undefined })).toMatchObject([{ reason: "malformed", path: "nickname" }]);
         });
     });
 
-    describe("rejects every non-JSON carrier type, regardless of operator polarity", () => {
-        it("rejects a Date / Map / Set operand", () => {
+    describe("flags every non-JSON carrier type — coarsely by the base gate (now structurally invalid), precisely under the flag", () => {
+        it("a Date / Map / Set operand is malformed; the subset also pins it to its path", () => {
+            // A non-JSON carrier is no longer a valid filter operand (the tightened schema forbids it), so the
+            // base gate flags it even without the flag — as a path-less whole-filter malformed. The subset walk
+            // additionally localises it to the offending field.
+            expect(validate({ score: new Date() })).toMatchObject([{ reason: "malformed" }]);
             expect(sub({ score: new Date() })).toMatchObject([{ reason: "malformed", path: "score" }]);
             expect(sub({ score: new Map() })).toMatchObject([{ reason: "malformed", path: "score" }]);
             expect(sub({ score: new Set() })).toMatchObject([{ reason: "malformed", path: "score" }]);
-            expect(validate({ score: new Date() })).toEqual([]); // default leaves these opaque
+        });
+
+        it("a bigint operand is malformed even under a broadening $ne; the subset also pins it to its path", () => {
+            expect(validate({ age: { $ne: 5n } })).toMatchObject([{ reason: "malformed" }]);
+            expect(sub({ age: { $ne: 5n } })).toMatchObject([{ reason: "malformed", path: "age.$ne" }]);
         });
 
         it("rejects a NaN operand in any position", () => {

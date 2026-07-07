@@ -25,6 +25,7 @@ import { registerMultiScalarEnums } from "./section-20-multiscalar-enums.ts";
 import { registerLogicTrees } from "./section-21-logic-trees.ts";
 import { registerTypeMapping } from "./section-22-type-mapping.ts";
 import { registerCoverageGaps } from "./section-23-coverage-gaps.ts";
+import { runFuzzSection } from "./fuzz.ts";
 
 /**
  * The backend-agnostic `WhereFilterDefinition` conformance battery.
@@ -83,6 +84,7 @@ export function standardTests(testConfig: StandardTestConfig): void {
     registerLogicTrees(ctx);
     registerTypeMapping(ctx);
     registerCoverageGaps(ctx);
+    runFuzzSection(ctx);
 }
 
 export type { StandardTestConfig, MatchJavascriptObjectInTesting } from "./harness.ts";

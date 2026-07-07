@@ -21,11 +21,12 @@ describe('postgres where clause builder', () => {
 
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
-        const { client, table } = await acquireSchema();
+        const json = JSON.stringify(object);
+        const { client, table } = await acquireSchema(json.length);
 
         const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
 
-        await client.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [JSON.stringify(object)]);
+        await client.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [json]);
 
         let clause:PreparedWhereClauseResult | undefined;
         try {
@@ -66,7 +67,8 @@ describe('postgres where clause builder', () => {
         test,
         expect,
         matchJavascriptObject:matchJavascriptObjectInDb,
-        implementationName: 'postgres'
+        implementationName: 'postgres',
+        fuzz: { iterations: 100 }
     })
 
     // A multi-scalar union field (boolean|number|string|null) must compare by strict JSON value-equality —

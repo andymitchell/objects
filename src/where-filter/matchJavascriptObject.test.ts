@@ -18,7 +18,8 @@ describe('testMatchJavascriptObject', () => {
         test,
         expect,
         matchJavascriptObject,
-        implementationName: 'javascript'
+        implementationName: 'javascript',
+        fuzz: { iterations: 300 }
     })
 
 

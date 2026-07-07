@@ -3,127 +3,106 @@ import { PGlite } from '@electric-sql/pglite';
 /**
  * Test-only isolation primitive for the Postgres where-clause conformance harness.
  *
- * Why: booting a fresh PGlite (WASM heap) per test costs ~1s; minting a fresh PG schema over a
- * single shared PGlite is ~40× faster. This module owns the singleton and hands each match call an
- * isolated schema holding one row, so a `SELECT ... WHERE <clause>` sees only that call's object.
+ * Why: booting a fresh PGlite (WASM heap) per test costs ~1s. This module owns a single shared PGlite and
+ * a single reused table, and clears the table (`TRUNCATE`) before each match call — so a
+ * `SELECT ... WHERE <clause>` sees only that call's one row, without paying a fresh-WASM boot per test.
+ *
+ * Why a reused table rather than a fresh schema per call: `CREATE SCHEMA`/`DROP SCHEMA CASCADE` churn grows
+ * PGlite's WASM heap (catalog allocations it never returns to the OS), so over a long file — and especially
+ * under the fuzz load's thousands of calls — a late large insert (e.g. a 1MB value) can silently fail to
+ * round-trip. `TRUNCATE` reuses the same table and reclaims row storage, keeping the heap flat so the last
+ * test behaves like the first. One row at a time means schema-per-call isolation is stronger than needed.
  *
  * Usage in the harness file:
- *   beforeAll(warmUp);              // pre-pay the one-time WASM init off the first test
- *   afterEach(disposeAllForTest);   // DROP every schema acquired during the test
- * The match adapter calls `acquireSchema()` per call; cleanup is tracked centrally so callers never
- * have to manage it.
+ *   beforeAll(warmUp);              // pre-pay the one-time WASM init + table creation off the first test
+ *   afterEach(disposeAllForTest);   // no-op: the table is cleared on the next acquire
+ * The match adapter calls `acquireSchema()` per call; it returns an already-empty table to insert into.
  */
 
 let sharedClient: PGlite | null = null;
-const acquired: string[] = [];
-let acquireCount = 0;
+let tableReady = false;
+
+const SCHEMA = 't_shared';
+const TABLE = `"${SCHEMA}".test_table`;
 
 /**
- * Recycle the shared PGlite after this many acquisitions.
+ * Rebuild the shared PGlite before inserting a payload at least this many bytes.
  *
- * Why: PGlite runs in a WASM heap that grows with churn and does not return memory to the OS after a
- * `DROP SCHEMA`. Over a long file, a large insert (e.g. a 1MB value) on an accumulated heap can silently
- * fail to round-trip — the row does not come back and an otherwise-correct match reads as `false`.
- * Recycling every N acquisitions caps the peak heap so late tests behave like early ones. N trades a
- * ~one-off rebuild cost against how much accumulation any single test can face.
+ * PGlite's WASM heap grows with query volume and does not shrink; a *large* insert on an accumulated heap
+ * trips `RuntimeError: memory access out of bounds` (a fresh instance handles the same value fine). Crucially
+ * the crash needs BOTH accumulation and a large insert — thousands of small inserts (every ordinary test and
+ * the entire fuzz) never trip it. So rebuilding only when a genuinely large payload is about to be inserted
+ * gives that one test a fresh heap at zero cost to everything else. The harness passes the byte size it has
+ * already computed for the insert.
  */
-const RECYCLE_EVERY = 50;
+const REBUILD_BEFORE_PAYLOAD_BYTES = 200_000;
 
 /** Lazily-constructed module-level singleton in-memory PGlite. */
 export function getSharedPgClient(): PGlite {
     if (sharedClient === null) {
         sharedClient = new PGlite();
+        tableReady = false;
     }
     return sharedClient;
 }
 
 /**
- * Drop the shared PGlite reference so the next {@link getSharedPgClient} builds a fresh one.
- *
- * Why: a single fatal statement (e.g. inserting a JSON string containing U+0000) can abort the PGlite
- * WASM instance outright (`RuntimeError: Aborted()`), leaving the shared singleton unusable. Because the
- * instance is shared across every test in the file, that one poisoning would otherwise cascade into a
- * failure for every subsequent test. Resetting lets the next acquire rebuild a clean instance so the
- * damage stays contained to the test that triggered it. The dead instance's schemas died with it, so the
- * pending-cleanup list is cleared too. Does NOT close the old instance — the caller is a poison-recovery
- * path where the instance is already dead; use {@link recycleSharedClient} to retire a live instance.
- */
-function resetSharedClient(): void {
-    sharedClient = null;
-    acquired.length = 0;
-}
-
-/** Retire a still-live shared instance (closing it to free its WASM heap) so the next acquire rebuilds. */
-async function recycleSharedClient(): Promise<void> {
-    const old = sharedClient;
-    resetSharedClient();
-    if (old) {
-        try { await old.close(); } catch { /* best-effort; a dead instance cannot be closed */ }
-    }
-}
-
-/**
- * Mint a fresh schema (`t_<uuid_no_dashes>`) with an empty `test_table`, and return the shared
- * client, the schema-qualified table name, and a dispose closure.
+ * Ensure the shared schema + table exist on the current client.
  *
  * The column is created UNQUOTED (`recordColumn` → folds to `recordcolumn`) to match
  * `PropertyTranslatorPgJsonbSchema`, which emits an unquoted `recordColumn->…` accessor; a quoted
  * `"recordColumn"` column would not resolve against that folded reference.
- *
- * Schema name = `t_` + 32 hex chars = 34 chars: satisfies `/^[A-Za-z_][A-Za-z0-9_]*$/` and stays
- * under PG's 63-char identifier limit. The dispose closure is tracked centrally so
- * {@link disposeAllForTest} cleans up even when a caller forgets to dispose.
  */
-export async function acquireSchema(): Promise<{ client: PGlite; schemaName: string; table: string; dispose: () => Promise<void> }> {
-    // Bound the WASM heap by retiring a live instance every RECYCLE_EVERY acquisitions (between tests, so no
-    // in-flight schema is lost). Keeps late, large-payload tests behaving like early ones.
-    if (acquireCount > 0 && acquireCount % RECYCLE_EVERY === 0) {
-        await recycleSharedClient();
-    }
-    acquireCount++;
-    const schemaName = `t_${crypto.randomUUID().replaceAll('-', '')}`;
-    const ddl = `CREATE SCHEMA "${schemaName}"; CREATE TABLE "${schemaName}".test_table (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL);`;
-    let client = getSharedPgClient();
-    try {
-        await client.exec(ddl);
-    } catch {
-        // The shared instance is likely dead (a prior fatal statement aborted the WASM). Rebuild once and retry;
-        // if this second attempt also fails, the error is real and propagates.
-        resetSharedClient();
-        client = getSharedPgClient();
-        await client.exec(ddl);
-    }
-    acquired.push(schemaName);
-    return {
-        client,
-        schemaName,
-        table: `"${schemaName}".test_table`,
-        dispose: async () => {
-            await client.query(`DROP SCHEMA "${schemaName}" CASCADE`);
-            const idx = acquired.indexOf(schemaName);
-            if (idx !== -1) acquired.splice(idx, 1);
-        },
-    };
+async function ensureTable(client: PGlite): Promise<void> {
+    if (tableReady) return;
+    await client.exec(`CREATE SCHEMA IF NOT EXISTS "${SCHEMA}"; CREATE TABLE IF NOT EXISTS "${SCHEMA}".test_table (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL);`);
+    tableReady = true;
 }
 
 /**
- * Drop every schema acquired since the last call. Best-effort: per-schema failures are swallowed so
- * `afterEach` never throws and the next test still starts cleanly.
+ * Clear the shared table and return it ready for one row.
+ *
+ * Recovers from a poisoned instance: a single fatal statement (e.g. inserting a JSON string containing
+ * U+0000) can abort the PGlite WASM instance outright (`RuntimeError: Aborted()`). Because the instance is
+ * shared, that would otherwise cascade into a failure for every subsequent test. On any failure here the
+ * client is rebuilt once and the acquire retried, so the damage stays contained to the test that triggered
+ * it (which still correctly reds).
  */
-export async function disposeAllForTest(): Promise<void> {
-    if (sharedClient === null || acquired.length === 0) return;
-    const client = sharedClient;
-    const toDrop = acquired.splice(0, acquired.length);
-    for (const schemaName of toDrop) {
-        try {
-            await client.query(`DROP SCHEMA "${schemaName}" CASCADE`);
-        } catch {
-            // Swallowed — best-effort cleanup; the next test starts fresh regardless.
-        }
+export async function acquireSchema(payloadBytes = 0): Promise<{ client: PGlite; schemaName: string; table: string; dispose: () => Promise<void> }> {
+    // A large insert on an accumulated heap can crash the WASM instance — give it a fresh one first.
+    if (payloadBytes >= REBUILD_BEFORE_PAYLOAD_BYTES && sharedClient !== null) {
+        const old = sharedClient;
+        sharedClient = null;
+        tableReady = false;
+        try { await old.close(); } catch { /* a dead instance cannot be closed */ }
     }
+    let client = getSharedPgClient();
+    try {
+        await ensureTable(client);
+        await client.exec(`TRUNCATE ${TABLE} RESTART IDENTITY;`);
+    } catch {
+        // The shared instance is likely dead (a prior fatal statement aborted the WASM). Rebuild once and
+        // retry; if this second attempt also fails, the error is real and propagates.
+        sharedClient = null;
+        tableReady = false;
+        client = getSharedPgClient();
+        await ensureTable(client);
+        await client.exec(`TRUNCATE ${TABLE} RESTART IDENTITY;`);
+    }
+    return {
+        client,
+        schemaName: SCHEMA,
+        table: TABLE,
+        dispose: async () => { /* no-op: the next acquire truncates */ },
+    };
 }
 
-/** Force the one-time WASM init cost off the first test (cycle-0 is ~1s; later cycles are ms-scale). Call in `beforeAll`. */
+/** No-op: the shared table is cleared on the next {@link acquireSchema}. Kept for the `afterEach` contract. */
+export async function disposeAllForTest(): Promise<void> {
+    // Intentionally empty — see the module note.
+}
+
+/** Force the one-time WASM init + table creation off the first test (cycle-0 is ~1s; later ops are ms-scale). Call in `beforeAll`. */
 export async function warmUp(): Promise<void> {
-    await getSharedPgClient().query('SELECT 1');
+    await ensureTable(getSharedPgClient());
 }

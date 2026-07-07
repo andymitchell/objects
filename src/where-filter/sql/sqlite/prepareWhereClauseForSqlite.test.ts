@@ -67,7 +67,8 @@ describe('sqlite where clause builder', () => {
         test,
         expect,
         matchJavascriptObject: matchJavascriptObjectInDb,
-        implementationName: 'sqlite'
+        implementationName: 'sqlite',
+        fuzz: { iterations: 100 }
     })
 
     // A multi-scalar union field compares by strict JSON value-equality via json_type + json_extract — json_extract

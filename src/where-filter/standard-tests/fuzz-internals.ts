@@ -1,0 +1,178 @@
+import { z } from "zod";
+import type { WhereFilterDefinition } from "../types.ts";
+
+// ═══════════════════════════════════════════════════════════════════
+// Deterministic PRNG (mulberry32) — failures replay from (seed, propertyIndex, iteration)
+// ═══════════════════════════════════════════════════════════════════
+
+export type Rng = {
+    next(): number;
+    int(n: number): number;
+    intRange(lo: number, hi: number): number;
+    bool(p?: number): boolean;
+    pick<X>(arr: readonly X[]): X;
+};
+
+export function mulberry32(seed: number): Rng {
+    let a = seed >>> 0;
+    const next = () => {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const int = (n: number) => Math.floor(next() * n);
+    return { next, int, intRange: (lo, hi) => lo + int(hi - lo + 1), bool: (p = 0.5) => next() < p, pick: (arr) => arr[int(arr.length)]! };
+}
+
+/** Combine the base seed with a property index and iteration into a stable per-run seed. */
+export function mixSeed(base: number, propertyIndex: number, iteration: number): number {
+    return (base ^ Math.imul(propertyIndex, 0x9E3779B1) ^ Math.imul(iteration, 0x85EBCA77)) >>> 0;
+}
+
+export const DEFAULT_FUZZ_SEED = 0x1F2E3D4C;
+export const DEFAULT_FUZZ_ITERATIONS = 150;
+
+// ═══════════════════════════════════════════════════════════════════
+// Fixture — a small schema whose fields exercise the uniform (cross-engine-agreeing) operators
+// ═══════════════════════════════════════════════════════════════════
+
+export const FuzzSchema = z.object({
+    id: z.string(),
+    name: z.string().optional(),
+    age: z.number().optional(),
+    active: z.boolean().optional(),
+    tags: z.array(z.string()).optional(),
+    scores: z.array(z.number()).optional(),
+    items: z.array(z.object({ k: z.string(), v: z.number().optional() }).strict()).optional(),
+}).strict();
+export type FuzzRow = z.infer<typeof FuzzSchema>;
+
+// Lowercase-ASCII ONLY. Mixed case / non-ASCII would hit PG/SQLite collation vs JS code-point
+// divergence in string ranges. Do not extend the alphabet without excluding string-range ops.
+const NAME_POOL = ['ann', 'bob', 'cid', 'dan'] as const;
+const TAG_POOL = ['a', 'b', 'c', 'd'] as const;
+
+type SubItem = { k: string; v?: number };
+
+/** Assert a dynamically-built filter is a WhereFilterDefinition. The generators only ever build valid
+ * uniform-profile shapes; the fields are optional so their operator types collapse to `never`, hence the
+ * cast (never `as any`). */
+export const asFilter = (x: unknown): WhereFilterDefinition<FuzzRow> => x as WhereFilterDefinition<FuzzRow>;
+
+// ═══════════════════════════════════════════════════════════════════
+// Generators — every value JSON-safe; every operator in the uniform (cross-engine) profile
+// ═══════════════════════════════════════════════════════════════════
+
+export function genRow(rng: Rng): FuzzRow {
+    // Scalars stay optional (their missing/null behaviour is uniform — §15 grid). The array fields are
+    // ALWAYS present (possibly empty): an array operator ($size/$all/$in) on a MISSING array is NOT
+    // uniform — the SQLite emitter yields SQL NULL there, which does not negate, so `$nor ≡ ¬$or` breaks
+    // (see the ledger). Missing-array behaviour is pinned by the targeted §14/§15/§18 tests instead.
+    const row: FuzzRow = { id: 'r' + rng.int(1000) };
+    if (rng.bool()) row.name = rng.pick(NAME_POOL);
+    if (rng.bool()) row.age = rng.intRange(-10, 20);
+    if (rng.bool()) row.active = rng.bool();
+    row.tags = Array.from({ length: rng.int(5) }, () => rng.pick(TAG_POOL));
+    row.scores = Array.from({ length: rng.int(5) }, () => rng.intRange(-10, 20));
+    row.items = Array.from({ length: rng.int(5) }, () => {
+        const si: SubItem = { k: rng.pick(TAG_POOL) };
+        if (rng.bool(0.7)) si.v = rng.intRange(-10, 20);
+        return si;
+    });
+    return row;
+}
+
+// Operands bias ~50% toward a value present in the row, so filters both match and miss.
+const pickName = (rng: Rng, row: FuzzRow): string => (row.name !== undefined && rng.bool(0.5) ? row.name : rng.pick(NAME_POOL));
+const pickAge = (rng: Rng, row: FuzzRow): number => (row.age !== undefined && rng.bool(0.5) ? row.age : rng.intRange(-10, 20));
+const pickTag = (rng: Rng, row: FuzzRow): string => (row.tags && row.tags.length && rng.bool(0.5) ? rng.pick(row.tags) : rng.pick(TAG_POOL));
+const RANGE_OPS = ['$gt', '$lt', '$gte', '$lte'] as const;
+const list = <X>(rng: Rng, gen: () => X): X[] => Array.from({ length: rng.intRange(1, 3) }, gen);
+
+/**
+ * A single uniform-profile leaf: an operator on one field whose behaviour is identical across the pure-JS
+ * matcher and both SQL emitters. Deliberately EXCLUDES the operators shown to diverge in the example
+ * sections: boolean equality (`active` — SQLite binds a raw boolean and throws), `$regex`/`$type`,
+ * non-finite numbers, empty `$in`/`$nin`/`$all`, `$elemMatch` `$exists`/`$type` on scalar arrays,
+ * exact-array / multi-key deep-object literals, and unknown paths.
+ */
+function genLeaf(rng: Rng, row: FuzzRow): WhereFilterDefinition<FuzzRow> {
+    switch (rng.int(18)) {
+        case 0: return asFilter({ name: pickName(rng, row) });
+        case 1: return asFilter({ name: { $eq: pickName(rng, row) } });
+        case 2: return asFilter({ name: { $ne: pickName(rng, row) } });
+        case 3: return asFilter({ name: { [rng.pick(RANGE_OPS)]: pickName(rng, row) } });
+        case 4: return asFilter({ name: { $in: list(rng, () => pickName(rng, row)) } });
+        case 5: return asFilter({ name: { $nin: list(rng, () => pickName(rng, row)) } });
+        case 6: return asFilter({ name: { $exists: rng.bool() } });
+        case 7: return asFilter({ age: pickAge(rng, row) });
+        case 8: return asFilter({ age: { [rng.bool() ? '$eq' : '$ne']: pickAge(rng, row) } });
+        case 9: return asFilter({ age: { [rng.pick(RANGE_OPS)]: pickAge(rng, row) } });
+        case 10: return asFilter({ age: { [rng.bool() ? '$in' : '$nin']: list(rng, () => pickAge(rng, row)) } });
+        case 11: return asFilter({ age: { $exists: rng.bool() } });
+        case 12: return asFilter({ tags: pickTag(rng, row) });
+        case 13: return asFilter({ tags: { [rng.bool() ? '$in' : '$nin']: list(rng, () => pickTag(rng, row)) } });
+        case 14: return asFilter({ tags: { $size: rng.int(4) } });
+        case 15: return asFilter({ tags: { $all: list(rng, () => pickTag(rng, row)) } });
+        case 16: return asFilter({ scores: { $size: rng.int(4) } });
+        default: {
+            const sub: SubItem = { k: pickTag(rng, row) };
+            if (rng.bool(0.5)) sub.v = pickAge(rng, row);
+            return asFilter({ items: { $elemMatch: sub } });
+        }
+    }
+}
+
+const LOGIC_OPS = ['$and', '$or', '$nor'] as const;
+
+/** A uniform-profile filter: a leaf, or a logic node (1–3 arms) up to depth 3. */
+export function genFilter(rng: Rng, row: FuzzRow, depth = 0): WhereFilterDefinition<FuzzRow> {
+    if (depth < 3 && rng.bool(0.3)) {
+        const op = rng.pick(LOGIC_OPS);
+        const arms = list(rng, () => genFilter(rng, row, depth + 1));
+        return asFilter({ [op]: arms });
+    }
+    return genLeaf(rng, row);
+}
+
+/**
+ * The WF-P9 rejection corpus: filters the CURRENT reference genuinely rejects on ALL engines, so the fuzz
+ * stays green on an honest matcher (it is the saboteur baseline). `{id:{$in:5}}` throws a TypeError
+ * (`.includes` on a number) — the field must be REQUIRED and always present: an absent value (a phantom
+ * field, or an absent OPTIONAL field) short-circuits the nullish guard to `false` instead of reaching the
+ * throw. SPEC-INTENT §16 rejections are NOT here until the validation gate is tightened — add them then.
+ */
+export const REJECTING_FILTERS: readonly unknown[] = [null, [], 42, 'x', { $and: [5, 'x'] }, { id: { $in: 5 } }];
+
+/**
+ * Hand-written structural deep-equal — deliberately NOT the unit-under-test's own equality, so the
+ * differential oracle never trusts the code it is judging. NaN≡NaN; undefined≡missing; arrays order-sensitive.
+ */
+export function fuzzDeepEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (typeof a === 'number' && typeof b === 'number') return Number.isNaN(a) && Number.isNaN(b);
+    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+    const aArr = Array.isArray(a); const bArr = Array.isArray(b);
+    if (aArr !== bArr) return false;
+    if (aArr && bArr) {
+        if (a.length !== b.length) return false;
+        return a.every((x, i) => fuzzDeepEqual(x, b[i]));
+    }
+    const ao = a as Record<string, unknown>; const bo = b as Record<string, unknown>;
+    const keys = new Set([...Object.keys(ao), ...Object.keys(bo)].filter(k => ao[k] !== undefined || bo[k] !== undefined));
+    for (const k of keys) if (!fuzzDeepEqual(ao[k], bo[k])) return false;
+    return true;
+}
+
+/** Build a reproduction message embedding the (seed, propertyIndex, iteration) triple and the row/filter. */
+export function repro(name: string, seed: number, propIdx: number, iter: number, row: unknown, filter: unknown, extra?: string): string {
+    return `[fuzz ${name}] reproduce with seed=${seed} property=${propIdx} iteration=${iter}`
+        + `${extra ? `\n${extra}` : ''}`
+        + `\nrow=${JSON.stringify(row)}`
+        + `\nfilter=${JSON.stringify(filter)}`;
+}
+
+export function invariant(cond: boolean, msg: () => string): void {
+    if (!cond) throw new Error(msg());
+}

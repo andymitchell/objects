@@ -12,6 +12,19 @@ import { registerSecurity } from "./section-07-security.ts";
 import { registerCompositePatterns } from "./section-08-composite.ts";
 import { registerLogicalEquivalences } from "./section-09-logical-equivalences.ts";
 import { registerSchemaConformance } from "./section-10-schema-conformance.ts";
+import { registerRegexFidelity } from "./section-11-regex-like.ts";
+import { registerPathInjection } from "./section-12-path-injection.ts";
+import { registerEmptyLists } from "./section-13-empty-lists.ts";
+import { registerSizeContract } from "./section-14-size-contract.ts";
+import { registerNullishMatrix } from "./section-15-nullish-matrix.ts";
+import { registerMalformedHostile } from "./section-16-malformed-hostile.ts";
+import { registerDegeneratePaths } from "./section-17-degenerate-paths.ts";
+import { registerArraySemantics } from "./section-18-array-semantics.ts";
+import { registerExoticValues } from "./section-19-exotic-values.ts";
+import { registerMultiScalarEnums } from "./section-20-multiscalar-enums.ts";
+import { registerLogicTrees } from "./section-21-logic-trees.ts";
+import { registerTypeMapping } from "./section-22-type-mapping.ts";
+import { registerCoverageGaps } from "./section-23-coverage-gaps.ts";
 
 /**
  * The backend-agnostic `WhereFilterDefinition` conformance battery.
@@ -57,6 +70,19 @@ export function standardTests(testConfig: StandardTestConfig): void {
     registerCompositePatterns(ctx);
     registerLogicalEquivalences(ctx);
     registerSchemaConformance(ctx);
+    registerRegexFidelity(ctx);
+    registerPathInjection(ctx);
+    registerEmptyLists(ctx);
+    registerSizeContract(ctx);
+    registerNullishMatrix(ctx);
+    registerMalformedHostile(ctx);
+    registerDegeneratePaths(ctx);
+    registerArraySemantics(ctx);
+    registerExoticValues(ctx);
+    registerMultiScalarEnums(ctx);
+    registerLogicTrees(ctx);
+    registerTypeMapping(ctx);
+    registerCoverageGaps(ctx);
 }
 
 export type { StandardTestConfig, MatchJavascriptObjectInTesting } from "./harness.ts";

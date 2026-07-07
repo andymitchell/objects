@@ -6,85 +6,60 @@ import type { WhereFilterDefinition } from "../../types.ts";
 
 import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
 
-import { DbMultipleTestsRunner } from "@andyrmitchell/pg-testable";
 import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.ts";
+import { acquireSchema, warmUp, disposeAllForTest } from "./testSchemaPartition.ts";
 
 
 
 
 describe('postgres where clause builder', () => {
 
-    let runner:DbMultipleTestsRunner;
-    beforeAll(async () => {
-        runner = new DbMultipleTestsRunner({type:'pglite'});
-        runner.sequentialTest(async (runner, db) => {
-            await db.query("select 'Hello world' as message;");
-        })
-    })
-    afterAll(async () => {
-        await runner.dispose();
-        console.log("Db shutdown OK");
-    })
-
-
+    // Shared PGlite + a fresh schema per match call (see testSchemaPartition.ts). warmUp pre-pays the
+    // one-time WASM init off the first test; disposeAllForTest drops each test's schemas afterwards.
+    beforeAll(warmUp);
+    afterEach(disposeAllForTest);
 
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
-        return await runner.sequentialTest(async (runner, db, schemaName, schemaScope) => {
+        const { client, table } = await acquireSchema();
 
-            const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
+        const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
 
-            await db.exec(`CREATE TABLE IF NOT EXISTS ${schemaScope('test_table_123')} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
+        await client.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [JSON.stringify(object)]);
 
-            await db.query(`INSERT INTO ${schemaScope('test_table_123')} (recordColumn) VALUES($1::jsonb)`, [JSON.stringify(object)]);
+        let clause:PreparedWhereClauseResult | undefined;
+        try {
+            clause = prepareWhereClauseForPg(filter, pm);
 
-            let clause:PreparedWhereClauseResult | undefined;
-            try {
-                clause = prepareWhereClauseForPg(filter, pm);
-
-            } catch(e) {
-                if( e instanceof Error ) {
-                    if( e.message.toLowerCase().indexOf('unsupported')>-1 ) {
-                        return undefined;
-                    }
+        } catch(e) {
+            if( e instanceof Error ) {
+                if( e.message.toLowerCase().indexOf('unsupported')>-1 ) {
+                    return undefined;
                 }
-                debugger;
-                throw e;
             }
+            throw e;
+        }
 
-            if( !clause.success ) {
-                // Check for path conversion errors (previously thrown as UNSAFE_WARNING)
-                const msg = clause.errors.map(e => e.message).join('; ');
-                if( msg.includes(UNSAFE_WARNING) ) {
-                    return false;
-                }
-                // Re-throw validation errors so standardTests error-handling tests still work.
-                // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
-                if( msg.toLowerCase().includes('not well-defined') ) {
-                    throw new Error(msg);
-                }
-                return undefined;
+        if( !clause.success ) {
+            // Check for path conversion errors (previously thrown as UNSAFE_WARNING)
+            const msg = clause.errors.map(e => e.message).join('; ');
+            if( msg.includes(UNSAFE_WARNING) ) {
+                return false;
             }
-
-            let queryStr:string;
-            if( clause.where_clause_statement ) {
-                queryStr = `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.where_clause_statement}`;
-            } else {
-                queryStr = `SELECT * FROM ${schemaScope('test_table_123')}`;
+            // Re-throw validation errors so standardTests error-handling tests still work.
+            // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
+            if( msg.toLowerCase().includes('not well-defined') ) {
+                throw new Error(msg);
             }
+            return undefined;
+        }
 
-            try {
-                const result = await db.query(queryStr, clause.statement_arguments);
+        const queryStr = clause.where_clause_statement
+            ? `SELECT * FROM ${table} WHERE ${clause.where_clause_statement}`
+            : `SELECT * FROM ${table}`;
 
-                const rows = result.rows;
-
-                return rows.length>0;
-            } catch(e) {
-                debugger;
-                throw e;
-            }
-        } )
-
+        const result = await client.query(queryStr, clause.statement_arguments);
+        return result.rows.length>0;
     }
 
     standardTests({
@@ -150,22 +125,21 @@ describe('postgres where clause builder', () => {
         const objectFilter: WhereFilterDefinition<Row> = { k: { a: '1' } };
 
         // The SQL verdict, or 'loud' when the filter is rejected at compile time or the query errors — both acceptable.
-        const sqlVerdict = (object: Row, filter: WhereFilterDefinition<Row>, schema: z.ZodType<Row>): Promise<boolean | 'loud'> =>
-            runner.sequentialTest(async (runner, db, schemaName, schemaScope) => {
-                const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
-                await db.exec(`CREATE TABLE IF NOT EXISTS ${schemaScope('test_table_123')} (pk SERIAL PRIMARY KEY, recordColumn JSONB NOT NULL)`);
-                await db.query(`INSERT INTO ${schemaScope('test_table_123')} (recordColumn) VALUES($1::jsonb)`, [JSON.stringify(object)]);
-                let clause: PreparedWhereClauseResult;
-                try { clause = prepareWhereClauseForPg(filter, pm); } catch { return 'loud'; }
-                if (!clause.success) return 'loud';
-                const sql = clause.where_clause_statement
-                    ? `SELECT * FROM ${schemaScope('test_table_123')} WHERE ${clause.where_clause_statement}`
-                    : `SELECT * FROM ${schemaScope('test_table_123')}`;
-                try {
-                    const result = await db.query(sql, clause.statement_arguments);
-                    return result.rows.length > 0;
-                } catch { return 'loud'; }
-            });
+        const sqlVerdict = async (object: Row, filter: WhereFilterDefinition<Row>, schema: z.ZodType<Row>): Promise<boolean | 'loud'> => {
+            const { client, table } = await acquireSchema();
+            const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
+            await client.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [JSON.stringify(object)]);
+            let clause: PreparedWhereClauseResult;
+            try { clause = prepareWhereClauseForPg(filter, pm); } catch { return 'loud'; }
+            if (!clause.success) return 'loud';
+            const sql = clause.where_clause_statement
+                ? `SELECT * FROM ${table} WHERE ${clause.where_clause_statement}`
+                : `SELECT * FROM ${table}`;
+            try {
+                const result = await client.query(sql, clause.statement_arguments);
+                return result.rows.length > 0;
+            } catch { return 'loud'; }
+        };
 
         const assertAgreesOrLoud = async (object: Row, filter: WhereFilterDefinition<Row>, schema: z.ZodType<Row>): Promise<void> => {
             const js = matchJavascriptObject(object, filter);

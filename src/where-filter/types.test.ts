@@ -1030,3 +1030,58 @@ describe('PartialObjectFilterStrict types', () => {
         });
     });
 });
+
+
+describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
+    // Each @ts-expect-error below pins a CURRENT gap between the type and the runtime/spec: it is GREEN today
+    // (the type wrongly REJECTS a shape the matcher supports, which a section test pins at runtime), and it
+    // flips to a compile error — TS2578 "unused @ts-expect-error" — the day the type is fixed to accept it.
+    // These are tripwires that a gap has closed, not desired behaviour. Cross-refs name the section tests that
+    // exercise the same shape against the running matcher.
+
+    type NullableAgeDoc = { contact: { name: string; age?: number | null } };
+    type SpreadDoc = { contact: { name: string; locations?: ({ city?: string; country?: string } | string | number)[] } };
+    type NumberDoc = { name: string; age: number };
+
+    describe('null equality on a nullable field is unmodelled', () => {
+        it('control: $eq with a concrete value on the same nullable field type-checks', () => {
+            const ok: WhereFilterDefinition<NullableAgeDoc> = { 'contact.age': { $eq: 5 } };
+        });
+
+        it('gap: $eq null — ValueComparisonEq conditional types drop null; the matcher treats it as IS NULL (§2 pins runtime)', () => {
+            const a: WhereFilterDefinition<NullableAgeDoc> = {
+                // @ts-expect-error TODO ValueComparisonEq doesn't resolve null for nullable fields
+                'contact.age': { $eq: null }
+            };
+        });
+
+        it('gap: bare null equality — ValueComparisonFlexi drops null; the matcher treats it as IS NULL (§2 pins runtime)', () => {
+            const a: WhereFilterDefinition<NullableAgeDoc> = {
+                // @ts-expect-error TODO ValueComparisonFlexi doesn't include null for nullable fields
+                'contact.age': null
+            };
+        });
+    });
+
+    describe('scalar-leaf paths through an array are not generated', () => {
+        it('gap: spread-leaf dot-prop path — DotPropPathsIncArrayUnion stops at arrays; the matcher spreads a generous $or (§3/§4 pin runtime)', () => {
+            const a: WhereFilterDefinition<SpreadDoc> = {
+                // @ts-expect-error TODO DotPropPathsIncArrayUnion doesn't generate dot-prop paths through arrays
+                'contact.locations.city': 'London'
+            };
+        });
+    });
+
+    describe('nested $not is unmodelled', () => {
+        it('control: a single $not wrapping a range type-checks', () => {
+            const ok: WhereFilterDefinition<NumberDoc> = { age: { $not: { $gt: 5 } } };
+        });
+
+        it('gap: $not wrapping $not — $not\'s argument union excludes ValueComparisonNot; the matcher negates recursively (§9 pins runtime)', () => {
+            const a: WhereFilterDefinition<NumberDoc> = {
+                // @ts-expect-error TODO $not's argument union doesn't include ValueComparisonNot, so nested $not is unmodelled
+                age: { $not: { $not: { $gt: 5 } } }
+            };
+        });
+    });
+});

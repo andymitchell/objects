@@ -69,8 +69,11 @@ const createAdapter: AdapterFactory = <T extends Record<string, any>>(schema: z.
 describe('writeToItemsArray', () => {
 
     describe('standard tests', () => {
+        // This honest reference adapter produces invalid_filter outcomes (rather than throwing), so it opts
+        // into the deliberately-invalid where corpus (§9 + fuzz P10 where-variant). The validate-where-sync
+        // consumer must NOT set this — it throws on any invalid_filter.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vitest global vs import type mismatch
-        standardTests({ test: test as any, expect: expect as any, createAdapter, implementationName: 'writeToItemsArray' });
+        standardTests({ test: test as any, expect: expect as any, createAdapter, implementationName: 'writeToItemsArray', capabilities: { invalidWhereCorpus: true } });
     });
 
     // ═══════════════════════════════════════════════════════════════

@@ -221,6 +221,12 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * | **$eq** | `{ $eq: 'Andy' }` | Explicit equality (`===`). `{ $eq: null }` matches null/missing. |
  * | **$regex** | `{ $regex: 'And', $options: 'i' }` | Regex match. String values only. |
  *
+ * **Multiple operators on one field are ANDed** (Mongo's implicit `$and`): `{ $gte: 18, $ne: 30 }` matches
+ * when *every* operator matches — identical to `{ $and: [{ field: { $gte: 18 } }, { field: { $ne: 30 } }] }`.
+ * Each operator keeps its own single-operator semantics, including missing-field behaviour
+ * (`$ne`/`$nin`/`$not`/`$exists:false` match a missing field; range/`$regex`/`$in` on a missing field are
+ * `false`). `$regex` + `$options` count as one predicate. The result is order-independent.
+ *
  * **Nullish behaviour**: Range/$regex on `undefined`/`null` returns `false` (like SQL NULL).
  *
  * **Type safety**: Range comparison throws if the filter type differs from the value type
@@ -282,6 +288,23 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * { 'children.grandchildren': { grandchild_name: 'Rita' } }
  * // → true: found in the first child's grandchildren array
  * ```
+ *
+ * ---
+ * ## Operand domain & structural validity
+ *
+ * **Operand domain — the JSON-serialisable subset.** Data and operand positions (a bare scalar, an
+ * `$eq`/range/`$in` operand, an exact-array element, an `$all` element) accept only `string | number`
+ * (incl. `NaN`/`±Infinity`) `| boolean | null` and plain objects/arrays thereof. A non-JSON carrier —
+ * `Date`, `bigint`, `Symbol`, `Map`, `Set`, or an explicit `undefined` element — is **rejected at the
+ * validity gate** (`isWhereFilterDefinition`), so the matcher throws rather than silently mis-evaluating
+ * (the JS matcher deep-equals a `Date`; SQL's `JSON.stringify` morphs it to an ISO string or throws on a
+ * `bigint`). See MONGO-DIVERGENCES.md #9 (and #7 for the accepted-but-lossy non-finite numbers).
+ *
+ * **Present-undefined is malformed.** An explicitly-`undefined` operator or logic value is rejected —
+ * `{ age: { $gt: undefined } }`, `{ age: { $lt: 5, $gt: undefined } }`, `{ $or: undefined }`,
+ * `{ name: { $regex: 'a', $options: undefined } }` — as is an unknown operator riding a known one
+ * (`{ age: { $eq: 5, $mod: 3 } }`). A bare `{ field: undefined }` field value stays valid but matches
+ * nothing (see Edge Cases).
  *
  * ---
  * ## Edge Cases

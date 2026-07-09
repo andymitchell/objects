@@ -2,7 +2,7 @@
 
 WhereFilterDefinition is a **subset** of MongoDB's query language. Every valid filter is also valid MongoDB syntax — with the exceptions listed below, where our semantics intentionally differ from MongoDB's.
 
-These are not missing features (subset gaps). These are cases where the same syntax produces **different results** compared to MongoDB.
+Two kinds of entry appear below. Entries **#1–#8** are **silent semantic divergences**: the same syntax runs but yields a different result than MongoDB. Entry **#9** is a **loud-rejection subset gap**: an operand type MongoDB/BSON accepts is rejected outright at the validity gate (rather than silently mis-evaluated), so every engine stays uniform across the JSON storage boundary.
 
 ---
 
@@ -119,3 +119,17 @@ These are not missing features (subset gaps). These are cases where the same syn
 **Rationale**: A schema-driven engine (SQL, or any backend bound to declared columns) fundamentally cannot duck-type per row. A `scalar | array` field is also a genuine footgun — it silently turns a scalar equality into an array-containment match — so rejecting it (rather than picking an arm) is the safe lowest-common-denominator.
 
 **Tests**: "10. Schema conformance (value-driven JS vs schema-driven SQL)" in `standardTests.ts`; `matchJavascriptObject.test.ts` "universalSchemaConformance …"; `prepareWhereClause.test.ts` "schema-driven rejection of shape-ambiguous schemas".
+
+---
+
+## 9. Operand domain is the JSON-serialisable subset (non-JSON carriers are rejected)
+
+**MongoDB / BSON**: BSON's operand and value domain is rich — `Date`, `BinData`, `ObjectId`, `Long`/`Decimal128`, regular expressions as first-class values, etc. `{ createdAt: { $gt: new Date('2020-01-01') } }` and a stored `{ tags: [new Date()] }` are all valid.
+
+**WhereFilterDefinition**: every data and operand position — a bare scalar, an `$eq`/range/`$in` operand, an exact-array element, an `$all` element — accepts only the JSON-serialisable subset: `string | number` (including `NaN`/`±Infinity`) `| boolean | null`, and plain objects/arrays composed of those. A non-JSON carrier — `Date`, `bigint`, `Symbol`, `Map`, `Set`, or an explicit `undefined` element — is **rejected at the validity gate** (`isWhereFilterDefinition`): the JS matcher throws ("filter was not well-defined") and the SQL builders rethrow a not-well-defined error. Unlike the silent divergences #1–#8, this subset gap **fails loudly**.
+
+Related structural rejections at the same gate: an explicitly-`undefined` *operator* or *logic* value is malformed (`{ age: { $gt: undefined } }`, `{ $or: undefined }`, `{ name: { $regex: 'a', $options: undefined } }`), and an unknown operator riding a known one (`{ age: { $eq: 5, $mod: 3 } }`) is rejected rather than silently ignored. A bare `{ field: undefined }` field value stays valid (it matches nothing — see the Edge Cases table in `WhereFilterDefinition`).
+
+**Rationale**: a filter must survive `JSON.stringify` → parse to a SQL backend losslessly and evaluate identically across JS, SQLite, and Postgres. BSON's richer types have no portable JSON representation, and silent coercion is a cross-engine divergence class in its own right — the JS matcher deep-equals a `Date` object, while SQL's `JSON.stringify` morphs it to an ISO string (and throws outright on a `bigint`). Rejecting the whole class at the gate keeps every engine uniform. Non-finite numbers are the one accepted exception — valid as operands (see #7) but lossy through SQL storage.
+
+**Tests**: "25. Operator-payload strictness, operand domains & multi-operator AND" in `standardTests.ts`; the numeric/carrier rows in the §16/§19 sub-blocks.

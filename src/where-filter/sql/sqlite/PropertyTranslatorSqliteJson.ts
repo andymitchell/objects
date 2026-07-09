@@ -10,6 +10,7 @@ import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToSqliteJsonPath } from "./convertDotPropPathToSqliteJsonPath.ts";
 import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
 import { ValueComparisonRangeOperators } from "../../consts.ts";
+import { splitIntoPredicateGroups } from "../../splitOperatorPayload.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
 import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect, WhereClauseError } from "../types.ts";
@@ -119,6 +120,16 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
     /** Inner implementation of generateSql, separated so conversionErrors can be collected. */
     private _generateSqlInner(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
+        // Several operators on one field mean their conjunction (Mongo's implicit AND). Emit each operator's
+        // clause independently and AND them, so every operator keeps its single-op SQL verbatim and the result
+        // is order-independent — replacing a first-operator-wins dispatch. A single predicate group (a lone
+        // operator, a whole range payload, or $regex+$options) falls through to the existing emitters unchanged.
+        const groups = splitIntoPredicateGroups(filter);
+        if (groups && groups.length > 1) {
+            const clauses = groups.map(group => this._generateSqlInner(dotpropPath, group as WhereFilterDefinition<T>, statementArguments, errors, rootFilter));
+            return `(${clauses.join(' AND ')})`;
+        }
+
         const countArraysInPath = this.countArraysInPath(dotpropPath);
         if (countArraysInPath > 0) {
 

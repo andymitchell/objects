@@ -1,0 +1,52 @@
+import isPlainObject from "../utils/isPlainObject.js";
+import { ValueOperators, ArrayOperators, ValueComparisonRangeOperators } from "./consts.ts";
+
+// The operators that mark a value as a field condition's operator payload, as opposed to a bare scalar, an
+// exact-array operand, or a compound sub-document. Sourced from the single-source operator lists.
+const OPERATOR_KEYS: ReadonlySet<string> = new Set<string>([...ValueOperators, ...ArrayOperators]);
+const isRangeOperator = (k: string): boolean => (ValueComparisonRangeOperators as readonly string[]).includes(k);
+
+/**
+ * Splits a field's operator payload into independent predicate groups whose conjunction is the payload's
+ * meaning — MongoDB reads several operators on one field as an implicit AND. Returns `null` when the value is
+ * not an operator payload (a bare scalar, an exact-array operand, or a compound sub-document), so those paths
+ * keep their existing single-value handling.
+ *
+ * Every where-filter engine — the in-memory JS matcher and both SQL emitters — evaluates one group at a time
+ * and ANDs the outcomes. Sharing THIS function is what guarantees they split a payload identically, so the
+ * AND law (`match(row, {p:{opA,…,opN}}) === match(row, {$and:[{p:{opA}},…]})`) holds ACROSS engines by
+ * construction, rather than relying on three separate copies agreeing by luck.
+ *
+ * Two operators are deliberately NOT split apart: `$regex` keeps its `$options` (options tunes the pattern,
+ * it is not a predicate of its own), and the range operators (`$gt`/`$gte`/`$lt`/`$lte`) stay one group so a
+ * mixed-type bound is handled exactly as a lone range payload would be. Every other operator becomes its own
+ * single-key group.
+ *
+ * @param condition The field-condition value to inspect.
+ * @returns One record per predicate group (order: range group first, then remaining operators in key order),
+ *   or `null` if `condition` is not an operator payload.
+ * @example
+ * splitIntoPredicateGroups({ $exists: true, $ne: 'x' });   // [{ $exists: true }, { $ne: 'x' }]
+ * splitIntoPredicateGroups({ $gt: 5, $lt: 10 });           // [{ $gt: 5, $lt: 10 }]  (range stays one group)
+ * splitIntoPredicateGroups('alice');                       // null  (a bare scalar, not an operator payload)
+ */
+export function splitIntoPredicateGroups(condition: unknown): Record<string, unknown>[] | null {
+    if (!isPlainObject(condition)) return null;
+    const payload = condition as Record<string, unknown>;
+    const keys = Object.keys(payload);
+    if (!keys.some(k => OPERATOR_KEYS.has(k))) return null;
+
+    const groups: Record<string, unknown>[] = [];
+    const rangeKeys = keys.filter(isRangeOperator);
+    if (rangeKeys.length > 0) groups.push(Object.fromEntries(rangeKeys.map(k => [k, payload[k]])));
+
+    for (const key of keys) {
+        if (key === '$options' || isRangeOperator(key)) continue; // $options travels with $regex; range grouped above
+        if (key === '$regex') {
+            groups.push('$options' in payload ? { $regex: payload.$regex, $options: payload.$options } : { $regex: payload.$regex });
+        } else {
+            groups.push({ [key]: payload[key] });
+        }
+    }
+    return groups;
+}

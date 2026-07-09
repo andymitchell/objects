@@ -120,6 +120,17 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         return `json_type(${columnExpr}, '${jsonPath}') = ${placeholder}`;
     }
 
+    /**
+     * Record a $regex translation failure. A 'not well-defined' message routes the seam to a REJECTION (an invalid
+     * pattern/flag — the JS oracle throws on those too); any other message routes it to a SKIP (a capability gap
+     * LIKE cannot express). Pushed to conversionErrors so it surfaces whether or not the caller threaded an errors
+     * array (e.g. from inside $elemMatch).
+     */
+    private pushRegexError(dotpropPath: string, filter: unknown, rootFilter: WhereFilterDefinition<T> | undefined, message: string): void {
+        const sub = { [dotpropPath]: filter } as WhereFilterDefinition;
+        this.conversionErrors.push({ kind: 'filter', sub_filter: sub, root_filter: rootFilter ?? sub, message });
+    }
+
     /** Pushes a value into the statementArguments array and returns `?`. Objects/arrays are JSON.stringify'd first. */
     protected generatePlaceholder(value: PreparedStatementArgumentOrObject, statementArguments: PreparedStatementArgument[]): string {
         if (isPlainObject(value) || Array.isArray(value)) value = JSON.stringify(value);
@@ -500,21 +511,25 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             return this.arraySizeEquals(jsonPath, placeholder);
         }
         // $regex — SQLite has no native regex; translate simple patterns to LIKE (best-effort).
-        // $options: 'i' is a no-op because SQLite LIKE is already ASCII case-insensitive.
         if (isValueComparisonRegex(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
             const raw = filter.$regex;
+            const opts = filter.$options ?? '';
 
-            // Detect complex regex features we cannot translate to LIKE
-            if (/[[\]+*?.|\\d\\w\\s\\b()]/.test(raw.replace(/\\\[/g, '').replace(/\\\]/g, ''))) {
-                if (errors && rootFilter) {
-                    errors.push({
-                        kind: 'filter',
-                        sub_filter: { [dotpropPath]: filter } as any,
-                        root_filter: rootFilter as any,
-                        message: '$regex pattern is too complex for SQLite LIKE translation'
-                    });
-                }
+            // Mirror the JS oracle (`new RegExp($regex, $options)`): an invalid pattern or an invalid flag is a
+            // REJECTION (the reference throws), surfaced as 'not well-defined' so the seam rethrows (vs a skip).
+            try {
+                new RegExp(raw, filter.$options);
+            } catch {
+                this.pushRegexError(dotpropPath, filter, rootFilter, `$regex is not well-defined: /${raw}/${opts}`);
+                return 'FALSE';
+            }
+
+            // LIKE can only express a literal substring/anchor pattern. The 'i' flag is a no-op (LIKE is already
+            // ASCII case-insensitive, divergence #3); any OTHER valid flag (m/s/u/y/…) changes matching in a way
+            // LIKE cannot reproduce → a capability gap (skip, not a rejection — the pattern itself is well-defined).
+            if ([...opts].some(f => f !== 'i')) {
+                this.pushRegexError(dotpropPath, filter, rootFilter, '$regex $options is unsupported for SQLite LIKE translation');
                 return 'FALSE';
             }
 
@@ -524,7 +539,16 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             if (anchStart) body = body.slice(1);
             if (anchEnd) body = body.slice(0, -1);
 
-            // Escape LIKE special characters in the pattern body
+            // After the anchors are stripped, a body containing any regex metacharacter — a char class `[]`, group
+            // `()`, quantifier `{}+*?`, wildcard `.`, alternation `|`, a backslash escape, or a mid-string anchor
+            // `^`/`$` — is a genuine regex feature LIKE cannot express → a capability gap (skip). A body of literal
+            // characters (letters, digits, `-`, `%`, `_`) translates.
+            if (/[[\](){}+*?.|\\^$]/.test(body)) {
+                this.pushRegexError(dotpropPath, filter, rootFilter, '$regex pattern is too complex for SQLite LIKE translation');
+                return 'FALSE';
+            }
+
+            // Escape LIKE special characters in the (now-literal) pattern body
             body = body.replace(/%/g, '\\%').replace(/_/g, '\\_');
 
             if (anchStart && anchEnd) {

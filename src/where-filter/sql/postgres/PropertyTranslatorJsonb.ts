@@ -109,6 +109,33 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     }
 
     /**
+     * Record a $regex translation failure. A 'not well-defined' message routes the seam to a REJECTION (an invalid
+     * pattern/flag — the JS oracle throws on those too); any other message routes it to a SKIP (a capability gap).
+     * Pushed to conversionErrors so it surfaces whether or not the caller threaded an errors array.
+     */
+    private pushRegexError(dotpropPath: string, filter: unknown, rootFilter: WhereFilterDefinition<T> | undefined, message: string): void {
+        const sub = { [dotpropPath]: filter } as WhereFilterDefinition;
+        this.conversionErrors.push({ kind: 'filter', sub_filter: sub, root_filter: rootFilter ?? sub, message });
+    }
+
+    /**
+     * Translate JS RegExp flags ($options) into a Postgres embedded-option prefix `(?…)`, so `col ~ '(?…)pattern'`
+     * reproduces `new RegExp(pattern, $options).test(value)`. Newline-sensitivity is chosen to match JS: 'm' makes
+     * `^`/`$` match at line boundaries; 's' makes `.` match a newline; the base (neither) keeps `.` off newlines and
+     * `^`/`$` at the string ends. Returns undefined for a flag Postgres cannot faithfully express (→ skip).
+     */
+    private pgRegexOptionPrefix(options: string | undefined): string | undefined {
+        const flags = new Set([...(options ?? '')]);
+        const i = flags.delete('i');
+        const m = flags.delete('m');
+        const s = flags.delete('s');
+        if (flags.size > 0) return undefined; // a flag (g/u/y/…) with no faithful Postgres equivalent
+        // Newline-sensitivity letter: (m,s)→w, (m,!s)→n, (!m,s)→s, (!m,!s)→p.
+        const nl = m ? (s ? 'w' : 'n') : (s ? 's' : 'p');
+        return `(?${i ? 'i' : ''}${nl})`;
+    }
+
+    /**
      * Whether an operator payload matches a field that is ABSENT from the schema (hence always missing),
      * mirroring matchJavascriptObject. Only the broadening operators ($ne / $nin / $not / $exists:false) match a
      * missing field; every narrowing operator ($eq, a range, $in, $type, $regex, $size, a bare scalar) does not.
@@ -547,12 +574,25 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             // (the convert call above still validates the path — an unknown one returns FALSE before reaching here).
             return this.arraySizeEquals(this.rawJsonbAccessor(dotpropPath), placeholder);
         }
-        // $regex
+        // $regex — Postgres POSIX regex (`~`); JS flags become an embedded `(?…)` option prefix.
         if (isValueComparisonRegex(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
-            const placeholder = this.generatePlaceholder(filter.$regex, statementArguments);
-            const op = filter.$options?.includes('i') ? '~*' : '~';
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ${op} ${placeholder}`);
+            // Mirror the JS oracle (`new RegExp($regex, $options)`): an invalid pattern or an invalid flag is a
+            // REJECTION (the reference throws), surfaced as 'not well-defined' so the seam rethrows (vs a skip).
+            try {
+                new RegExp(filter.$regex, filter.$options);
+            } catch {
+                this.pushRegexError(dotpropPath, filter, rootFilter, `$regex is not well-defined: /${filter.$regex}/${filter.$options ?? ''}`);
+                return 'FALSE';
+            }
+            const prefix = this.pgRegexOptionPrefix(filter.$options);
+            if (prefix === undefined) {
+                // A valid JS flag Postgres cannot faithfully express (e.g. sticky/unicode) → capability gap (skip).
+                this.pushRegexError(dotpropPath, filter, rootFilter, '$regex $options is unsupported for Postgres translation');
+                return 'FALSE';
+            }
+            const placeholder = this.generatePlaceholder(prefix + filter.$regex, statementArguments);
+            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ~ ${placeholder}`);
         }
 
         if (isValueComparisonEq(filter)) {

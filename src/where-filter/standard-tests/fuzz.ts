@@ -4,7 +4,7 @@ import type { SectionCtx } from "./harness.ts";
 import {
     mulberry32, mixSeed, DEFAULT_FUZZ_SEED, DEFAULT_FUZZ_ITERATIONS,
     FuzzSchema, type FuzzRow, type Rng, asFilter,
-    genRow, genFilter, REJECTING_FILTERS, invariant, repro,
+    genRow, genFilter, genComboPair, REJECTING_FILTERS, invariant, repro,
 } from "./fuzz-internals.ts";
 
 /**
@@ -14,8 +14,10 @@ import {
  * the in-package JS reference matcher (the one deliberate reference import). WF-P2–P8 are metamorphic laws
  * (De Morgan, double-negation, `$in`≡`$or` of `$eq`, commutativity/idempotence, monotonicity, `$nor`≡¬`$or`,
  * empty-logic identities) that only compare the adapter against ITSELF, so they hold even where an engine
- * diverges from the reference. WF-P9 pins the rejection contract. Every failure throws with the exact
- * `(seed, propertyIndex, iteration)` triple so it replays deterministically. The generator's uniform profile
+ * diverges from the reference. WF-P9 pins the rejection contract. WF-P10 is the multi-operator AND law
+ * (`{p:{opA,opB}} ≡ {$and:[{p:{opA}},{p:{opB}}]}`), a self-comparison that catches first-operator-wins
+ * dispatch. Every failure throws with the exact `(seed, propertyIndex, iteration)` triple so it replays
+ * deterministically. The generator's uniform profile
  * is confined to operators the example sections proved agree across all three engines — a WF-P1 red means a
  * NEW divergence the profile missed: tighten the generator, never the assertion.
  */
@@ -170,6 +172,22 @@ export function runFuzzSection(ctx: SectionCtx): void {
             for (const h of REJECTING_FILTERS) {
                 await ctx.expectMalformedFilterRejected(() => run(row, asFilter(h)));
             }
+            return 'ok';
+        });
+
+        // WF-P10 — multi-operator AND law: a payload of several operators means their conjunction, exactly
+        // as splitting them into a $and of one-operator payloads. Catches first-operator-wins dispatch (the
+        // combo generator is intentionally NOT part of the uniform WF-P1 profile — that profile must stay
+        // single-operator so WF-P1 keeps comparing agreed-uniform shapes).
+        property(10, 'multi-operator AND law', async (rng, iter) => {
+            const row = genRow(rng);
+            const { field, opA, opB, a, b } = genComboPair(rng, row);
+            const combo = asFilter({ [field]: { [opA]: a, [opB]: b } });
+            const split = asFilter({ $and: [{ [field]: { [opA]: a } }, { [field]: { [opB]: b } }] });
+            const got = await run(row, combo);
+            const exp = await run(row, split);
+            if (got === undefined || exp === undefined) return 'skip';
+            invariant(got === exp, () => repro('WF-P10', seed, 10, iter, row, { combo, split }, `combo=${got} and-split=${exp}`));
             return 'ok';
         });
     });

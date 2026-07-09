@@ -78,6 +78,19 @@ const swapsInNin: Rewrite = (obj) => {
     for (const [k, v] of Object.entries(obj)) out[k === '$in' ? '$nin' : k === '$nin' ? '$in' : k] = v;
     return out;
 };
+/**
+ * First-operator-wins: on a multi-operator value payload, keep only the FIRST operator and drop the rest —
+ * the pre-AND dispatch bug, re-imposed on top of the AND-correct reference. Only WF-P10 generates
+ * multi-operator payloads (with all-defined value operands), so P10 is the sole property that must catch it.
+ */
+const VALUE_OP_KEYS = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$exists']);
+const firstOpWins: Rewrite = (obj) => {
+    const keys = Object.keys(obj);
+    if (keys.length >= 2 && keys.every(k => VALUE_OP_KEYS.has(k) && obj[k] !== undefined)) {
+        return { [keys[0]!]: obj[keys[0]!] };
+    }
+    return obj;
+};
 
 /** Ignore the filter entirely and match everything. */
 const alwaysTrue: MatchJavascriptObjectInTesting = async () => true;
@@ -108,6 +121,7 @@ const GROUP_A: Saboteur[] = [
     { name: 'S7 swapsInNin', matcher: rewriteMatcher(swapsInNin), trips: [1] },
     { name: 'S8 emptyOrMatchesAll', matcher: emptyOrMatchesAll, trips: [8] },
     { name: 'S9 swallowsInvalidFilter', matcher: swallowsInvalidFilter, trips: [9] },
+    { name: 'S10 firstOpWins', matcher: rewriteMatcher(firstOpWins), trips: [10] },
 ];
 
 type Collected = { name: string; passed: boolean; error?: string };

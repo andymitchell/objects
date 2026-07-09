@@ -1084,4 +1084,51 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
             };
         });
     });
+
+    type BoolArrDoc = { flags: boolean[] };
+    type NumArrDoc = { scores: number[] };
+
+    describe('multi-operator payloads are ACCEPTED by the type (§25 pins the AND runtime)', () => {
+        // These COMPILE today (a TS union does not excess-property-check a value assignable to one arm), so no
+        // type change is needed to model multi-operator AND — the gate accepts them and every engine ANDs them.
+        // Regression guards, not tripwires: if a future type change starts REJECTING a combo, it breaks here.
+        it('cross-family value combo $gte + $ne compiles', () => {
+            const a: WhereFilterDefinition<NumberDoc> = { age: { $gte: 18, $ne: 30 } };
+        });
+        it('value + meta combo $eq + $exists compiles', () => {
+            const a: WhereFilterDefinition<NumberDoc> = { age: { $eq: 5, $exists: true } };
+        });
+        it('$regex + range combo compiles on a string field', () => {
+            const a: WhereFilterDefinition<NumberDoc> = { name: { $regex: 'a', $gt: 'b' } };
+        });
+    });
+
+    describe('$all operand domain is ACCEPTED by the type (§25 pins the widened gate)', () => {
+        // The element type follows the array, so the type always allowed booleans / non-finite numbers in $all;
+        // only the runtime gate was narrower (it rejected them). Gate widening aligns the gate to the type.
+        it('$all of booleans compiles on a boolean array', () => {
+            const a: WhereFilterDefinition<BoolArrDoc> = { flags: { $all: [true, false] } };
+        });
+        it('$all of NaN compiles on a number array', () => {
+            const a: WhereFilterDefinition<NumArrDoc> = { scores: { $all: [NaN] } };
+        });
+    });
+
+    describe('present-undefined operator values compile but are rejected at runtime (§25)', () => {
+        // These COMPILE because exactOptionalPropertyTypes is off (an optional `$gt?: number` admits `undefined`).
+        // The type will NOT be tightened by this work; §25 rejects them at the runtime gate instead. Plain
+        // compiling assignments document the direction of the gap (type accepts, runtime rejects).
+        it('gap: a lone present-undefined operator compiles', () => {
+            const a: WhereFilterDefinition<NumberDoc> = { age: { $gt: undefined } };
+        });
+        it('gap: a present-undefined operator beside a defined one compiles', () => {
+            const a: WhereFilterDefinition<NumberDoc> = { age: { $gte: 18, $ne: undefined } };
+        });
+        it('control: a cross-CATEGORY mix ($in + $size) on a scalar path stays a type error', () => {
+            const a: WhereFilterDefinition<NumberDoc> = {
+                // @ts-expect-error $size is an array operator; it is not valid on a scalar (number) field alongside $in
+                age: { $in: [1], $size: 2 }
+            };
+        });
+    });
 });

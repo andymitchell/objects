@@ -137,13 +137,58 @@ export function genFilter(rng: Rng, row: FuzzRow, depth = 0): WhereFilterDefinit
 }
 
 /**
- * The WF-P9 rejection corpus: filters the CURRENT reference genuinely rejects on ALL engines, so the fuzz
- * stays green on an honest matcher (it is the saboteur baseline). `{id:{$in:5}}` throws a TypeError
- * (`.includes` on a number) — the field must be REQUIRED and always present: an absent value (a phantom
- * field, or an absent OPTIONAL field) short-circuits the nullish guard to `false` instead of reaching the
- * throw. SPEC-INTENT §16 rejections are NOT here until the validation gate is tightened — add them then.
+ * The WF-P9 rejection corpus: filters the reference genuinely rejects on ALL engines, so the fuzz stays
+ * green on an honest matcher (it is the saboteur baseline). `{id:{$in:5}}` throws a TypeError (`.includes`
+ * on a number) — the field must be REQUIRED and always present: an absent value (a phantom field, or an
+ * absent OPTIONAL field) short-circuits the nullish guard to `false` instead of reaching the throw.
+ *
+ * The §25 additions below are GATE rejections: once the validity gate is tightened they are rejected
+ * uniformly by all four consumers (the gate is shared), so they never become an eval-time-only reject that
+ * would permanently red SQL. Only gate-rejected shapes belong here.
  */
-export const REJECTING_FILTERS: readonly unknown[] = [null, [], 42, 'x', { $and: [5, 'x'] }, { id: { $in: 5 } }];
+export const REJECTING_FILTERS: readonly unknown[] = [
+    null, [], 42, 'x', { $and: [5, 'x'] }, { id: { $in: 5 } },
+    // §25 gate rejections: unknown-operator piggyback, present-undefined operator/logic, non-JSON carrier,
+    // cross-category mix. Each fails `isWhereFilterDefinition` once the gate is tightened.
+    { age: { $eq: 5, $mod: 3 } },
+    { age: { $lt: 5, $gt: undefined } },
+    { $or: undefined },
+    { tags: [new Date()] },
+    { tags: { $all: [{ x: Symbol('s') }] } },
+    { tags: { $size: 2, $gt: 5 } },
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// Multi-operator AND law (WF-P10) — its own generator, deliberately kept OUT of the uniform profile
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * The value operators WF-P10 combines. Two DISTINCT ones on one present-biased scalar field form a payload
+ * whose meaning is their conjunction. All operands are number|string — never boolean/null (not value-op
+ * operands, and they would drag in $all engine-limitation reds). `$regex`/`$options` are excluded so the
+ * combo is a pure conjunction with no paired-predicate special case.
+ */
+const COMBO_VALUE_OPS = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$exists'] as const;
+
+const comboOperand = (rng: Rng, op: string, field: 'name' | 'age', row: FuzzRow): unknown => {
+    if (op === '$exists') return rng.bool();
+    const value = () => (field === 'name' ? pickName(rng, row) : pickAge(rng, row));
+    if (op === '$in' || op === '$nin') return list(rng, value);
+    return value();
+};
+
+/**
+ * A single-field, two-operator combo and the fields needed to split it into `$and` of one-operator payloads.
+ * WF-P10 asserts `{field:{opA,opB}} ≡ {$and:[{field:{opA}},{field:{opB}}]}` — the AND law. Present-biased
+ * operands make both operators straddle the row value, so the two ops frequently disagree and the law bites.
+ */
+export function genComboPair(rng: Rng, row: FuzzRow): { field: 'name' | 'age'; opA: string; opB: string; a: unknown; b: unknown } {
+    const field = rng.bool() ? 'name' : 'age';
+    const opA = rng.pick(COMBO_VALUE_OPS);
+    let opB = rng.pick(COMBO_VALUE_OPS);
+    while (opB === opA) opB = rng.pick(COMBO_VALUE_OPS);
+    return { field, opA, opB, a: comboOperand(rng, opA, field, row), b: comboOperand(rng, opB, field, row) };
+}
 
 /**
  * Hand-written structural deep-equal — deliberately NOT the unit-under-test's own equality, so the

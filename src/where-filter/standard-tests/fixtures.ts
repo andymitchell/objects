@@ -158,3 +158,17 @@ export type DollarKey = z.infer<typeof DollarKeySchema>;
 /** An array of (string | object) — scalar-element match in a mixed array. */
 export const MixedArraySchema = z.object({ id: z.string(), mixed: z.array(z.union([z.string(), z.object({ k: z.string() })])) }).strict();
 export type MixedArray = z.infer<typeof MixedArraySchema>;
+
+/**
+ * Array fields spanning the widened `$all` operand domain — a boolean array and a nullable-number array —
+ * for §25's operand-domain rows. The gate historically rejected `$all:[true]` / `$all:[null]` / `$all:[NaN]`
+ * (its `$all` element schema was `string | number | record`, and `z.number()` rejects NaN/±Inf); the type
+ * always allowed them (element type follows the array). `scores` carries the non-finite `$all` operands.
+ */
+export const ArrayOperandSchema = z.object({
+    id: z.string(),
+    flags: z.array(z.boolean()),
+    maybe: z.array(z.union([z.number(), z.null()])),
+    scores: z.array(z.number()),
+}).strict();
+export type ArrayOperand = z.infer<typeof ArrayOperandSchema>;

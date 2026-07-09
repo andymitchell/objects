@@ -25,6 +25,7 @@ import { registerMultiScalarEnums } from "./section-20-multiscalar-enums.ts";
 import { registerLogicTrees } from "./section-21-logic-trees.ts";
 import { registerTypeMapping } from "./section-22-type-mapping.ts";
 import { registerCoverageGaps } from "./section-23-coverage-gaps.ts";
+import { registerOperatorStrictness } from "./section-25-operator-strictness.ts";
 import { runFuzzSection } from "./fuzz.ts";
 
 /**
@@ -84,6 +85,7 @@ export function standardTests(testConfig: StandardTestConfig): void {
     registerLogicTrees(ctx);
     registerTypeMapping(ctx);
     registerCoverageGaps(ctx);
+    registerOperatorStrictness(ctx);
     runFuzzSection(ctx);
 }
 

@@ -6,7 +6,7 @@ import type { ArrayFilter, MatchJavascriptObject, MatchJavascriptObjectOptions, 
 import deepEql from "deep-eql";
 import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from "./schemas.ts";
 import {isLogicFilter, isValueComparisonRangeFlexi, isValueComparisonScalar } from "./typeguards.ts";
-import { ValueComparisonRangeOperators } from "./consts.ts";
+import { ValueComparisonRangeOperators, ValueOperators, ArrayOperators } from "./consts.ts";
 import { safeJson } from "./safeJson.ts";
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
@@ -65,6 +65,7 @@ export type { ObjOrDraft };
  * @example
  * matchJavascriptObject({ name: 'Alice', age: 30 }, { age: { $gte: 18 } });   // true
  * matchJavascriptObject({ owner: ['alice', 'bob'] }, { owner: 'alice' });      // true (array containment)
+ * matchJavascriptObject({ age: 30 }, { age: { $gte: 18, $lt: 65 } });         // true (several operators on one field are ANDed)
  *
  * @example
  * // Universal schema conformance — behaves like the SQL backend, refusing to duck-type non-conforming data.
@@ -188,47 +189,101 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
             }
         }
 
-        // Handle $exists before array/scalar branching — it checks the value itself.
-        // MongoDB-aligned: explicit `null` is a present value (distinct from a missing key).
-        if (isValueComparisonExists(dotpropFilter)) {
-            if (dotpropFilter.$exists) {
-                return objectValue !== undefined;
-            } else {
-                return objectValue === undefined;
-            }
+        // Several operators on one field mean their conjunction (MongoDB's implicit AND, the same rule as
+        // multiple fields). Evaluate each operator independently and AND the verdicts: this keeps every
+        // operator's single-op semantics verbatim and is order-independent, replacing a first-operator-wins
+        // dispatch that silently ignored every operator after the first — and did so in a different order per
+        // engine, so JS and the SQL emitters could disagree on the very same filter.
+        const groups = splitIntoPredicateGroups(dotpropFilter);
+        if (groups) {
+            return groups.every(group => evaluateFieldCondition(objectValue, group, debugPath));
         }
-
-        // Handle $type before array/scalar branching — it checks the value's runtime type
-        if (isValueComparisonType(dotpropFilter)) {
-            return checkJsType(objectValue, dotpropFilter.$type);
-        }
-
-        // Handle $not before array/scalar branching when inner operator needs pre-branch handling.
-        // Use untyped `innerRaw` to avoid TypeScript's progressive type narrowing
-        // exhausting the generic union to `never` (the generic T=any makes narrowing unreliable).
-        if (isValueComparisonNot(dotpropFilter)) {
-            if (objectValue === undefined || objectValue === null) return true; // MongoDB: $not matches missing
-            const innerRaw: unknown = dotpropFilter.$not;
-            if (isValueComparisonExists(innerRaw)) {
-                const exists = objectValue !== undefined && objectValue !== null;
-                return !(innerRaw.$exists ? exists : !exists);
-            }
-            if (isValueComparisonType(innerRaw)) {
-                return !checkJsType(objectValue, innerRaw.$type);
-            }
-            // @ts-expect-error — TypeScript narrows innerRaw to never after prior type guards exhaust the unknown union
-            if (isArrayValueComparisonSize(innerRaw)) { if (!Array.isArray(objectValue)) return true; return !(objectValue.length === innerRaw.$size); }
-            // For other $not inner operators, fall through to normal array/scalar branching
-        }
-
-        if( Array.isArray(objectValue) ) {
-            return compareArray(objectValue, dotpropFilter, [...debugPath, dotpropFilter]);
-        } else {
-            return compareValue(objectValue, dotpropFilter);
-        }
+        return evaluateFieldCondition(objectValue, dotpropFilter, debugPath);
     }
 
-    
+
+}
+
+// The operators that make a value the operator payload of a field condition, as opposed to a bare scalar, an
+// exact-array operand, or a compound sub-document. Sourced from the same single-source lists the gate uses.
+const OPERATOR_KEYS: ReadonlySet<string> = new Set<string>([...ValueOperators, ...ArrayOperators]);
+const isRangeOperator = (k: string): boolean => (ValueComparisonRangeOperators as readonly string[]).includes(k);
+
+/**
+ * Splits a field's operator payload into independent predicate groups whose conjunction is the payload's
+ * meaning — MongoDB reads several operators on one field as an implicit AND. Returns `null` when the value is
+ * not an operator payload (a bare scalar, an exact-array operand, or a compound sub-document), leaving those
+ * paths to their existing handling untouched.
+ *
+ * Two operators are deliberately NOT split apart: `$regex` keeps its `$options` (options tunes the pattern,
+ * it is not a predicate of its own), and the range operators (`$gt`/`$gte`/`$lt`/`$lte`) stay one group so a
+ * mixed-type bound throws exactly as a lone range payload would. Every other operator becomes its own group.
+ *
+ * @param condition The field-condition value to inspect.
+ * @returns One record per predicate group, or `null` if `condition` is not an operator payload.
+ * @example
+ * splitIntoPredicateGroups({ $exists: true, $ne: 'x' });   // [{ $exists: true }, { $ne: 'x' }]
+ * splitIntoPredicateGroups({ $gt: 5, $lt: 10 });           // [{ $gt: 5, $lt: 10 }]  (range stays one group)
+ * splitIntoPredicateGroups('alice');                       // null  (a bare scalar, not an operator payload)
+ */
+function splitIntoPredicateGroups(condition: unknown): Record<string, unknown>[] | null {
+    if (!isPlainObject(condition)) return null;
+    const payload = condition as Record<string, unknown>;
+    const keys = Object.keys(payload);
+    if (!keys.some(k => OPERATOR_KEYS.has(k))) return null;
+
+    const groups: Record<string, unknown>[] = [];
+    const rangeKeys = keys.filter(isRangeOperator);
+    if (rangeKeys.length > 0) groups.push(Object.fromEntries(rangeKeys.map(k => [k, payload[k]])));
+
+    for (const key of keys) {
+        if (key === '$options' || isRangeOperator(key)) continue; // $options travels with $regex; range grouped above
+        if (key === '$regex') {
+            groups.push('$options' in payload ? { $regex: payload.$regex, $options: payload.$options } : { $regex: payload.$regex });
+        } else {
+            groups.push({ [key]: payload[key] });
+        }
+    }
+    return groups;
+}
+
+/**
+ * Evaluates a single field-condition predicate group against an already-resolved field value. `$exists`,
+ * `$type` and a pre-branch `$not` inspect the value itself; everything else routes to the array or scalar
+ * comparison by the value's runtime shape. Multi-operator payloads are split upstream, so each call here
+ * carries exactly one predicate group — this is the per-operator body the AND dispatch composes.
+ */
+function evaluateFieldCondition(objectValue: any, condition: any, debugPath: WhereFilterDefinition[]): boolean {
+    // $exists checks the value itself — MongoDB-aligned: explicit `null` is a present value (distinct from missing).
+    if (isValueComparisonExists(condition)) {
+        return condition.$exists ? objectValue !== undefined : objectValue === undefined;
+    }
+
+    // $type checks the value's runtime type.
+    if (isValueComparisonType(condition)) {
+        return checkJsType(objectValue, condition.$type);
+    }
+
+    // $not whose inner operator must be resolved against the value itself (pre-branch parity). Use untyped
+    // `innerRaw` to avoid TypeScript's progressive narrowing exhausting the generic union to `never`.
+    if (isValueComparisonNot(condition)) {
+        if (objectValue === undefined || objectValue === null) return true; // MongoDB: $not matches missing
+        const innerRaw: unknown = condition.$not;
+        if (isValueComparisonExists(innerRaw)) {
+            const exists = objectValue !== undefined && objectValue !== null;
+            return !(innerRaw.$exists ? exists : !exists);
+        }
+        if (isValueComparisonType(innerRaw)) {
+            return !checkJsType(objectValue, innerRaw.$type);
+        }
+        if (isArrayValueComparisonSize(innerRaw)) { if (!Array.isArray(objectValue)) return true; return !(objectValue.length === innerRaw.$size); }
+        // Other $not inner operators fall through to normal array/scalar branching below.
+    }
+
+    if (Array.isArray(objectValue)) {
+        return compareArray(objectValue, condition, [...debugPath, condition]);
+    }
+    return compareValue(objectValue, condition);
 }
 
 

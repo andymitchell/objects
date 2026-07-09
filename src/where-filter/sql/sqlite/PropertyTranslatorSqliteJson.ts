@@ -67,6 +67,19 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
     }
 
     /**
+     * Whether an operator payload matches a field that is ABSENT from the schema (hence always missing),
+     * mirroring matchJavascriptObject. Only the broadening operators ($ne / $nin / $not / $exists:false) match a
+     * missing field; every narrowing operator ($eq, a range, $in, $type, $regex, $size, a bare scalar) does not.
+     */
+    private matchesMissingField(filter: unknown): boolean {
+        if (isValueComparisonNe(filter)) return true;
+        if (isValueComparisonNin(filter)) return true;
+        if (isValueComparisonNot(filter)) return !this.matchesMissingField(filter.$not);
+        if (isValueComparisonExists(filter)) return !filter.$exists;
+        return false;
+    }
+
+    /**
      * Compare an array field's length, guarding the array-only `json_array_length` against a non-array value.
      * Unlike Postgres, SQLite's `json_array_length` does not error on a non-array — it returns 0 — so a `null |
      * array` field holding a JSON null would make `{ $size: 0 }` spuriously match. The json_type guard makes any
@@ -371,6 +384,14 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 return strict(filter);
             }
             // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
+        }
+
+        // A field absent from the schema is always missing. The broadening operators ($ne / $nin / $not) match a
+        // missing field (matchJavascriptObject's oracle), so return their definite verdict here — BEFORE
+        // getSqlIdentifier, which for an unknown path raises a path_conversion error that would fail the clause.
+        if (customSqlIdentifier === undefined && !this.nodeMap[dotpropPath]
+            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter))) {
+            return this.matchesMissingField(filter) ? '1=1' : '1=0';
         }
 
         // $ne

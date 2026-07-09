@@ -109,6 +109,19 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     }
 
     /**
+     * Whether an operator payload matches a field that is ABSENT from the schema (hence always missing),
+     * mirroring matchJavascriptObject. Only the broadening operators ($ne / $nin / $not / $exists:false) match a
+     * missing field; every narrowing operator ($eq, a range, $in, $type, $regex, $size, a bare scalar) does not.
+     */
+    private matchesMissingField(filter: unknown): boolean {
+        if (isValueComparisonNe(filter)) return true;
+        if (isValueComparisonNin(filter)) return true;
+        if (isValueComparisonNot(filter)) return !this.matchesMissingField(filter.$not);
+        if (isValueComparisonExists(filter)) return !filter.$exists;
+        return false;
+    }
+
+    /**
      * Generates a SQL fragment for a single dot-prop path and its filter value.
      * Two main branches: direct comparison (no arrays), or jsonb_array_elements spreading + EXISTS wrapping (arrays).
      * Compound array filters require all conditions to match the same element (exact document match).
@@ -424,6 +437,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
         }
 
+        // A field absent from the schema is always missing. The broadening operators ($ne / $nin / $not) match a
+        // missing field (matchJavascriptObject's oracle), so return their definite verdict here — BEFORE
+        // getSqlIdentifier, which for an unknown path raises a path_conversion error that would fail the clause.
+        if (customSqlIdentifier === undefined && !this.nodeMap[dotpropPath]
+            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter))) {
+            return this.matchesMissingField(filter) ? '1=1' : '1=0';
+        }
+
         // $ne
         if (isValueComparisonNe(filter)) {
             // MongoDB: NaN equals nothing, so $ne: NaN matches every value (and Mongo's "ne matches missing" rule also applies). See MONGO-DIVERGENCES.md §7.
@@ -492,9 +513,12 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
                 return 'FALSE';
             }
-            const jsonbPath = sizeResult.expression;
             const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
-            return `jsonb_array_length(${jsonbPath}) = ${placeholder}`;
+            // Guard the array-only jsonb_array_length against a scalar/missing value (CASE → false), matching the
+            // value-driven JS matcher — a bare `jsonb_array_length(<scalar>)` errors ("cannot get array length of a
+            // scalar"). Feed the raw `->` JSONB accessor, not the converter's `->>` text extraction for a scalar leaf
+            // (the convert call above still validates the path — an unknown one returns FALSE before reaching here).
+            return this.arraySizeEquals(this.rawJsonbAccessor(dotpropPath), placeholder);
         }
         // $regex
         if (isValueComparisonRegex(filter)) {

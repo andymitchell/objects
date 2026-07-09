@@ -89,6 +89,35 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         return `(json_type(${this.sqlColumnName}, '${jsonPath}') = 'array' AND json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder})`;
     }
 
+    /**
+     * A `$type` check emitted as a json_type comparison against (columnExpr, jsonPath). `'number'` accepts
+     * json_type's 'integer'/'real'; `'bool'` accepts 'true'/'false' (divergence #5); every other name maps to its
+     * json_type tag. Shared by the leaf comparison and the array-spread leaf so the two stay in lock-step.
+     */
+    private sqliteTypeTest(columnExpr: string, jsonPath: string, type: string, statementArguments: PreparedStatementArgument[]): string {
+        if (type === 'number') {
+            const p1 = this.generatePlaceholder('integer', statementArguments);
+            const p2 = this.generatePlaceholder('real', statementArguments);
+            return `json_type(${columnExpr}, '${jsonPath}') IN (${p1}, ${p2})`;
+        }
+        if (type === 'bool') {
+            const p1 = this.generatePlaceholder('true', statementArguments);
+            const p2 = this.generatePlaceholder('false', statementArguments);
+            return `json_type(${columnExpr}, '${jsonPath}') IN (${p1}, ${p2})`;
+        }
+        const typeMap: Record<string, string> = {
+            'string': 'text',
+            'number': 'integer',  // json_type returns 'integer' or 'real'
+            'bool': 'true',       // json_type returns 'true' or 'false'
+            'object': 'object',
+            'array': 'array',
+            'null': 'null',
+        };
+        const mappedType = typeMap[type] ?? type;
+        const placeholder = this.generatePlaceholder(mappedType, statementArguments);
+        return `json_type(${columnExpr}, '${jsonPath}') = ${placeholder}`;
+    }
+
     /** Pushes a value into the statementArguments array and returns `?`. Objects/arrays are JSON.stringify'd first. */
     protected generatePlaceholder(value: PreparedStatementArgumentOrObject, statementArguments: PreparedStatementArgument[]): string {
         if (isPlainObject(value) || Array.isArray(value)) value = JSON.stringify(value);
@@ -181,6 +210,11 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
                 sa = spreadJsonArraysSqlite(this.sqlColumnName, path);
                 if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
+                // The raw spread element (before any remaining-leaf extraction below) and the leaf path within it,
+                // for operators ($exists / $type) that must probe the element by json_type rather than compare its
+                // extracted scalar value.
+                const spreadElement = sa.output_column;
+                let spreadLeafJsonPath: string | undefined;
                 // When the path continues past the last array to a scalar/object field
                 // (e.g. messages.rfc822msgid where messages is the array), extract the
                 // remaining field from the spread output.
@@ -191,7 +225,8 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                         if (path[i]!.name) remainingSegments.unshift(path[i]!.name);
                     }
                     if (remainingSegments.length > 0) {
-                        const extracted = `json_extract(${sa.output_column}, '$.${remainingSegments.join('.')}')`;
+                        spreadLeafJsonPath = '$.' + remainingSegments.join('.');
+                        const extracted = `json_extract(${sa.output_column}, '${spreadLeafJsonPath}')`;
                         sa = { ...sa, output_column: extracted, output_identifier: extracted };
                     }
                 }
@@ -261,6 +296,15 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 }
                 // $exists on array
                 if (isValueComparisonExists(filter)) {
+                    if (spreadLeafJsonPath !== undefined) {
+                        // Spread leaf (a scalar/object below an array): the field exists iff some array element
+                        // carries the leaf. A whole-path json_type cannot descend through the array, so probe each
+                        // spread element — json_type keeps a present JSON null (a value) distinct from a missing key.
+                        const cond = `json_type(${spreadElement}, '${spreadLeafJsonPath}') IS NOT NULL`;
+                        return filter.$exists
+                            ? `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${cond})`
+                            : `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${cond})`;
+                    }
                     const jsonPath = '$.' + dotpropPath.split('.').join('.');
                     if (filter.$exists) {
                         return `json_type(${this.sqlColumnName}, '${jsonPath}') IS NOT NULL`;
@@ -270,6 +314,11 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 }
                 // $type on array
                 if (isValueComparisonType(filter)) {
+                    if (spreadLeafJsonPath !== undefined) {
+                        // Spread leaf: match the type of the leaf in any array element (whole-path json_type cannot
+                        // descend the array).
+                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${this.sqliteTypeTest(spreadElement, spreadLeafJsonPath, filter.$type, statementArguments)})`;
+                    }
                     const jsonPath = '$.' + dotpropPath.split('.').join('.');
                     const placeholder = this.generatePlaceholder(filter.$type, statementArguments);
                     return `json_type(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
@@ -386,11 +435,15 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
         }
 
-        // A field absent from the schema is always missing. The broadening operators ($ne / $nin / $not) match a
-        // missing field (matchJavascriptObject's oracle), so return their definite verdict here — BEFORE
-        // getSqlIdentifier, which for an unknown path raises a path_conversion error that would fail the clause.
+        // A field absent from the schema is always missing. Its verdict is the JS oracle's missing-field verdict —
+        // the broadening operators ($ne / $nin / $not / $exists:false) match, every narrowing one ($eq, a range,
+        // $in, $type, $regex, $size, $exists:true, a bare scalar) does not. Resolve $exists / $type / $size here
+        // (alongside $ne / $nin / $not) BEFORE their emitters interpolate the raw filter key into the SQL string —
+        // so an attacker-controlled key is never a query, only ever a definite `false`. ($eq / $in / range / $regex
+        // / bare scalar already resolve to FALSE via the path-validating getSqlIdentifier, so need no guard here.)
         if (customSqlIdentifier === undefined && !this.nodeMap[dotpropPath]
-            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter))) {
+            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter)
+                || isValueComparisonExists(filter) || isValueComparisonType(filter) || isArrayValueComparisonSize(filter))) {
             return this.matchesMissingField(filter) ? '1=1' : '1=0';
         }
 
@@ -436,27 +489,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         // $type
         if (isValueComparisonType(filter)) {
             const jsonPath = '$.' + dotpropPath.split('.').join('.');
-            const typeMap: Record<string, string> = {
-                'string': 'text',
-                'number': 'integer',  // json_type returns 'integer' or 'real'
-                'bool': 'true',       // json_type returns 'true' or 'false'
-                'object': 'object',
-                'array': 'array',
-                'null': 'null',
-            };
-            if (filter.$type === 'number') {
-                const placeholder1 = this.generatePlaceholder('integer', statementArguments);
-                const placeholder2 = this.generatePlaceholder('real', statementArguments);
-                return `json_type(${this.sqlColumnName}, '${jsonPath}') IN (${placeholder1}, ${placeholder2})`;
-            } else if (filter.$type === 'bool') {
-                const placeholder1 = this.generatePlaceholder('true', statementArguments);
-                const placeholder2 = this.generatePlaceholder('false', statementArguments);
-                return `json_type(${this.sqlColumnName}, '${jsonPath}') IN (${placeholder1}, ${placeholder2})`;
-            } else {
-                const mappedType = typeMap[filter.$type] ?? filter.$type;
-                const placeholder = this.generatePlaceholder(mappedType, statementArguments);
-                return `json_type(${this.sqlColumnName}, '${jsonPath}') = ${placeholder}`;
-            }
+            return this.sqliteTypeTest(this.sqlColumnName, jsonPath, filter.$type, statementArguments);
         }
         // $size (needed here for $not + $size to work via recursive generateComparison)
         if (isArrayValueComparisonSize(filter)) {

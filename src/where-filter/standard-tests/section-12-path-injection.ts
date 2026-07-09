@@ -85,5 +85,10 @@ export function registerPathInjection(ctx: SectionCtx): void {
             expectOrAcknowledgeUnsupported(result, true);
         });
 
+        test('12.15 a single-quote in a $size key stays safe (false, never a DB error)', async () => {
+            const result = await matchJavascriptObject({ id: '1', tags: ['a'], nums: [] }, { "ta'gs": { $size: 1 } } as unknown as WhereFilterDefinition, TagsSchema);
+            expectOrAcknowledgeUnsupported(result, false);
+        });
+
     });
 }

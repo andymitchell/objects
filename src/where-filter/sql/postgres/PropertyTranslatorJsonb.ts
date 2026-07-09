@@ -200,6 +200,10 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 // When the path continues past the last array to a scalar/object field
                 // (e.g. messages.rfc822msgid where messages is the array), extract the
                 // remaining field from the spread output.
+                // Whether the path ends at a scalar/object leaf BELOW the last array (a "spread leaf"). When set,
+                // saResolved.output_column is the leaf's raw `->` JSONB accessor within the spread element, which
+                // $exists / $type probe with jsonb_typeof.
+                let isSpreadLeaf = false;
                 if (treeNode.kind !== 'array') {
                     const remainingSegments: string[] = [];
                     for (let i = path.length - 1; i >= 0; i--) {
@@ -210,6 +214,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                         const jsonbPath = remainingSegments.map(s => `'${s}'`).join('->');
                         const output_column = `${sa.output_column}->${jsonbPath}`;
                         sa = { ...sa, output_column, output_identifier: `${output_column} #>> '{}'` };
+                        isSpreadLeaf = true;
                     }
                 }
                 const saResolved = sa;
@@ -289,6 +294,15 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 }
                 // $exists on array
                 if (isValueComparisonExists(filter)) {
+                    if (isSpreadLeaf) {
+                        // Spread leaf (a scalar/object below an array): the field exists iff some array element
+                        // carries the leaf. The converter's whole-path accessor cannot descend through the array, so
+                        // probe each spread element by jsonb_typeof (a present JSON null stays distinct from missing).
+                        const cond = `jsonb_typeof(${saResolved.output_column}) IS NOT NULL`;
+                        return filter.$exists
+                            ? `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${cond})`
+                            : `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${cond})`;
+                    }
                     const existsResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
                     if (!existsResult.success) {
                         this.conversionErrors.push({ kind: 'path_conversion', error: existsResult.error, message: existsResult.error.message });
@@ -303,12 +317,21 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 }
                 // $type on array
                 if (isValueComparisonType(filter)) {
-                    const parts = dotpropPath.split('.');
-                    const jsonbPath = parts.map(p => `'${p}'`).join('->');
-                    const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
                     const pgType = mapTypeToPostgres(filter.$type);
                     const placeholder = this.generatePlaceholder(pgType, statementArguments);
-                    return `jsonb_typeof(${rawJsonbExpr}) = ${placeholder}`;
+                    if (isSpreadLeaf) {
+                        // Spread leaf: match the leaf's type in any array element (the whole-path accessor cannot
+                        // descend the array).
+                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE jsonb_typeof(${saResolved.output_column}) = ${placeholder})`;
+                    }
+                    // Array-field $type: build the raw `->` JSONB accessor via the validating converter (noCasting)
+                    // rather than raw filter-key segments, so an accessor is only ever emitted for a known path.
+                    const typeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
+                    if (!typeResult.success) {
+                        this.conversionErrors.push({ kind: 'path_conversion', error: typeResult.error, message: typeResult.error.message });
+                        return 'FALSE';
+                    }
+                    return `jsonb_typeof(${typeResult.expression}) = ${placeholder}`;
                 }
 
                 if (isArrayValueComparisonElemMatch(filter)) {
@@ -437,11 +460,15 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
         }
 
-        // A field absent from the schema is always missing. The broadening operators ($ne / $nin / $not) match a
-        // missing field (matchJavascriptObject's oracle), so return their definite verdict here — BEFORE
-        // getSqlIdentifier, which for an unknown path raises a path_conversion error that would fail the clause.
+        // A field absent from the schema is always missing. Its verdict is the JS oracle's missing-field verdict —
+        // the broadening operators ($ne / $nin / $not / $exists:false) match, every narrowing one ($eq, a range,
+        // $in, $type, $regex, $size, $exists:true, a bare scalar) does not. Resolve $exists / $type / $size here
+        // (alongside $ne / $nin / $not) BEFORE their emitters interpolate the raw filter key into the SQL string —
+        // so an attacker-controlled key is never a query, only ever a definite `false`. ($eq / $in / range / $regex
+        // / bare scalar already resolve to FALSE via the path-validating getSqlIdentifier, so need no guard here.)
         if (customSqlIdentifier === undefined && !this.nodeMap[dotpropPath]
-            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter))) {
+            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter)
+                || isValueComparisonExists(filter) || isValueComparisonType(filter) || isArrayValueComparisonSize(filter))) {
             return this.matchesMissingField(filter) ? '1=1' : '1=0';
         }
 

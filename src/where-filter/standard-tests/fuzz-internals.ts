@@ -91,14 +91,14 @@ const RANGE_OPS = ['$gt', '$lt', '$gte', '$lte'] as const;
 const list = <X>(rng: Rng, gen: () => X): X[] => Array.from({ length: rng.intRange(1, 3) }, gen);
 
 /**
- * A single uniform-profile leaf: an operator on one field whose behaviour is identical across the pure-JS
- * matcher and both SQL emitters. Deliberately EXCLUDES the operators shown to diverge in the example
+ * A single uniform-profile leaf: an operator (or a two-operator conjunction) on one field whose behaviour is
+ * identical across the pure-JS matcher and both SQL emitters. Deliberately EXCLUDES the operators shown to diverge in the example
  * sections: boolean equality (`active` — SQLite binds a raw boolean and throws), `$regex`/`$type`,
  * non-finite numbers, empty `$in`/`$nin`/`$all`, `$elemMatch` `$exists`/`$type` on scalar arrays,
  * exact-array / multi-key deep-object literals, and unknown paths.
  */
 function genLeaf(rng: Rng, row: FuzzRow): WhereFilterDefinition<FuzzRow> {
-    switch (rng.int(18)) {
+    switch (rng.int(19)) {
         case 0: return asFilter({ name: pickName(rng, row) });
         case 1: return asFilter({ name: { $eq: pickName(rng, row) } });
         case 2: return asFilter({ name: { $ne: pickName(rng, row) } });
@@ -116,6 +116,12 @@ function genLeaf(rng: Rng, row: FuzzRow): WhereFilterDefinition<FuzzRow> {
         case 14: return asFilter({ tags: { $size: rng.int(4) } });
         case 15: return asFilter({ tags: { $all: list(rng, () => pickTag(rng, row)) } });
         case 16: return asFilter({ scores: { $size: rng.int(4) } });
+        case 17: {
+            // A two-operator conjunction on one scalar field (a Mongo implicit-AND payload). Every engine
+            // composes the operators as an AND, so the shape stays uniform — see {@link genComboPair}.
+            const { field, opA, opB, a, b } = genComboPair(rng, row);
+            return asFilter({ [field]: { [opA]: a, [opB]: b } });
+        }
         default: {
             const sub: SubItem = { k: pickTag(rng, row) };
             if (rng.bool(0.5)) sub.v = pickAge(rng, row);
@@ -159,7 +165,7 @@ export const REJECTING_FILTERS: readonly unknown[] = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════
-// Multi-operator AND law (WF-P10) — its own generator, deliberately kept OUT of the uniform profile
+// Multi-operator AND law (WF-P10) — combo generator, also folded into the uniform profile via genLeaf
 // ═══════════════════════════════════════════════════════════════════
 
 /**

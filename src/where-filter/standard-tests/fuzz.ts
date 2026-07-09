@@ -176,9 +176,9 @@ export function runFuzzSection(ctx: SectionCtx): void {
         });
 
         // WF-P10 — multi-operator AND law: a payload of several operators means their conjunction, exactly
-        // as splitting them into a $and of one-operator payloads. Catches first-operator-wins dispatch (the
-        // combo generator is intentionally NOT part of the uniform WF-P1 profile — that profile must stay
-        // single-operator so WF-P1 keeps comparing agreed-uniform shapes).
+        // as splitting them into a $and of one-operator payloads. Catches first-operator-wins dispatch. The
+        // combo generator also feeds the uniform profile (via genLeaf), so WF-P1's differential exercises
+        // multi-operator payloads on every engine too.
         property(10, 'multi-operator AND law', async (rng, iter) => {
             const row = genRow(rng);
             const { field, opA, opB, a, b } = genComboPair(rng, row);

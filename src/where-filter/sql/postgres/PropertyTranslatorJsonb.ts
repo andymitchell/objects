@@ -228,12 +228,22 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 // $all: array must contain all specified values (scalars use =, objects use @> containment)
                 if (isArrayValueComparisonAll(filter)) {
                     const conditions = filter.$all.map(v => {
+                        if (v === null) {
+                            // A JSON null element: compare the raw JSONB element to `'null'::jsonb`. The text
+                            // extraction (output_identifier) of a JSONB null is SQL NULL and never equals a bound param.
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = 'null'::jsonb)`;
+                        }
                         if (isPlainObject(v)) {
                             // Object element: use @> containment on the raw JSONB element
                             const placeholder = this.generatePlaceholder(v, statementArguments);
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} @> ${placeholder}::jsonb)`;
                         }
                         if (multiScalarElement && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${this.toJsonbParam(v, statementArguments)})`;
+                        }
+                        if (typeof v === 'boolean') {
+                            // A boolean element on a non-multiscalar array: cast via to_jsonb so the comparison is
+                            // `jsonb = jsonb`, not `text = boolean` (Postgres has no such operator and errors).
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${this.toJsonbParam(v, statementArguments)})`;
                         }
                         const placeholder = this.generatePlaceholder(v, statementArguments);

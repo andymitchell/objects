@@ -79,6 +79,10 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
     /** Pushes a value into the statementArguments array and returns `?`. Objects/arrays are JSON.stringify'd first. */
     protected generatePlaceholder(value: PreparedStatementArgumentOrObject, statementArguments: PreparedStatementArgument[]): string {
         if (isPlainObject(value) || Array.isArray(value)) value = JSON.stringify(value);
+        // better-sqlite3 cannot bind a JS boolean. A stored JSON boolean reads back through json_extract / json_each
+        // as the integer 1/0, so bind that shape to keep a plain `= ?` comparison faithful (a boolean field can only
+        // hold booleans; multi-scalar unions never reach here — they compare via the type-faithful json_type path).
+        if (typeof value === 'boolean') value = value ? 1 : 0;
         if (!isPreparedStatementArgument(value)) {
             throw new Error("Placeholders for SQL can only be string/number/boolean");
         }
@@ -206,6 +210,11 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 // $all: array must contain all specified values (scalars use =, objects use json_extract comparisons)
                 if (isArrayValueComparisonAll(filter)) {
                     const conditions = filter.$all.map(v => {
+                        if (v === null) {
+                            // A JSON null element: match by the json_each type tag. A `value = ?` bind cannot
+                            // represent null, and under SQL 3VL `value = NULL` is never true even for a null element.
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_type} = 'null')`;
+                        }
                         if (isPlainObject(v)) {
                             // Object element: check each key via json_extract on the spread element
                             const keys = Object.keys(v as Record<string, unknown>);

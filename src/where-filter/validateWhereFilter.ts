@@ -65,9 +65,11 @@ import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonV
  * **Deliberately not flagged (accepted misses — it errs toward a miss over a false positive).** Value-constraint
  * "matches nothing" queries (operands are never `safeParse`d, so a `.positive()` field still accepts a negative
  * filter); the documented edge cases (`{}`, `{field:undefined}`, empty `$and`/`$or`/`$nor`); logic-rescued
- * `$or`/`$nor` arms and the rare all-arms-dead `$or`; undeclared or mistyped fields under non-strict or
- * mixed-strictness-union parents; and positive contradictions expressed via `$exists:true` / `$type` / `$regex`
- * (e.g. `{age:{$type:'string'}}` on a number field) — these match zero rows but stay unflagged to keep the
+ * `$or`/`$nor` arms and the rare all-arms-dead `$or`; an un-compilable `$regex` nested inside a `$not` (a
+ * broadening operator the validator does not descend into), which *throws* rather than matching zero — left to
+ * the runtime dry-run; undeclared or mistyped fields under non-strict or mixed-strictness-union parents; and
+ * positive contradictions expressed via `$exists:true` / `$type` / `$regex` (e.g. `{age:{$type:'string'}}` on a
+ * number field) — these match zero rows but stay unflagged to keep the
  * validator simple and its false-positive surface minimal.
  *
  * **Opt-in `SerialisableJsonSubset` (`{ requireSerialisableJsonSubset: true }`).** A *further* narrowing layered
@@ -203,7 +205,7 @@ function appendNonSerialisableIssues(filter: unknown, issues: WhereFilterValidat
 function dedupeIssues(issues: WhereFilterValidationIssue[]): WhereFilterValidationIssue[] {
     const seen = new Set<string>();
     return issues.filter((i) => {
-        const key = `${i.path ?? ""} ${i.reason}`;
+        const key = `${i.path ?? ""}\0${i.reason}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -275,7 +277,7 @@ type DirectOperand = { value: unknown; op: "$eq" | RangeOp };
 /** A leaf condition classified for validation — only `direct` operands (incl. its `$in` list) can make a clause match nothing. */
 type LeafClass =
     | { kind: "broadening" }
-    | { kind: "regex"; pattern: unknown; options: unknown }
+    | { kind: "regex" }
     | { kind: "direct"; operands: DirectOperand[]; inList: unknown[] | null }
     | { kind: "opaque" };
 
@@ -300,7 +302,7 @@ function classifyCondition(condition: unknown): LeafClass {
     const inList = "$in" in ops && Array.isArray(ops["$in"]) ? (ops["$in"] as unknown[]) : null;
     if (operands.length > 0 || inList) return { kind: "direct", operands, inList };
 
-    if ("$regex" in ops) return { kind: "regex", pattern: ops["$regex"], options: ops["$options"] }; // pattern, not a field-typed value
+    if ("$regex" in ops) return { kind: "regex" }; // a lone $regex is a pattern, not a field-typed value (compile-checked off the raw condition in validateLeaf)
     for (const op of BROADENING_OPS) if (op in ops) return { kind: "broadening" };
     if ("$eq" in ops) return { kind: "broadening" }; // $eq:null (matches null/missing); $eq:undefined is caught as malformed upstream
     return { kind: "opaque" }; // operator-free object: deep-equal on a scalar, or a compound array-element filter
@@ -340,12 +342,19 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
     // short-circuit; those throws are left to the runtime dry-run, which is data-correct). A `$regex` operand
     // is a pattern; a range operand must be a number or string (an `Infinity`/`NaN` operand is a number — a
     // valid comparand or the `non_finite` case below — so it is not malformed).
-    if (cls.kind === "regex") {
-        if (typeof cls.pattern === "string" && !regexCompiles(cls.pattern, cls.options)) {
+    //
+    // Check `$regex` off the raw condition, not the leaf class: a positive sibling ($eq/range/$in) classifies
+    // the leaf `direct`, but under the implicit AND the `$regex` is still a conjunct the matcher builds a
+    // `RegExp` for and throws on, so an un-compilable pattern (or bad `$options`) must be flagged even when it
+    // does not own the classification.
+    if (condition !== null && typeof condition === "object" && !Array.isArray(condition) && "$regex" in condition) {
+        const pattern = (condition as Record<string, unknown>)["$regex"];
+        if (typeof pattern === "string" && !regexCompiles(pattern, (condition as Record<string, unknown>)["$options"])) {
             issues.push({ path, reason: "malformed", message: `Invalid $regex pattern on '${path}'.` });
+            return;
         }
-        return; // a $regex operand is a pattern, not a field-typed value — nothing else to check
     }
+    if (cls.kind === "regex") return; // a compiling $regex is a pattern, not a field-typed value — nothing else to check
     if (cls.kind === "direct" && cls.operands.some((o) => o.op !== "$eq" && typeof o.value !== "number" && typeof o.value !== "string")) {
         issues.push({ path, reason: "malformed", message: `Range operator on '${path}' needs a number or string operand.` });
         return;

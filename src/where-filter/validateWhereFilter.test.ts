@@ -389,6 +389,16 @@ describe("validateWhereFilter — malformed operands (flagged statically, regard
         // flagged here (that would be a false positive); the write engine's runtime dry-run catches it instead.
         expect(v({ $or: [{ id: "x" }, { id: { $regex: "[" } }] })).toEqual([]);
     });
+    it("flags an un-compilable $regex even when a positive operator sits beside it (an AND conjunct, not hidden by the leaf's classification)", () => {
+        // The leaf classifies as `direct` on the positive operator, but under the implicit AND the $regex is
+        // still a conjunct the matcher builds a RegExp for and throws on — so it must be flagged all the same.
+        expect(v({ id: { $eq: "x", $regex: "[" } })).toMatchObject([{ reason: "malformed", path: "id" }]);
+        expect(v({ age: { $gt: 5, $regex: "(" } })).toMatchObject([{ reason: "malformed", path: "age" }]);
+        // A bad $options behind a positive sibling is caught too — RegExp(pattern, options) throws on invalid flags.
+        expect(v({ id: { $eq: "x", $regex: "a", $options: "q" } })).toMatchObject([{ reason: "malformed", path: "id" }]);
+        // Control: a compiling $regex beside a positive operator is not a throw, so it is not flagged.
+        expect(v({ id: { $eq: "ok", $regex: "^o" } })).toEqual([]);
+    });
     it("flags a non-number/string range operand", () => {
         expect(v({ age: { $gt: undefined } })).toMatchObject([{ reason: "malformed", path: "age" }]);
         expect(v({ age: { $lt: null } })).toMatchObject([{ reason: "malformed", path: "age" }]);
@@ -586,6 +596,7 @@ describe("validateWhereFilter — metamorphic (never rejects what the matcher ma
         // — multi-operator AND: several operators on one field = their conjunction —
         { age: { $ne: 0, $gt: Infinity } }, { age: { $eq: 5, $gt: Infinity } }, // a zero-match positive beside a broadening / other-family operator → flagged, matches 0
         { age: { $ne: 1, $eq: "old" } }, // a type-mismatched positive masked by $ne → flagged, matches 0
+        { id: { $eq: "1", $regex: "[" } }, // an un-compilable $regex beside a positive → matcher throws on a matching row (else false), flagged, matches 0
         { age: { $gte: 18, $lte: 100 } }, { age: { $gt: 0, $lt: 200 } }, // valid AND bounds → some rows match, so must NOT be flagged (guards the AND-model against a false positive)
         { $or: [{ age: { $eq: 5, $mod: 3 } }, { id: "1" }] }, // a malformed $or arm makes the WHOLE filter gate-reject → the matcher throws at its entry gate (never rescues), so flagging is safe
     ];

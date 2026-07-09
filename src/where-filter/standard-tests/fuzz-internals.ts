@@ -65,17 +65,20 @@ export const asFilter = (x: unknown): WhereFilterDefinition<FuzzRow> => x as Whe
 // ═══════════════════════════════════════════════════════════════════
 
 export function genRow(rng: Rng): FuzzRow {
-    // Scalars stay optional (their missing/null behaviour is uniform — §15 grid). The array fields are
-    // ALWAYS present (possibly empty): an array operator ($size/$all/$in) on a MISSING array is NOT
-    // uniform — the SQLite emitter yields SQL NULL there, which does not negate, so `$nor ≡ ¬$or` breaks
-    // (see the ledger). Missing-array behaviour is pinned by the targeted §14/§15/§18 tests instead.
+    // Every field is optional and independently present/absent — including the array fields, so a MISSING array
+    // is exercised. An array operator ($size/$all/$in) on a missing array is now uniform across all engines: the
+    // SQLite $size emitter yields a DEFINITE `false` via a CASE guard (an unguarded `AND` used to leave SQL NULL,
+    // which does not negate, breaking `$nor ≡ ¬$or`); $all/$in/$elemMatch spread to zero rows.
     const row: FuzzRow = { id: 'r' + rng.int(1000) };
     if (rng.bool()) row.name = rng.pick(NAME_POOL);
     if (rng.bool()) row.age = rng.intRange(-10, 20);
     if (rng.bool()) row.active = rng.bool();
-    row.tags = Array.from({ length: rng.int(5) }, () => rng.pick(TAG_POOL));
-    row.scores = Array.from({ length: rng.int(5) }, () => rng.intRange(-10, 20));
-    row.items = Array.from({ length: rng.int(5) }, () => {
+    // Array fields are usually present (collection fields typically are) but sometimes absent — enough over the
+    // real iteration counts (100–300) to exercise the missing-array path densely, while keeping present-array
+    // operators well-represented for the differential.
+    if (rng.bool(0.8)) row.tags = Array.from({ length: rng.int(5) }, () => rng.pick(TAG_POOL));
+    if (rng.bool(0.8)) row.scores = Array.from({ length: rng.int(5) }, () => rng.intRange(-10, 20));
+    if (rng.bool(0.8)) row.items = Array.from({ length: rng.int(5) }, () => {
         const si: SubItem = { k: rng.pick(TAG_POOL) };
         if (rng.bool(0.7)) si.v = rng.intRange(-10, 20);
         return si;
@@ -136,7 +139,9 @@ const LOGIC_OPS = ['$and', '$or', '$nor'] as const;
 export function genFilter(rng: Rng, row: FuzzRow, depth = 0): WhereFilterDefinition<FuzzRow> {
     if (depth < 3 && rng.bool(0.3)) {
         const op = rng.pick(LOGIC_OPS);
-        const arms = list(rng, () => genFilter(rng, row, depth + 1));
+        // An arm is occasionally the empty match-all `{}`: the identity of $and, the absorber of $or, the emptier
+        // of $nor. Exercises the empty-sub-filter join path (which must contribute `1 = 1`, not a dangling clause).
+        const arms = list(rng, () => (rng.bool(0.15) ? asFilter({}) : genFilter(rng, row, depth + 1)));
         return asFilter({ [op]: arms });
     }
     return genLeaf(rng, row);

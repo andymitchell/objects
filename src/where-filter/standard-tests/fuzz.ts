@@ -156,12 +156,15 @@ export function runFuzzSection(ctx: SectionCtx): void {
             if (andEmpty !== undefined) invariant(andEmpty === true, () => repro('WF-P8', seed, 8, iter, row, {}, `$and[]=${andEmpty}`));
             if (orEmpty !== undefined) invariant(orEmpty === false, () => repro('WF-P8', seed, 8, iter, row, {}, `$or[]=${orEmpty}`));
             if (norEmpty !== undefined) invariant(norEmpty === true, () => repro('WF-P8', seed, 8, iter, row, {}, `$nor[]=${norEmpty}`));
-            // NOTE: `$and:[F, {}] ≡ F` is deliberately NOT exercised — an empty sub-filter `{}` (match-all)
-            // inside `$and` makes the SQLite emitter produce `(F) AND ()` → `near ")": syntax error` (a real
-            // divergence, recorded in the ledger). `{}` as a logic arm is outside the generated uniform profile.
             const justF = await run(row, F);
             const orF = await run(row, { $or: [F] });
             if (justF !== undefined && orF !== undefined) invariant(orF === justF, () => repro('WF-P8', seed, 8, iter, row, F, `$or[F]=${orF} F=${justF}`));
+            // An empty sub-filter `{}` is match-all: the identity of $and (`$and:[F,{}] ≡ F`) and the absorber of
+            // $or (`$or:[F,{}] ≡ match-all`). The empty arm must contribute `1 = 1`, never a dangling clause.
+            const andFEmpty = await run(row, asFilter({ $and: [F, {}] }));
+            if (justF !== undefined && andFEmpty !== undefined) invariant(andFEmpty === justF, () => repro('WF-P8', seed, 8, iter, row, F, `$and[F,{}]=${andFEmpty} F=${justF}`));
+            const orFEmpty = await run(row, asFilter({ $or: [F, {}] }));
+            if (orFEmpty !== undefined) invariant(orFEmpty === true, () => repro('WF-P8', seed, 8, iter, row, F, `$or[F,{}]=${orFEmpty} (match-all expected)`));
             return 'ok';
         });
 

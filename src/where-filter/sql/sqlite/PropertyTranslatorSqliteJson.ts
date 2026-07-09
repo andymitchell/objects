@@ -80,13 +80,15 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
     }
 
     /**
-     * Compare an array field's length, guarding the array-only `json_array_length` against a non-array value.
-     * Unlike Postgres, SQLite's `json_array_length` does not error on a non-array — it returns 0 — so a `null |
-     * array` field holding a JSON null would make `{ $size: 0 }` spuriously match. The json_type guard makes any
-     * non-array yield false, reproducing the value-driven JS matcher, which never reports a size for a non-array.
+     * Compare an array field's length, guarding the array-only `json_array_length` against a non-array or missing
+     * value. Unlike Postgres, SQLite's `json_array_length` does not error on a non-array — it returns 0 — so a `null
+     * | array` field holding a JSON null would make `{ $size: 0 }` spuriously match. A `CASE` (not `AND`) yields a
+     * DEFINITE `false` for every non-array AND for a missing path: with `AND`, a missing path makes `json_type = NULL
+     * = 'array'` evaluate to SQL NULL, which does not negate (breaking `$nor`/negation under 3VL). This reproduces
+     * the value-driven JS matcher, which reports no size for a non-array or absent field.
      */
     private arraySizeEquals(jsonPath: string, placeholder: string): string {
-        return `(json_type(${this.sqlColumnName}, '${jsonPath}') = 'array' AND json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder})`;
+        return `CASE WHEN json_type(${this.sqlColumnName}, '${jsonPath}') = 'array' THEN json_array_length(${this.sqlColumnName}, '${jsonPath}') = ${placeholder} ELSE 0 END`;
     }
 
     /**

@@ -61,7 +61,13 @@ export function compileWhereFilterRecursive<T extends Record<string, any> = any>
             const filterType = filter[type];
             if (isWhereFilterArray(filterType)) {
                 let subClauseString = '';
-                const subClauses = [...filterType].map(subFilter => compileWhereFilterRecursive(subFilter, statementArguments, propertySqlMap, errors, rootFilter));
+                // An empty sub-filter `{}` compiles to '' — it is Mongo's match-all, so inside a logic join it
+                // contributes `1 = 1` (else the join would emit a dangling `(F AND )` → SQL syntax error). Match-all
+                // is the identity of $and, the absorber of $or, and empties $nor — all correct via this substitution.
+                const subClauses = [...filterType].map(subFilter => {
+                    const clause = compileWhereFilterRecursive(subFilter, statementArguments, propertySqlMap, errors, rootFilter);
+                    return clause === '' ? '1 = 1' : clause;
+                });
                 if (type === '$nor') {
                     subClauseString = subClauses.length === 0 ? '1 = 1' : `NOT (${subClauses.join(' OR ')})`;
                 } else if (subClauses.length > 0) {

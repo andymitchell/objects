@@ -148,7 +148,12 @@ async function collectFuzzResults(matcher: MatchJavascriptObjectInTesting): Prom
         matchJavascriptObject: matcher,
         implementationName: 'saboteur-probe',
         errorsAsValues: false,
-        fuzz: { iterations: 40, seed: DEFAULT_FUZZ_SEED },
+        // The generator draws from a broad shape space (optional arrays, empty-`{}` logic arms, multi-op combos),
+        // so a rare-operator defect — e.g. a $size off-by-one, which only bites on a PRESENT array of a specific
+        // length — is diluted across many iterations. Enough iterations to catch it with a comfortable margin
+        // (~6 catches for S6 at this seed); the honest matcher still passes every property, and more iterations
+        // only ADD catches, so every declared-trip subset holds.
+        fuzz: { iterations: 120, seed: DEFAULT_FUZZ_SEED },
         ...makeHelpers(realExpect, false, 'saboteur-probe'),
     };
 

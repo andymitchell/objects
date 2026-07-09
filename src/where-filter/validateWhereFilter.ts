@@ -3,7 +3,7 @@ import { convertSchemaToDotPropPathTree, type TreeNode } from "../dot-prop-paths
 import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
 import { objectRejectsUnknownKeys } from "../zod/introspection.ts";
 import { WhereFilterLogicOperators, ValueComparisonRangeOperators } from "./consts.ts";
-import { isWhereFilterDefinition } from "./schemas.ts";
+import { isWhereFilterDefinition, WhereFilterFieldConditionSchema } from "./schemas.ts";
 import type { WhereFilterDefinition } from "./types.ts";
 import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 
@@ -20,10 +20,12 @@ import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonV
  * matcher exactly:
  *
  * - **Polarity.** Only *positive* operators (bare value, `$eq`, `$in`, range `$gt/$lt/$gte/$lte`) make a
- *   clause match nothing on a type/finite contradiction, so only those are checked. *Broadening* forms
- *   match widely — including missing fields — so they are never flagged: bare `null`, `$eq:null`, `$ne`,
- *   `$nin`, `$not`, `$exists`, `$type`. (e.g. `{ghost:{$ne:5}}` matches every row, so the unknown field
- *   `ghost` is *not* reported.)
+ *   clause match nothing on a type/finite contradiction, so only those are checked. *Broadening* operators
+ *   (bare `null`, `$eq:null`, `$ne`, `$nin`, `$not`, `$exists`, `$type`) match widely — including missing
+ *   fields — so a leaf carrying ONLY broadening operators is never flagged (e.g. `{ghost:{$ne:5}}` matches
+ *   every row, so the unknown field `ghost` is *not* reported). But several operators on one field mean their
+ *   conjunction (Mongo's implicit AND), so a broadening operator does not rescue a zero-match positive beside
+ *   it: `{age:{$ne:0, $gt:Infinity}}` still matches nothing, so its `$gt:Infinity` is flagged.
  * - **Logic.** Anything reached through `$or`/`$nor` is skipped — a sibling arm can rescue the match
  *   (`$or`) or the negation inverts it (`$nor`) — so a bad arm is never flagged. `$and`, multiple keys
  *   (implicit `$and`), and the top level are still checked. (This misses the rare all-arms-dead `$or`;
@@ -39,12 +41,16 @@ import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonV
  * - **Arrays.** Descends element-wise into object-array conditions (`$elemMatch` and the operator-free
  *   compound form) exactly where the matcher does; stays opaque on the array/operator forms it handles
  *   atomically (`$in`/`$size`/`$all`/etc.).
- * - **Malformed.** A filter the matcher would *throw* on is reported `malformed`: a structurally invalid
- *   filter (`isWhereFilterDefinition` false — `null`, `[]`, `{$or:[null]}`), or — in a must-match position — an
- *   un-compilable `$regex` pattern or a range operand that is not a number or string. The operand checks are
- *   static (data-independent, so they hold even on an empty list) but polarity-aware: under `$or`/`$nor` the
- *   matcher short-circuits, so a sibling arm can still match — a throw there is left to the write engine's
- *   runtime dry-run, not flagged here (flagging it would be a false positive).
+ * - **Malformed.** A filter the matcher would *throw* on is reported `malformed`. A structurally-invalid field
+ *   condition (a piggybacked operator like `{$eq:5,$mod:3}`, a non-JSON carrier) is localised to its field by
+ *   parsing the leaf against the gate's field-condition schema; a whole-filter fault no leaf could localise
+ *   (`null`, `[]`, `{$or:'x'}`, `{$mod:1}`) gets one path-less `malformed` via `isWhereFilterDefinition` — this
+ *   coarse gate runs even when no schema was supplied. A structurally-valid operand that only throws at *eval*
+ *   — an un-compilable `$regex` pattern, or a range operand that is not a number or string — is flagged only in
+ *   a must-match position: under `$or`/`$nor` the matcher short-circuits, so a sibling arm can still match, and
+ *   a throw there is left to the write engine's runtime dry-run (flagging it would be a false positive). A
+ *   *structural* fault, by contrast, makes the matcher throw at its entry gate regardless of polarity, so
+ *   flagging it — coarse or localised — is always sound.
  *
  * **`unknown_field` is flagged only under `.strict()` objects.** A strict object's parse rejects extra keys,
  * so the write engine cannot store an undeclared key on such a row — only there is a `where` on an undeclared
@@ -149,13 +155,17 @@ export function compileValidateWhereFilter<T extends Record<string, any> = any>(
         // those operands corrupt across a serialisation boundary even though the live matcher satisfies them.
         if (options?.requireSerialisableJsonSubset) appendNonSerialisableIssues(filter, issues);
         // Coarse fallback: a structurally-invalid filter the matcher would throw on (null / [] / a non-array
-        // logic arm / an unknown operator) that neither precise pass could localise gets ONE path-less
-        // `malformed`. Only when nothing more specific fired — a filter whose fault the walk pinned keeps its
-        // precise, path-tagged issue. Checked via the matcher's own predicate so the two stay in sync.
-        if (index && issues.length === 0 && !isWhereFilterDefinition(filter)) {
+        // logic arm / a stray operator) gets ONE path-less `malformed`. It runs with OR without a schema (the
+        // matcher's entry gate throws on any invalid filter regardless), and it fires unless a `malformed` was
+        // already localised — a co-occurring `non_finite`/`type_mismatch`/`unknown_field` does NOT suppress it,
+        // so a filter that is both localisably faulty AND structurally invalid reports both. Checked via the
+        // matcher's own predicate so the two stay in sync.
+        if (!issues.some((i) => i.reason === "malformed") && !isWhereFilterDefinition(filter)) {
             issues.push({ reason: "malformed", message: "Filter is not a valid where-filter definition." });
         }
-        return issues;
+        // Dedupe by (path, reason): the schema walk and the SerialisableJsonSubset walk can pin the same fault
+        // (e.g. a NaN operand is both a schema-level non_finite and a serialisation-level one) — report it once.
+        return dedupeIssues(issues);
     };
 }
 
@@ -187,6 +197,17 @@ function appendNonSerialisableIssues(filter: unknown, issues: WhereFilterValidat
                 : `Non-JSON operand${where} cannot losslessly round-trip JSON.`,
         });
     }
+}
+
+/** Drop issues that repeat a `(path, reason)` already seen, keeping the first (most precise) message for it. */
+function dedupeIssues(issues: WhereFilterValidationIssue[]): WhereFilterValidationIssue[] {
+    const seen = new Set<string>();
+    return issues.filter((i) => {
+        const key = `${i.path ?? ""} ${i.reason}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 }
 
 /** DFS the schema tree into a multimap (all nodes per path) and a set of paths that have a distinct child path. */
@@ -234,6 +255,10 @@ function walk(filter: Record<string, unknown> | null | undefined, prefix: string
             for (const sub of value) walk(sub as Record<string, unknown>, prefix, childBroadening, index, issues);
             continue;
         }
+        // A remaining `$`-prefixed key is not a valid field leaf: it is a logic operator with a non-array value
+        // (`{$or:'x'}`) or a stray operator (`{$mod:1}`). Validating it as a leaf would mislabel it
+        // `unknown_field`; instead skip it and let the coarse gate report the whole filter as `malformed`.
+        if (key.startsWith("$")) continue;
         validateLeaf(joinDotpropPath(prefix, key), value, broadening, index, issues);
     }
 }
@@ -247,31 +272,37 @@ type RangeOp = (typeof ValueComparisonRangeOperators)[number];
  */
 type DirectOperand = { value: unknown; op: "$eq" | RangeOp };
 
-/** A leaf condition classified by which matcher branch it drives — only `direct`/`in` operands can make a clause match nothing. */
+/** A leaf condition classified for validation — only `direct` operands (incl. its `$in` list) can make a clause match nothing. */
 type LeafClass =
     | { kind: "broadening" }
-    | { kind: "in"; list: unknown[] }
     | { kind: "regex"; pattern: unknown; options: unknown }
-    | { kind: "direct"; operands: DirectOperand[] }
+    | { kind: "direct"; operands: DirectOperand[]; inList: unknown[] | null }
     | { kind: "opaque" };
 
 /**
- * Map a leaf condition onto the matcher's `compareValue` precedence so the validator judges exactly the
- * operand the matcher would use: any broadening operator (matches missing/any) short-circuits to skip; among
- * positives the order is `$in` → `$regex` → `$eq` → range, mirroring the matcher's if-chain.
+ * Classify a leaf condition by the constraints it places on the field. A payload of several operators means
+ * their conjunction (Mongo's implicit AND), so this collects EVERY positive, schema-checkable constraint at
+ * once — `$eq` (non-null) and the range operators as direct operands, `$in` as a list — rather than picking a
+ * single winning operator. A broadening operator ($ne/$nin/$not/$exists/$type, or `$eq:null`) sitting beside
+ * them no longer short-circuits the whole leaf: under AND a zero-match positive still forces zero matches. A
+ * leaf that carries ONLY broadening operators (or a bare `null`) is `broadening` (skipped); `$regex` alone is
+ * a pattern (compile-checked, never schema-typed); an operator-free object is `opaque`.
  */
 function classifyCondition(condition: unknown): LeafClass {
     if (condition === null || condition === undefined) return { kind: "broadening" }; // bare null / absent → matches missing
-    if (typeof condition !== "object") return { kind: "direct", operands: [{ value: condition, op: "$eq" }] }; // bare scalar equality
+    if (typeof condition !== "object") return { kind: "direct", operands: [{ value: condition, op: "$eq" }], inList: null }; // bare scalar equality
     if (Array.isArray(condition)) return { kind: "opaque" }; // array literal = exact deep-equal
     const ops = condition as Record<string, unknown>;
-    for (const op of BROADENING_OPS) if (op in ops) return { kind: "broadening" };
-    if ("$eq" in ops && ops["$eq"] === null) return { kind: "broadening" }; // $eq:null matches null/missing
-    if ("$in" in ops) return Array.isArray(ops["$in"]) ? { kind: "in", list: ops["$in"] } : { kind: "opaque" };
+
+    const operands: DirectOperand[] = [];
+    if ("$eq" in ops && ops["$eq"] !== null && ops["$eq"] !== undefined) operands.push({ value: ops["$eq"], op: "$eq" }); // $eq:null broadens; $eq:undefined is caught as malformed
+    for (const op of RANGE_OPS) if (op in ops) operands.push({ value: ops[op], op }); // tag each operand with its range op → drives the position-aware Infinity check
+    const inList = "$in" in ops && Array.isArray(ops["$in"]) ? (ops["$in"] as unknown[]) : null;
+    if (operands.length > 0 || inList) return { kind: "direct", operands, inList };
+
     if ("$regex" in ops) return { kind: "regex", pattern: ops["$regex"], options: ops["$options"] }; // pattern, not a field-typed value
-    if ("$eq" in ops) return ops["$eq"] === undefined ? { kind: "opaque" } : { kind: "direct", operands: [{ value: ops["$eq"], op: "$eq" }] };
-    const operands = RANGE_OPS.filter((op) => op in ops).map((op) => ({ value: ops[op], op })); // tag each operand with its range op → drives the position-aware Infinity check
-    if (operands.length > 0) return { kind: "direct", operands };
+    for (const op of BROADENING_OPS) if (op in ops) return { kind: "broadening" };
+    if ("$eq" in ops) return { kind: "broadening" }; // $eq:null (matches null/missing); $eq:undefined is caught as malformed upstream
     return { kind: "opaque" }; // operator-free object: deep-equal on a scalar, or a compound array-element filter
 }
 
@@ -319,6 +350,17 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
         issues.push({ path, reason: "malformed", message: `Range operator on '${path}' needs a number or string operand.` });
         return;
     }
+    // Localise a malformed field condition: an object-shaped leaf that fails the gate's field-condition union
+    // is exactly the leaf that makes `isWhereFilterDefinition` reject the whole filter (the gate validates each
+    // field value against this same schema). Pinning `malformed` here — rather than leaving only the coarse,
+    // path-less fallback — localises a piggybacked operator (`{$eq:5,$mod:3}`) or a non-JSON carrier to its
+    // field. Sound in this must-match position: a gate-rejected filter throws at the matcher's entry gate, so a
+    // throw (never a match) backs the flag. (A bare `$regex` returned above, so an un-compilable-but-valid
+    // pattern string is not mis-flagged here.)
+    if (condition !== null && typeof condition === "object" && !Array.isArray(condition) && !WhereFilterFieldConditionSchema.safeParse(condition).success) {
+        issues.push({ path, reason: "malformed", message: `Malformed condition on '${path}'.` });
+        return;
+    }
 
     const nodes = index.multimap[path];
     if (!nodes || nodes.length === 0) {
@@ -358,11 +400,12 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
                     return;
                 }
             }
-        } else if (cls.kind === "in") {
-            // One right-type element could match, so flag only when EVERY element is the wrong type.
-            const checkable = cls.list.filter((el) => el !== null && el !== undefined);
-            if (checkable.length > 0 && checkable.every((el) => typeof el !== kind)) {
-                issues.push({ path, reason: "type_mismatch", message: `Filter on '${path}' expects ${kind} values in $in.` });
+            if (cls.inList) {
+                // One right-type element could match, so flag only when EVERY element is the wrong type.
+                const checkable = cls.inList.filter((el) => el !== null && el !== undefined);
+                if (checkable.length > 0 && checkable.every((el) => typeof el !== kind)) {
+                    issues.push({ path, reason: "type_mismatch", message: `Filter on '${path}' expects ${kind} values in $in.` });
+                }
             }
         }
     }

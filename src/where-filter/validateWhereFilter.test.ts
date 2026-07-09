@@ -440,6 +440,95 @@ describe("validateWhereFilter — a structurally-VALID operand that only throws 
     });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Structural hardening: a malformed filter is reported with the right reason and, where possible, the right
+// path — with no schema, alongside a localisable fault, and never twice. Plus the multi-operator AND model:
+// a payload of several operators means their conjunction, so a zero-match positive still bites even when a
+// broadening operator sits beside it.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("validateWhereFilter — structural hardening", () => {
+    describe("reports malformed even with no schema (the structural gate always runs)", () => {
+        const vs = (f: unknown) => compileValidateWhereFilter(undefined)(f as WhereFilterDefinition<any>);
+        it("flags a structurally-invalid filter that no schema-aware pass could localise", () => {
+            expect(vs({ $or: "x" })).toMatchObject([{ reason: "malformed" }]);
+            expect(vs({ age: { $eq: 5, $mod: 3 } })).toMatchObject([{ reason: "malformed" }]);
+            expect(vs(null)).toMatchObject([{ reason: "malformed" }]);
+            expect(vs([])).toMatchObject([{ reason: "malformed" }]);
+        });
+        it("accepts a structurally-valid filter with no schema (no false positive)", () => {
+            expect(vs({ anything: 1 })).toEqual([]);
+            expect(vs({ $and: [{ id: "x" }] })).toEqual([]);
+            expect(vs({ ghost: { $ne: 5 } })).toEqual([]);
+        });
+    });
+
+    describe("labels a bad logic/operator value as malformed, never as unknown_field", () => {
+        it("a non-array logic value is malformed, not an unknown '$or' field", () => {
+            const issues = validate({ $or: "x" });
+            expect(issues).toMatchObject([{ reason: "malformed" }]);
+            expect(issues.some(i => i.reason === "unknown_field")).toBe(false);
+        });
+        it("a stray operator at filter level is malformed, not an unknown '$mod' field", () => {
+            const issues = validate({ $mod: 1 });
+            expect(issues).toMatchObject([{ reason: "malformed" }]);
+            expect(issues.some(i => i.reason === "unknown_field")).toBe(false);
+        });
+    });
+
+    describe("reports a structural fault alongside a localisable one (neither suppresses the other)", () => {
+        it("a NaN operand AND a malformed logic value are BOTH reported", () => {
+            const issues = validate({ age: NaN, $or: "x" });
+            expect(issues.some(i => i.reason === "non_finite" && i.path === "age")).toBe(true);
+            expect(issues.some(i => i.reason === "malformed")).toBe(true);
+        });
+    });
+
+    describe("localises a malformed field condition to its path", () => {
+        it("an unknown operator riding a known one is pinned to the field", () => {
+            expect(validate({ age: { $eq: 5, $mod: 3 } })).toMatchObject([{ reason: "malformed", path: "age" }]);
+        });
+        it("emits exactly one malformed issue for it (the localised one; no path-less duplicate)", () => {
+            const malformed = validate({ age: { $eq: 5, $mod: 3 } }).filter(i => i.reason === "malformed");
+            expect(malformed).toHaveLength(1);
+            expect(malformed[0]!.path).toBe("age");
+        });
+        it("localises a piggyback inside $elemMatch to the array field", () => {
+            expect(vm({ children: { $elemMatch: { age: { $eq: 5, $mod: 3 } } } })).toMatchObject([{ reason: "malformed", path: "children" }]);
+        });
+        it("still reports a piggyback under a broadening $not (coarsely, since a broadening leaf is never localised)", () => {
+            expect(validate({ age: { $not: { $eq: 5, $mod: 3 } } })).toMatchObject([{ reason: "malformed" }]);
+        });
+    });
+
+    describe("does not double-report the same (path, reason)", () => {
+        const sub = (f: unknown) => validateWhereFilter(wf(f), Schema, { requireSerialisableJsonSubset: true });
+        it("a NaN operand caught by both the schema walk and the serialisable walk reports non_finite once", () => {
+            expect(sub({ age: NaN }).filter(i => i.reason === "non_finite" && i.path === "age")).toHaveLength(1);
+        });
+        it("a Date operand caught by both walks reports malformed once", () => {
+            expect(sub({ score: new Date() }).filter(i => i.reason === "malformed" && i.path === "score")).toHaveLength(1);
+        });
+    });
+
+    describe("multi-operator AND: a zero-match positive bites even beside a broadening sibling", () => {
+        it("a broadening $ne no longer masks a zero-match range bound", () => {
+            expect(validate({ age: { $ne: 0, $gt: Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+        });
+        it("collects positives across families — $eq AND a zero-match range together", () => {
+            expect(validate({ age: { $eq: 5, $gt: Infinity } })).toMatchObject([{ reason: "non_finite", path: "age" }]);
+        });
+        it("still flags a type mismatch masked by a broadening sibling", () => {
+            expect(validate({ age: { $ne: 1, $eq: "old" } })).toMatchObject([{ reason: "type_mismatch", path: "age" }]);
+        });
+        it("still NEVER flags a purely broadening leaf (no positive constraint present)", () => {
+            expect(validate({ age: { $ne: 5 } })).toEqual([]);
+            expect(validate({ age: { $ne: NaN } })).toEqual([]);
+            expect(validate({ ghost: { $ne: 5 } })).toEqual([]);
+            expect(validate({ age: { $not: { $gt: 5 } } })).toEqual([]);
+        });
+    });
+});
+
 /**
  * Metamorphic safety net: the validator must NEVER reject a filter the matcher would actually match.
  * The single property holds for *every* filter (no exceptions, including `$or`/`$nor`):
@@ -494,10 +583,46 @@ describe("validateWhereFilter — metamorphic (never rejects what the matcher ma
         { items: { a: 7 } }, // only variant 'a' has key 'a' (string) → flagged, matcher matches 0
         { children: { $and: [{ ghost: 1 }] } }, { children: { $elemMatch: { $and: [{ age: "old" }] } } }, // array-logic must-match → flagged, matches 0
         null, [], { $or: [null] }, { $and: [{ id: "1" }, { ghost: 1 }] }, // malformed (throws) + $and must-match
+        // — multi-operator AND: several operators on one field = their conjunction —
+        { age: { $ne: 0, $gt: Infinity } }, { age: { $eq: 5, $gt: Infinity } }, // a zero-match positive beside a broadening / other-family operator → flagged, matches 0
+        { age: { $ne: 1, $eq: "old" } }, // a type-mismatched positive masked by $ne → flagged, matches 0
+        { age: { $gte: 18, $lte: 100 } }, { age: { $gt: 0, $lt: 200 } }, // valid AND bounds → some rows match, so must NOT be flagged (guards the AND-model against a false positive)
+        { $or: [{ age: { $eq: 5, $mod: 3 } }, { id: "1" }] }, // a malformed $or arm makes the WHOLE filter gate-reject → the matcher throws at its entry gate (never rescues), so flagging is safe
     ];
 
     it.each(corpus.map((f, i) => [i, f] as const))("#%i: a flagged filter matches zero items", (_i, f) => {
         if (vm(f).length > 0) expect(matchCount(f)).toBe(0);
+    });
+
+    // Seeded fuzz — the same property, generated. Random 1–3-operator payloads on scalar fields, mixing
+    // broadening and positive operators with valid / NaN / ±Infinity / wrong-type / null operands, so the
+    // multi-operator AND model is stress-tested where it is riskiest: a broadening operator sitting beside a
+    // zero-match positive one. A generated filter that is flagged yet matches a row is a false positive (and a
+    // deterministic repro via the message). A gate-rejected shape throws in the matcher → matchCount 0 → safe.
+    it("seeded fuzz: no generated multi-operator leaf is ever flagged while still matching a row", () => {
+        let seed = 0x9e3779b9 | 0;
+        const rng = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+        const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rng() * xs.length)]!;
+        const FIELDS = ["id", "age", "active", "score", "nickname", "ghost"] as const;
+        const OPS = ["$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$type"] as const;
+        const SCALARS: unknown[] = [0, 5, -3, 30, "x", "old", true, false, null];
+        const OPERANDS: unknown[] = [...SCALARS, NaN, Infinity, -Infinity];
+        const operandFor = (op: string): unknown => {
+            if (op === "$exists") return rng() < 0.5;
+            if (op === "$type") return pick(["string", "number", "boolean", "null", "array", "object"]);
+            if (op === "$in" || op === "$nin") return Array.from({ length: 1 + Math.floor(rng() * 2) }, () => pick(OPERANDS));
+            return pick(OPERANDS);
+        };
+        for (let i = 0; i < 3000; i++) {
+            const field = pick(FIELDS);
+            const nOps = 1 + Math.floor(rng() * 3); // 1..3 operators on one field → a Mongo implicit-AND payload
+            const payload: Record<string, unknown> = {};
+            for (let k = 0; k < nOps; k++) { const op = pick(OPS); payload[op] = operandFor(op); }
+            const f = { [field]: payload } as WhereFilterDefinition<M>;
+            if (vm(f).length > 0) {
+                expect(matchCount(f), `false positive: ${JSON.stringify(f)} flagged ${JSON.stringify(vm(f))} but matched ${matchCount(f)} row(s)`).toBe(0);
+            }
+        }
     });
 });
 

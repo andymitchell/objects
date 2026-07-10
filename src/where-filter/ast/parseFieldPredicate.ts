@@ -1,16 +1,13 @@
 import isPlainObject from "../../utils/isPlainObject.ts";
-import { ArrayOperators, ValueComparisonRangeOperators, ValueOperators } from "../consts.ts";
+import { ValueComparisonRangeOperators } from "../consts.ts";
+import { isOperatorKey } from "./operators.ts";
 import { safeJson } from "../safeJson.ts";
 import type { ValueComparisonType } from "../types.ts";
 import type { ElemMatchBody, Predicate, PredicateScalar, RangeBound, RangeOperator } from "./predicate.ts";
 
-const OPERATOR_KEYS: ReadonlySet<string> = new Set<string>([...ValueOperators, ...ArrayOperators]);
 const RANGE_OPERATOR_KEYS: ReadonlySet<string> = new Set<string>(ValueComparisonRangeOperators);
 
 const isRangeOperator = (key: string): key is RangeOperator => RANGE_OPERATOR_KEYS.has(key);
-
-/** Whether a key names an operator rather than a field of a sub-document. */
-export const isOperatorKey = (key: string): boolean => OPERATOR_KEYS.has(key);
 
 /**
  * Parse one field condition into its {@link Predicate} tree.

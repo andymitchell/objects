@@ -3,6 +3,7 @@ import { convertSchemaToDotPropPathTree, type TreeNode } from "../dot-prop-paths
 import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
 import { objectRejectsUnknownKeys } from "../zod/introspection.ts";
 import { WhereFilterLogicOperators, ValueComparisonRangeOperators } from "./consts.ts";
+import { broadeningOperatorNames } from "./ast/operators.ts";
 import { isWhereFilterDefinition, WhereFilterFieldConditionSchema } from "./schemas.ts";
 import type { WhereFilterDefinition } from "./types.ts";
 import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
@@ -91,8 +92,12 @@ export type WhereFilterValidationIssue = {
 /** ZodKinds whose values are a single primitive we can coarsely type-check a filter operand against. */
 const SCALAR_KINDS = new Set<string>(["string", "number", "boolean"]);
 const LOGIC_OPERATORS = WhereFilterLogicOperators as readonly string[];
-/** Operators that broaden a match (incl. missing fields), so a contradiction under them never means "matches nothing". */
-const BROADENING_OPS = ["$ne", "$nin", "$not", "$exists", "$type"] as const;
+/**
+ * Operators that broaden a match (incl. missing fields), so a contradiction under them never means "matches
+ * nothing". Derived from the operator registry's `broadening` flag — the single source — so this set cannot
+ * drift from the gate's operator vocabulary. Presently `$ne`/`$nin`/`$not`/`$exists`/`$type`.
+ */
+const BROADENING_OPS: readonly string[] = broadeningOperatorNames;
 /** Positive range operators whose operand is compared as the field's own value. */
 const RANGE_OPS = ValueComparisonRangeOperators; // literal tuple — each element keeps its `RangeOp` type (no `as string[]`), so a classified operand can record which range op produced it
 

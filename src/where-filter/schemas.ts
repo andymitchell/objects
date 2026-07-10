@@ -56,7 +56,9 @@ const noPresentUndefinedKeys = (v: unknown): boolean =>
 // their conjunction (Mongo AND). `.strict()` rejects an unknown operator riding alongside a known one; the
 // refines require at least one operator and pair `$options` with `$regex`. `$not` wraps a value payload or a
 // bare `$size` (recursive: `$not` can negate another `$not`).
-const ValueOpsPayloadSchema: ZodSchema = z.lazy(() =>
+// Exported for `ast/operators.test.ts`, which pins that this payload admits exactly the registry's value
+// operators (the gate ⟷ operator-registry drift guard). Not part of the package's public surface.
+export const ValueOpsPayloadSchema: ZodSchema = z.lazy(() =>
     z.custom<Record<string, unknown>>(noPresentUndefinedKeys).pipe(
         z.object({
             $eq: EqOperand.optional(),
@@ -92,7 +94,8 @@ const ArrayValueComparisonElemMatchSchema = z.object({ $elemMatch: ElemMatchBody
 // `$exists`/`$type` are SHARED with the value payload (meaningful on arrays too); `$elemMatch`/`$all`/`$size`
 // are array-only. A payload mixing an array-only operator with a value-only one (`{$size:2,$gt:5}`) fails
 // this strict schema AND the value payload's strict schema → rejected as cross-category, matching the type.
-const ArrayOpsPayloadSchema: ZodSchema = z.lazy(() =>
+// Exported for the gate ⟷ operator-registry drift guard — see {@link ValueOpsPayloadSchema}.
+export const ArrayOpsPayloadSchema: ZodSchema = z.lazy(() =>
     z.custom<Record<string, unknown>>(noPresentUndefinedKeys).pipe(
         z.object({
             $elemMatch: ElemMatchBodySchema.optional(),

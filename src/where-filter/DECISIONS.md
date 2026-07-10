@@ -92,9 +92,10 @@ on the missing field.
 `{ $not: { $ne: 5 } }` is `false` (because `$ne` matches a missing field), and `{ $not: { $exists: false } }`
 is `false`.
 
-**Why**: This is MongoDB's semantics, and it is what both SQL engines already emitted. The JS matcher's
-short-circuit was the outlier. Negation that does not distribute over its operand is not negation, and it
-broke the complement law that the differential fuzz suite now enforces.
+**Why**: This is MongoDB's semantics. All three engines previously short-circuited `$not` on a missing field
+to `true` regardless of the operand, so they agreed with each other and disagreed with MongoDB. Negation
+that does not distribute over its operand is not negation, and it breaks the complement law
+(`{$not: X}` matches exactly the rows `X` does not) that the differential fuzz suite enforces.
 
 ---
 
@@ -131,6 +132,26 @@ more do, produce the report and stop for a human decision rather than encoding a
 
 **Why**: A secondary oracle is only worth its maintenance cost if its residual disagreement set is small
 enough to be understood entry by entry. A large ignore list is indistinguishable from no oracle at all.
+
+---
+
+## 8. The equality family's operand domain is narrower than `$all`'s
+
+**Context**: `$all` and a bare exact-array accept the full JSON value domain, so an operand may itself be an
+array or an object — `{ matrix: { $all: [[1, 2]] } }`. `$eq`, `$ne`, `$in` and `$nin` accept only strings and
+finite numbers (`$eq` also booleans and null), even where the field's element type is structural. The
+TypeScript types are more permissive than the runtime gate at these positions.
+
+**Decision**: Keep the narrower domain for now. It is pinned by test, so a widening must be deliberate.
+
+**Why**: The asymmetry is not load-bearing — it is where the gate's per-operator operand schemas were
+tightened at different times. Widening `$in`/`$nin`/`$eq`/`$ne` to structural operands is an expansion of the
+accepted filter language, not a bug fix, and every engine would need its structural-comparison path wired
+through those operators. Deciding it under a behavioural-fix effort would smuggle an API change into a
+conformance change.
+
+**Future work**: Unify the operand domain across the equality family when the operator metadata becomes a
+single registry, so each operator's operand schema is declared once rather than restated per payload.
 
 ---
 

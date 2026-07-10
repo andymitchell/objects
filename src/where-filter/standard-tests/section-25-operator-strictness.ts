@@ -5,7 +5,7 @@ import type { SectionCtx } from "./harness.ts";
 /**
  * §25. Operator-payload strictness, operand domains & multi-operator AND.
  *
- * Three contracts the earlier sections do not pin:
+ * Four contracts the earlier sections do not pin:
  *
  *  1. STRICTNESS — an operator payload admits ONLY known operators of ONE category. An unknown operator
  *     riding alongside a known one (`{age:{$eq:5,$mod:3}}`), a cross-category mix (`{tags:{$size:2,$gt:5}}`),
@@ -35,9 +35,13 @@ import type { SectionCtx } from "./harness.ts";
  *     wrongly returns T) while the SQL emitters dispatch `$ne` first (so a missing field wrongly returns T).
  *     AND forces both engines onto the verdicts above. Combo rows use number/string operands only (boolean /
  *     null operands would register extra `$all` engine-limitation reds).
+ *
+ *  4. CONJUNCTION AT EVERY DEPTH — the AND law of (3) holds inside `$not` and inside a scalar `$elemMatch`
+ *     too, not only at the top of a field condition. `$not` then negates the whole conjunction, and it does
+ *     so on a missing field as well (`{$not:{$ne:5}}` does NOT match a missing field, because `$ne` does).
  */
 export function registerOperatorStrictness(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
+    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     // These payloads are deliberately malformed: the compile-time type rejects each one (TS2353 for unknown /
     // cross-category operators; excess/absent for the carriers). The runtime gate must reject them too. Cast
@@ -233,6 +237,97 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
             test('25.7m D6 pin: {$exists:true,$ne:"x"} on a missing field is false (fails $exists)', async () => {
                 const result = await matchJavascriptObject({ id: 'x' }, bad({ s: { $exists: true, $ne: 'x' } }), NullishGridSchema);
                 expectOrAcknowledgeUnsupported(result, false);
+            });
+        });
+
+        // ── 25.8 A multi-operator payload under $not is still a conjunction ────────────────────────
+        //
+        // `{$not:{$ne:9,$gt:5}}` negates the WHOLE conjunction: it matches exactly the values that fail
+        // `$ne:9` OR fail `$gt:5`. A value of 3 satisfies `$ne:9` but not `$gt:5`, so the inner conjunction
+        // is false and the negation is TRUE — the row every first-operator-wins implementation gets wrong.
+        // Every assertion here is strict: this is a cross-engine conformance contract, not a capability.
+        describe('25.8 a multi-operator payload under $not is a conjunction', () => {
+            const notNe9Gt5 = (n?: number) => matchJavascriptObject(n === undefined ? { id: 'x' } : { id: 'x', n }, bad({ n: { $not: { $ne: 9, $gt: 5 } } }), NullishGridSchema);
+
+            test('25.8a a value failing only the inner $ne matches the negation', async () => {
+                expect(await notNe9Gt5(9)).toBe(true);
+            });
+            test('25.8b a value failing only the inner $gt matches the negation', async () => {
+                expect(await notNe9Gt5(3)).toBe(true);
+            });
+            test('25.8c a value satisfying both inner operators fails the negation', async () => {
+                expect(await notNe9Gt5(7)).toBe(false);
+            });
+            test('25.8d a larger value satisfying both inner operators also fails the negation', async () => {
+                expect(await notNe9Gt5(10)).toBe(false);
+            });
+            test('25.8e a missing field matches the negation (it fails the inner $gt)', async () => {
+                expect(await notNe9Gt5(undefined)).toBe(true);
+            });
+            test('25.8f a doubly-negated multi-operator payload is the payload itself', async () => {
+                expect(await matchJavascriptObject({ id: 'x', n: 7 }, bad({ n: { $not: { $not: { $gt: 5, $lt: 10 } } } }), NullishGridSchema)).toBe(true);
+                expect(await matchJavascriptObject({ id: 'x', n: 12 }, bad({ n: { $not: { $not: { $gt: 5, $lt: 10 } } } }), NullishGridSchema)).toBe(false);
+            });
+        });
+
+        // ── 25.9 A multi-operator payload inside a scalar $elemMatch is still a conjunction ────────
+        //
+        // ONE element must satisfy EVERY operator. `[3]` is the discriminating row: 3 satisfies `$ne:9`
+        // but not `$gt:5`, so no element satisfies both. A first-operator-wins implementation stops at
+        // `$ne` and wrongly matches. `[9,3]` is the same trap spread across two elements — neither element
+        // satisfies both, and a conjunction may not be split across elements.
+        describe('25.9 a multi-operator payload inside a scalar $elemMatch is a conjunction', () => {
+            const elemNe9Gt5 = (nums: number[]) => matchJavascriptObject({ id: 'x', tags: [], nums }, bad({ nums: { $elemMatch: { $ne: 9, $gt: 5 } } }), TagsSchema);
+
+            test('25.9a an element satisfying only the $ne does not match', async () => {
+                expect(await elemNe9Gt5([3])).toBe(false);
+            });
+            test('25.9b a conjunction cannot be satisfied by two different elements', async () => {
+                expect(await elemNe9Gt5([9, 3])).toBe(false);
+            });
+            test('25.9c an element satisfying both operators matches', async () => {
+                expect(await elemNe9Gt5([7])).toBe(true);
+            });
+            test('25.9d an element satisfying only the $gt does not match', async () => {
+                expect(await elemNe9Gt5([9])).toBe(false);
+            });
+            test('25.9e one satisfying element among failing ones matches', async () => {
+                expect(await elemNe9Gt5([9, 7])).toBe(true);
+            });
+            test('25.9f an empty array never matches', async () => {
+                expect(await elemNe9Gt5([])).toBe(false);
+            });
+            test('25.9g a two-bound range inside $elemMatch binds to one element', async () => {
+                const gt5lt8 = (nums: number[]) => matchJavascriptObject({ id: 'x', tags: [], nums }, bad({ nums: { $elemMatch: { $gt: 5, $lt: 8 } } }), TagsSchema);
+                expect(await gt5lt8([7])).toBe(true);
+                expect(await gt5lt8([9])).toBe(false);
+                expect(await gt5lt8([7, 9])).toBe(true);
+            });
+        });
+
+        // ── 25.10 $not negates its operand on a missing field ─────────────────────────────────────
+        //
+        // `$not` is negation, not a short-circuit. On a missing field it returns the complement of what
+        // its inner payload returns there: `$ne` matches a missing field, so `{$not:{$ne:5}}` does NOT.
+        // See DECISIONS.md — "$not negates its operand, including on a missing field".
+        describe('25.10 $not negates its operand on a missing field', () => {
+            const onMissing = (payload: unknown) => matchJavascriptObject({ id: 'x' }, bad({ n: payload }), NullishGridSchema);
+
+            test('25.10a the inner $ne matches a missing field, so its negation does not', async () => {
+                expect(await onMissing({ $not: { $ne: 5 } })).toBe(false);
+            });
+            test('25.10b the inner $exists:false matches a missing field, so its negation does not', async () => {
+                expect(await onMissing({ $not: { $exists: false } })).toBe(false);
+            });
+            test('25.10c the inner $exists:true fails a missing field, so its negation matches', async () => {
+                expect(await onMissing({ $not: { $exists: true } })).toBe(true);
+            });
+            test('25.10d the inner range fails a missing field, so its negation matches', async () => {
+                expect(await onMissing({ $not: { $gt: 5 } })).toBe(true);
+            });
+            test('25.10e on a present field $not is the plain complement', async () => {
+                expect(await matchJavascriptObject({ id: 'x', n: 5 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema)).toBe(true);
+                expect(await matchJavascriptObject({ id: 'x', n: 6 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema)).toBe(false);
             });
         });
 

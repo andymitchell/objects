@@ -1,4 +1,4 @@
-import { ContactSchema, TagsSchema } from "./fixtures.ts";
+import { ContactSchema, QuoteKeySchema, TagsSchema, type QuoteKey } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
@@ -9,9 +9,14 @@ import type { SectionCtx } from "./harness.ts";
  * validating path converter every other operator uses. These pin two guarantees: an unknown path is a
  * clean `false`/skip (never a match), and a quote (or a `DROP TABLE`) embedded in a filter KEY can never
  * break out of the emitted SQL — the worst-case outcome is `false`/skip, never a DB error or a match.
+ *
+ * A key carrying a quote is not always hostile, though: a schema may legitimately declare `O'Brien`, and
+ * such a field must be fully queryable. Safety therefore has to come from quoting every emitted path
+ * segment, not from rejecting the keys that look dangerous — a rejection would make the legitimate field
+ * unreachable while leaving any un-rejected key just as exposed.
  */
 export function registerPathInjection(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('12. Path integrity & injection', () => {
 
@@ -88,6 +93,58 @@ export function registerPathInjection(ctx: SectionCtx): void {
         test('12.15 a single-quote in a $size key stays safe (false, never a DB error)', async () => {
             const result = await matchJavascriptObject({ id: '1', tags: ['a'], nums: [] }, { "ta'gs": { $size: 1 } } as unknown as WhereFilterDefinition, TagsSchema);
             expectOrAcknowledgeUnsupported(result, false);
+        });
+
+        // ── 12.16 A schema-declared key carrying SQL metacharacters is a first-class field ─────────
+        //
+        // Every operator resolves such a key and compares its value; none emits broken SQL. The row below
+        // holds `O'Brien: 'Sean'`, so each filter's verdict is the ordinary one for that operator.
+        describe('12.16 a schema-declared key carrying SQL metacharacters is fully queryable', () => {
+            const row: QuoteKey = { id: '1', "O'Brien": 'Sean', 'a"b': 'dq', "a.b'c": 'both', "q'tags": ['t'] };
+            const quoted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<QuoteKey>, QuoteKeySchema);
+
+            test('a bare-equality match on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": 'Sean' })).toBe(true);
+                expect(await quoted({ "O'Brien": 'Other' })).toBe(false);
+            });
+            test('$eq and $ne on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $eq: 'Sean' } })).toBe(true);
+                expect(await quoted({ "O'Brien": { $ne: 'Sean' } })).toBe(false);
+            });
+            test('$in and $nin on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $in: ['Sean', 'Nuala'] } })).toBe(true);
+                expect(await quoted({ "O'Brien": { $nin: ['Sean'] } })).toBe(false);
+            });
+            test('$not on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $not: { $eq: 'Sean' } } })).toBe(false);
+            });
+            test('$exists on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $exists: true } })).toBe(true);
+                expect(await quoted({ "O'Brien": { $exists: false } })).toBe(false);
+            });
+            test('$type on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $type: 'string' } })).toBe(true);
+                expect(await quoted({ "O'Brien": { $type: 'number' } })).toBe(false);
+            });
+            test('$regex on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $regex: 'Sea' } })).toBe(true);
+            });
+            test('a range operator on a single-quoted key', async () => {
+                expect(await quoted({ "O'Brien": { $gte: 'Sean' } })).toBe(true);
+                expect(await quoted({ "O'Brien": { $gt: 'Sean' } })).toBe(false);
+            });
+            test('$size on a single-quoted array key', async () => {
+                expect(await quoted({ "q'tags": { $size: 1 } })).toBe(true);
+                expect(await quoted({ "q'tags": { $size: 2 } })).toBe(false);
+            });
+            test('a double-quoted key resolves (a SQLite JSON-path metacharacter)', async () => {
+                expect(await quoted({ 'a"b': 'dq' })).toBe(true);
+                expect(await quoted({ 'a"b': 'other' })).toBe(false);
+            });
+            test('a key holding both a literal dot and a quote resolves through the dot-prop escape', async () => {
+                expect(await quoted({ "a\\.b'c": 'both' })).toBe(true);
+                expect(await quoted({ "a\\.b'c": 'other' })).toBe(false);
+            });
         });
 
     });

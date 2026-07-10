@@ -147,9 +147,13 @@ export const DeepSpread3Schema = z.object({
 }).strict();
 export type DeepSpread3 = z.infer<typeof DeepSpread3Schema>;
 
-/** A literal-dot data key — dot-prop escape vs raw-split. */
-export const DottedKeySchema = z.object({ id: z.string(), 'a.b': z.string() }).strict();
+/** A literal-dot data key — dot-prop escape vs raw-split. `x.y` carries the array-operator ($size) cases. */
+export const DottedKeySchema = z.object({ id: z.string(), 'a.b': z.string(), 'x.y': z.array(z.string()).optional() }).strict();
 export type DottedKey = z.infer<typeof DottedKeySchema>;
+
+/** A literal-dot data key BENEATH a spreading array — the dot-prop escape must survive array traversal. */
+export const DottedKeyInArraySchema = z.object({ id: z.string(), rows: z.array(z.object({ 'a.b': z.string() }).strict()) }).strict();
+export type DottedKeyInArray = z.infer<typeof DottedKeyInArraySchema>;
 
 /** A field literally named `$or` — logic-operator-vs-data-key ambiguity. */
 export const DollarKeySchema = z.object({ id: z.string(), '$or': z.string() }).strict();
@@ -172,3 +176,56 @@ export const ArrayOperandSchema = z.object({
     scores: z.array(z.number()),
 }).strict();
 export type ArrayOperand = z.infer<typeof ArrayOperandSchema>;
+
+/**
+ * A scalar array nested inside an object array — the leaf-scope contract. A compound filter on
+ * `groups.tags` must be satisfied within ONE `groups` entry's `tags`, never by pooling elements
+ * from several entries.
+ */
+export const NestedScalarArraySchema = z.object({
+    id: z.string(),
+    groups: z.array(z.object({ tags: z.array(z.string()) }).strict()),
+}).strict();
+export type NestedScalarArray = z.infer<typeof NestedScalarArraySchema>;
+
+/**
+ * Data keys carrying SQL metacharacters — a single quote, a double quote, a quote behind a literal dot.
+ * Every emitted accessor must quote its segments, so a hostile key is inert data on every dialect rather
+ * than syntax. `q'tags` carries the array-operator cases.
+ */
+export const QuoteKeySchema = z.object({
+    id: z.string(),
+    "O'Brien": z.string(),
+    'a"b': z.string().optional(),
+    "a.b'c": z.string().optional(),
+    "q'tags": z.array(z.string()).optional(),
+}).strict();
+export type QuoteKey = z.infer<typeof QuoteKeySchema>;
+
+/**
+ * Dynamic record keys at two depths — `flat` holds scalars directly, `data` holds objects whose own
+ * fields are addressable (`data.<key>.value`). A record key is arbitrary runtime text, so it also
+ * carries the hostile-key and literal-dot cases that no schema can enumerate.
+ */
+export const RecordDeepSchema = z.object({
+    id: z.string(),
+    flat: z.record(z.string(), z.string()),
+    data: z.record(z.string(), z.object({
+        value: z.string(),
+        n: z.number().optional(),
+        tags: z.array(z.string()).optional(),
+    })),
+}).strict();
+export type RecordDeep = z.infer<typeof RecordDeepSchema>;
+
+/**
+ * Arrays whose elements are themselves arrays (and arrays of objects) — structural operands. Comparing
+ * such an operand by its serialized text is key-order- and whitespace-sensitive; it must be compared
+ * by structure instead.
+ */
+export const StructuralArraySchema = z.object({
+    id: z.string(),
+    matrix: z.array(z.array(z.number())).optional(),
+    objMatrix: z.array(z.array(z.object({ a: z.number(), b: z.number() }).strict())).optional(),
+}).strict();
+export type StructuralArray = z.infer<typeof StructuralArraySchema>;

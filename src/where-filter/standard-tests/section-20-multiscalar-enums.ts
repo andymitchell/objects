@@ -8,10 +8,11 @@ import type { SectionCtx } from "./harness.ts";
  * Enum fields drive the SQL type-cast path (string enum → ::text, numeric enum → ::numeric, mixed →
  * raw/no-cast). A multi-scalar union field must stay type-faithful: `$eq`/bare equality compares by
  * value AND type (no `1 == true`), typed range operators only apply to the matching arm, and a range
- * operator against the wrong runtime type is a rejection, not a silent false.
+ * operator against a wrong-typed stored value type-brackets — that row does not match, while the
+ * correctly-typed rows of the same field still do.
  */
 export function registerMultiScalarEnums(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence } = ctx;
+    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('20. Multi-scalar unions & enums', () => {
 
@@ -55,10 +56,18 @@ export function registerMultiScalarEnums(ctx: SectionCtx): void {
             expectOrAcknowledgeUnsupported(result, true);
         });
 
-        test('20.9 multi-scalar $gt against a string value is rejected', async () => {
-            // MEASURED: JS throws by design ("Cannot compare value of type string with filter of type number",
-            // the documented type-safety throw). SQL may cast-and-error or return false → divergent surface.
-            await expectMalformedFilterRejected(() => matchJavascriptObject({ id: 'x', secret: 'z' }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema));
+        test('20.9 multi-scalar $gt against a string value does not match, and does not error', async () => {
+            // Range operators type-bracket: a stored value of a non-comparable type simply fails the
+            // comparison, on every engine. See DECISIONS.md — "Range comparisons type-bracket instead of
+            // erroring". Strict: neither a throw nor an acknowledged skip satisfies this contract.
+            const result = await matchJavascriptObject({ id: 'x', secret: 'z' }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema);
+            expect(result).toBe(false);
+        });
+
+        test('20.9b a bracketed range still matches the correctly-typed rows of the same field', async () => {
+            // Type bracketing must not turn into "the whole predicate is poison": a numeric row still matches.
+            expect(await matchJavascriptObject({ id: 'x', secret: 5 }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema)).toBe(true);
+            expect(await matchJavascriptObject({ id: 'x', secret: true }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema)).toBe(false);
         });
 
         test('20.10 multi-scalar $type "string" on a string value', async () => {

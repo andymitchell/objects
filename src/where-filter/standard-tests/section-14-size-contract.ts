@@ -10,7 +10,7 @@ import type { SectionCtx } from "./harness.ts";
  * and `$size` composes with `$not`, `$elemMatch`, and spread paths.
  */
 export function registerSizeContract(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     describe('14. $size contract', () => {
 
@@ -85,7 +85,7 @@ export function registerSizeContract(ctx: SectionCtx): void {
                 { 'children.grandchildren': { $size: 1 } } as unknown as WhereFilterDefinition,
                 SpreadNestedSchema
             );
-            expectOrAcknowledgeDivergence(result, true, '#6 $size on spread dot-prop paths');
+            expectOrAcknowledgeUnsupported(result, true, '$size on a spread dot-prop leaf');
         });
 
     });

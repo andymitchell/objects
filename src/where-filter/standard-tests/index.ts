@@ -26,6 +26,8 @@ import { registerLogicTrees } from "./section-21-logic-trees.ts";
 import { registerTypeMapping } from "./section-22-type-mapping.ts";
 import { registerCoverageGaps } from "./section-23-coverage-gaps.ts";
 import { registerOperatorStrictness } from "./section-25-operator-strictness.ts";
+import { registerRecordPaths } from "./section-26-record-paths.ts";
+import { registerStructuralOperands } from "./section-27-structural-operands.ts";
 import { runFuzzSection } from "./fuzz.ts";
 
 /**
@@ -86,6 +88,8 @@ export function standardTests(testConfig: StandardTestConfig): void {
     registerTypeMapping(ctx);
     registerCoverageGaps(ctx);
     registerOperatorStrictness(ctx);
+    registerRecordPaths(ctx);
+    registerStructuralOperands(ctx);
     runFuzzSection(ctx);
 }
 

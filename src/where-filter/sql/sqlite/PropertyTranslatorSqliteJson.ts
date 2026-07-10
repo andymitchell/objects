@@ -159,6 +159,23 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
     }
 
     /**
+     * Key-order-insensitive deep equality of a stored JSON value against a literal object/array, matching the JS
+     * reference's `deepEql` (and Postgres jsonb `=`). SQLite's `json()`/`jsonb()` comparison preserves object key
+     * order, so a reordered-but-equal object would wrongly differ. Instead compare the two values' `json_tree` node
+     * sets: two JSON values are deeply equal iff they expose the same set of `(fullkey, type, atom)` nodes —
+     * `fullkey` encodes the structural path (object keys AND array indices), so key order is irrelevant while array
+     * order and scalar types stay significant. Emitted as a mutual `NOT EXISTS` set-difference (each tree's fullkeys
+     * are unique, so set-equality is exact equality). `accessorExpr` must resolve to valid JSON text (a schema-typed
+     * object/array field); a missing path is SQL NULL and `json_tree(NULL)` yields no rows (→ definite non-match).
+     */
+    private jsonDeepEquals(accessorExpr: string, value: PreparedStatementArgumentOrObject, statementArguments: PreparedStatementArgument[]): string {
+        const literalA = this.generatePlaceholder(value, statementArguments);
+        const literalB = this.generatePlaceholder(value, statementArguments);
+        return `NOT EXISTS (SELECT s.fullkey, s.type, s.atom FROM json_tree(${accessorExpr}) s EXCEPT SELECT a.fullkey, a.type, a.atom FROM json_tree(${literalA}) a) `
+            + `AND NOT EXISTS (SELECT b.fullkey, b.type, b.atom FROM json_tree(${literalB}) b EXCEPT SELECT s.fullkey, s.type, s.atom FROM json_tree(${accessorExpr}) s)`;
+    }
+
+    /**
      * Generates a SQL fragment for a single dot-prop path and its filter value.
      * Two main branches: direct comparison (no arrays), or json_each spreading + EXISTS wrapping (arrays).
      */
@@ -277,13 +294,9 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_type} = 'null')`;
                         }
                         if (isPlainObject(v)) {
-                            // Object element: check each key via json_extract on the spread element
-                            const keys = Object.keys(v as Record<string, unknown>);
-                            const keyConditions = keys.map(k => {
-                                const placeholder = this.generatePlaceholder((v as Record<string, unknown>)[k] as PreparedStatementArgumentOrObject, statementArguments);
-                                return `json_extract(${saResolved.output_column}, '$.${k}') = ${placeholder}`;
-                            });
-                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${keyConditions.join(' AND ')})`;
+                            // Object element: EXACT deep equality, not per-key subset. The JS reference is
+                            // `value.some(el => deepEql(el, v))`, so an element carrying extra keys must NOT match.
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${this.jsonDeepEquals(saResolved.output_column, v as PreparedStatementArgumentOrObject, statementArguments)})`;
                         }
                         if (multiScalarElement && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
                             const strictCond = this.strictMultiScalarMatch(saResolved.output_type, saResolved.output_column, v, statementArguments);
@@ -344,6 +357,12 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                         const subPropertyMap = new PropertyTranslatorSqliteJsonSchema(treeNode.schema!, sa.output_column, true);
                         const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
                         subClause = result;
+                    } else if (isValueComparisonExists(elemVal) || isValueComparisonType(elemVal)) {
+                        // $exists / $type are field-level notions with no per-element meaning. The JS reference
+                        // applies the sub-filter per element via compareValue, where {$exists|$type: …} falls through
+                        // to deepEql(element, {$exists|$type: …}) — a scalar element never equals that object literal,
+                        // so no element matches. (Contrast 18.31's accidental array≠string route.)
+                        subClause = '1 = 0';
                     } else {
                         // Scalar value comparison (includes $regex, $ne, $in, $eq, range, plain scalar, etc.)
                         const testArrayContainsString = typeof elemVal === 'string';
@@ -611,12 +630,10 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             }
         } else if (isPlainObject(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['object']);
-            const placeholder = this.generatePlaceholder(filter, statementArguments);
-            return optionalWrapper(sqlIdentifier, `json(${sqlIdentifier}) = json(${placeholder})`);
+            return optionalWrapper(sqlIdentifier, this.jsonDeepEquals(sqlIdentifier, filter, statementArguments));
         } else if (Array.isArray(filter)) {
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
-            const placeholder = this.generatePlaceholder(filter, statementArguments);
-            return optionalWrapper(sqlIdentifier, `json(${sqlIdentifier}) = json(${placeholder})`);
+            return optionalWrapper(sqlIdentifier, this.jsonDeepEquals(sqlIdentifier, filter, statementArguments));
         } else if (filter === null) {
             // Explicit null filter → match SQL NULL (no optionalWrapper — IS NOT NULL guard would contradict)
             const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);

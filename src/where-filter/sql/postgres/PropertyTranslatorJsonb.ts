@@ -279,9 +279,11 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = 'null'::jsonb)`;
                         }
                         if (isPlainObject(v)) {
-                            // Object element: use @> containment on the raw JSONB element
+                            // Object element: EXACT deep equality via jsonb `=` (key-order-insensitive), not `@>`
+                            // containment. The JS reference is `value.some(el => deepEql(el, v))`, so an element
+                            // carrying extra keys must NOT match.
                             const placeholder = this.generatePlaceholder(v, statementArguments);
-                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} @> ${placeholder}::jsonb)`;
+                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${placeholder}::jsonb)`;
                         }
                         if (multiScalarElement && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
                             return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${this.toJsonbParam(v, statementArguments)})`;
@@ -368,6 +370,12 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                         const subPropertyMap = new PropertyTranslatorPgJsonbSchema(treeNode.schema!, sa.output_column, true);
                         const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
                         subClause = result;
+                    } else if (isValueComparisonExists(elemVal) || isValueComparisonType(elemVal)) {
+                        // $exists / $type are field-level notions with no per-element meaning. The JS reference
+                        // applies the sub-filter per element via compareValue, where {$exists|$type: …} falls through
+                        // to deepEql(element, {$exists|$type: …}) — a scalar element never equals that object literal,
+                        // so no element matches. (Contrast 18.31's accidental array≠string route.)
+                        subClause = '1 = 0';
                     } else {
                         // Scalar value comparison (includes $regex, $ne, $in, $eq, range, plain scalar, etc.)
                         const testArrayContainsString = typeof elemVal === 'string';

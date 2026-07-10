@@ -1,14 +1,18 @@
 
 import type { TreeNode } from "../../../dot-prop-paths/schema-tree.ts";
+import { sqliteJsonPathSegments, sqliteSqlStringLiteral } from "../../../utils/sql/sqlite/sqliteJsonPath.ts";
 
 type SpreadedJsonArrays = { sql: string, output_column: string, output_identifier: string, output_type: string };
 /**
  * Builds a FROM clause that spreads nested JSON arrays using `json_each()`, joined via CROSS JOIN.
  * SQLite equivalent of spreadJsonbArrays. Each array layer produces a new aliased table.
  *
+ * Every key is emitted as a quoted JSON-path segment, so a key holding a dot, a quote, or a comment marker
+ * is inert data rather than syntax.
+ *
  * @example
  * // For path children.grandchildren.name (two arrays):
- * // → "json_each(col, '$.children') AS je1 CROSS JOIN json_each(je1.value, '$.grandchildren') AS je2"
+ * // → `json_each(col, '$."children"') AS je1 CROSS JOIN json_each(je1.value, '$."grandchildren"') AS je2`
  * // output_column: "je2.value", output_identifier: "je2.value"
  */
 export function spreadJsonArraysSqlite(column: string, nodesDesc: TreeNode[]): SpreadedJsonArrays | undefined {
@@ -29,9 +33,9 @@ export function spreadJsonArraysSqlite(column: string, nodesDesc: TreeNode[]): S
             pathSegments = [...pathSegments, node.name];
             if (node.kind === 'array') {
                 const alias = `${aliasBase}${arrayDepth}`;
-                const jsonPath = '$.' + pathSegments.join('.');
+                const jsonPath = sqliteSqlStringLiteral(sqliteJsonPathSegments(pathSegments));
                 parts.push({
-                    sql: `json_each(${currentSource}, '${jsonPath}') AS ${alias}`,
+                    sql: `json_each(${currentSource}, ${jsonPath}) AS ${alias}`,
                     output_value: `${alias}.value`,
                     // json_each's own `type` column distinguishes JSON true from 1 (both stored as 1 in `value`),
                     // so a multi-scalar element below an array can be compared type-faithfully through the spread.

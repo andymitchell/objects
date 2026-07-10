@@ -56,6 +56,11 @@ describe('postgres where clause builder', () => {
         }
 
         if( !clause.success ) {
+            // A path the engine cannot address at all (an array beneath a record's dynamic key) is an
+            // acknowledged capability gap, not a non-match: it must skip rather than answer `false`.
+            if (clause.errors.some(e => e.kind === 'path_conversion' && e.error.type === 'unsupported_kind')) {
+                return undefined;
+            }
             // Check for path conversion errors (previously thrown as UNSAFE_WARNING)
             const msg = clause.errors.map(e => e.message).join('; ');
             if( msg.includes(UNSAFE_WARNING) ) {
@@ -399,6 +404,93 @@ describe('postgres where clause builder', () => {
         test('string-first union (the other arm order): { $not: { $eq: true } } matches a numeric row and excludes the true row', async () => {
             expect(await matchJavascriptObjectInDb<Row>({ id: '4', secret: 7 }, { secret: { $not: { $eq: true } } }, StringFirst)).toBe(true);
             expect(await matchJavascriptObjectInDb<Row>({ id: '5', secret: true }, { secret: { $not: { $eq: true } } }, StringFirst)).toBe(false);
+        });
+    });
+
+    // A predicate on a path crossing two arrays is answered by spreading the outer array and asking each element's
+    // leaf array. When there ARE no elements — the outer array is absent, or empty — there is no leaf array either,
+    // which is exactly what a missing field means; the predicate's own verdict on a missing field must then decide.
+    // A bare `EXISTS (spread WHERE …)` answers `false` there instead, silently dropping every row an operator like
+    // `$nin` or `$exists:false` should return. The property fuzz cannot catch this: its nested-path operators are
+    // deliberately confined to ones that do NOT match a missing field.
+    describe('a nested-array path keeps the missing-field verdict when no leaf array exists', () => {
+        const Schema = z.object({ id: z.string(), groups: z.array(z.object({ subtags: z.array(z.string()) })).optional() });
+        type Row = z.infer<typeof Schema>;
+        const onNested = (row: Row, filter: unknown) => matchJavascriptObjectInDb<Row>(row, filter as WhereFilterDefinition<Row>, Schema);
+
+        test('$nin matches a row whose outer array is absent, as it matches any missing field', async () => {
+            expect(await onNested({ id: 'x' }, { 'groups.subtags': { $nin: ['x'] } })).toBe(true);
+        });
+        test('$nin matches a row whose outer array is empty, which holds no leaf array either', async () => {
+            expect(await onNested({ id: 'x', groups: [] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(true);
+        });
+        test('$exists:false matches a row whose outer array is absent', async () => {
+            expect(await onNested({ id: 'x' }, { 'groups.subtags': { $exists: false } })).toBe(true);
+        });
+        test('$not $size matches a row whose outer array is absent, because the inner $size does not', async () => {
+            expect(await onNested({ id: 'x' }, { 'groups.subtags': { $not: { $size: 2 } } })).toBe(true);
+        });
+        test('an operator that does not match a missing field still fails an absent outer array', async () => {
+            expect(await onNested({ id: 'x' }, { 'groups.subtags': { $size: 2 } })).toBe(false);
+        });
+        test('the present-array verdicts are unaffected: $nin is judged per leaf array', async () => {
+            expect(await onNested({ id: 'x', groups: [{ subtags: ['x'] }] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(false);
+            expect(await onNested({ id: 'x', groups: [{ subtags: ['a'] }, { subtags: ['x'] }] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(true);
+        });
+    });
+
+    // A bare-string `$elemMatch` beneath an intermediate array asks for containment of that string in ONE leaf
+    // array — the jsonb `?` operator, scoped to the leaf array reached through the spread. The whole-path accessor
+    // cannot descend an array (`col->'groups'->'tags'` is NULL when `groups` is an array), so a leaf-scoped emission
+    // is the value-driven verdict.
+    describe('a string $elemMatch beneath an intermediate array is scoped to one leaf array', () => {
+        const Schema = z.object({ id: z.string(), groups: z.array(z.object({ tags: z.array(z.string()) })) });
+        type Row = z.infer<typeof Schema>;
+        const onNested = (row: Row, filter: unknown) => matchJavascriptObjectInDb<Row>(row, filter as WhereFilterDefinition<Row>, Schema);
+
+        test('a leaf array containing the string matches', async () => {
+            expect(await onNested({ id: 'x', groups: [{ tags: ['a'] }] }, { 'groups.tags': { $elemMatch: 'a' } })).toBe(true);
+        });
+        test('a leaf array not containing the string does not match', async () => {
+            expect(await onNested({ id: 'x', groups: [{ tags: ['b'] }] }, { 'groups.tags': { $elemMatch: 'a' } })).toBe(false);
+        });
+    });
+
+    // An empty `$all` is vacuously satisfied by any array the path reaches — the conjunction of no conditions is
+    // true. A naive `conditions.join(' AND ')` over zero conditions yields '' and a `WHERE ` syntax error.
+    describe('an empty $all is vacuously satisfied', () => {
+        const Schema = z.object({ parent_name: z.string(), children: z.array(z.object({ child_name: z.string(), grandchildren: z.array(z.object({ grandchild_name: z.string() })) })) });
+        type Row = z.infer<typeof Schema>;
+
+        test('a leaf array present under an intermediate array satisfies {$all: []}', async () => {
+            const row: Row = { parent_name: 'p', children: [{ child_name: 's', grandchildren: [{ grandchild_name: 'r' }] }] };
+            expect(await matchJavascriptObjectInDb<Row>(row, { 'children.grandchildren': { $all: [] } }, Schema)).toBe(true);
+        });
+    });
+
+    // `$not` negates its operand on a stored JSON null too, so the SQL presence probe must ask whether the path is
+    // THERE — not whether its extracted value is null. The raw `->` accessor is SQL NULL only for an absent path; a
+    // stored JSON null reads back as `'null'::jsonb`. Text extraction (`->>`) returns SQL NULL for both, and under a
+    // negation that conflation inverts the verdict.
+    describe('a $not distinguishes a stored JSON null from an absent field', () => {
+        const Schema = z.object({ id: z.string(), n: z.number().nullable() });
+        type Row = z.infer<typeof Schema>;
+        const storedNull = (filter: unknown) => matchJavascriptObjectInDb<Row>({ id: 'x', n: null }, filter as WhereFilterDefinition<Row>, Schema);
+
+        test('a stored null exists, so negating $exists:true excludes the row', async () => {
+            expect(await storedNull({ n: { $not: { $exists: true } } })).toBe(false);
+        });
+        test('a stored null exists, so negating $exists:false matches the row', async () => {
+            expect(await storedNull({ n: { $not: { $exists: false } } })).toBe(true);
+        });
+        test('a stored null differs from 5, so negating that difference excludes the row', async () => {
+            expect(await storedNull({ n: { $not: { $ne: 5 } } })).toBe(false);
+        });
+        test('a stored null equals a null operand, so negating that equality excludes the row', async () => {
+            expect(await storedNull({ n: { $not: { $eq: null } } })).toBe(false);
+        });
+        test('a present value is still the plain complement', async () => {
+            expect(await matchJavascriptObjectInDb<Row>({ id: 'x', n: 5 }, { n: { $not: { $ne: 5 } } }, Schema)).toBe(true);
         });
     });
 

@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
+import { pgQuoteLiteral } from "../../../utils/sql/postgres/pgJsonbAccessor.ts";
+
+/**
+ * The raw `->` chain spreadJsonbArrays builds for one array source: the column, then each key quoted as a
+ * Postgres escape-string literal, joined by `->`. Expressed via pgQuoteLiteral so a change to how a key is
+ * quoted updates these pins with the emitter, never drifting into a hand-written literal.
+ */
+const rawChain = (column: string, ...keys: string[]) => [column, ...keys.map(pgQuoteLiteral)].join('->');
 
 
     test('spreadJsonbArrays 0 array', () => {
@@ -59,9 +67,10 @@ import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
         }
         const sa = spreadJsonbArrays('recordColumn', path);
 
+        const src = rawChain('recordColumn', 'contact', 'children');
         expect(sa).toEqual(
             {
-                "sql": "jsonb_array_elements(CASE WHEN jsonb_typeof(recordColumn->'contact'->'children') = 'array' THEN recordColumn->'contact'->'children' ELSE '[]'::jsonb END) AS recordColumn1",
+                "sql": `jsonb_array_elements(CASE WHEN jsonb_typeof(${src}) = 'array' THEN ${src} ELSE '[]'::jsonb END) AS recordColumn1`,
                 "output_column": "recordColumn1",
                 "output_identifier": "recordColumn1 #>> '{}'"
             }
@@ -96,9 +105,11 @@ import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
         }
         const sa = spreadJsonbArrays('recordColumn', path);
 
+        const outer = rawChain('recordColumn', 'contact', 'children');
+        const inner = rawChain('recordColumn1', 'family', 'grandchildren');
         expect(sa).toEqual(
             {
-                "sql": "jsonb_array_elements(CASE WHEN jsonb_typeof(recordColumn->'contact'->'children') = 'array' THEN recordColumn->'contact'->'children' ELSE '[]'::jsonb END) AS recordColumn1 CROSS JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(recordColumn1->'family'->'grandchildren') = 'array' THEN recordColumn1->'family'->'grandchildren' ELSE '[]'::jsonb END) AS recordColumn2",
+                "sql": `jsonb_array_elements(CASE WHEN jsonb_typeof(${outer}) = 'array' THEN ${outer} ELSE '[]'::jsonb END) AS recordColumn1 CROSS JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(${inner}) = 'array' THEN ${inner} ELSE '[]'::jsonb END) AS recordColumn2`,
                 "output_column": "recordColumn2",
                 "output_identifier": "recordColumn2 #>> '{}'"
             }

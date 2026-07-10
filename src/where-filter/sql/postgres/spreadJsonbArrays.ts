@@ -1,5 +1,6 @@
 
 import type { TreeNode } from "../../../dot-prop-paths/schema-tree.ts";
+import { pgQuoteLiteral } from "../../../utils/sql/postgres/pgJsonbAccessor.ts";
 
 type SpreadedJsonbArrays = {sql: string, output_column: string, output_identifier: string};
 /**
@@ -25,7 +26,7 @@ export function spreadJsonbArrays(column: string, nodesDesc: TreeNode[]): Spread
         const node = nodesDesc[i];
         if (!node) throw new Error("node was empty in spreadJsonbArrays");
         if (node.name) {
-            jsonbParts.push(`'${node.name}'`);
+            jsonbParts.push(pgQuoteLiteral(node.name));
             if (node.kind === 'array') {
 
                 const newColumn = column + arrayDepth;

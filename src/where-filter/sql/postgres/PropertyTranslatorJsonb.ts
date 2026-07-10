@@ -1,28 +1,55 @@
-
 import { z } from "zod";
-import type { ValueComparisonFlexi, ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "../../types.ts";
-import { isArrayValueComparisonElemMatch, isArrayValueComparisonAll, isArrayValueComparisonSize, isValueComparisonEq, isValueComparisonNe, isValueComparisonIn, isValueComparisonNin, isValueComparisonNot, isValueComparisonExists, isValueComparisonType, isValueComparisonRegex, isWhereFilterDefinition } from '../../schemas.ts';
+import type { ValueComparisonRangeOperatorsTyped, WhereFilterDefinition } from "../../types.ts";
 import { convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import type { TreeNode, TreeNodeMap, ZodKind } from "../../../dot-prop-paths/schema-tree.ts";
+import { isUnspreadableRecordPath, resolvePath } from "../../../dot-prop-paths/resolvePath.ts";
+import type { ResolvedPath } from "../../../dot-prop-paths/resolvePath-types.ts";
 import { findShapeAmbiguousPaths, findMultiScalarUnionPaths } from "../../../dot-prop-paths/shape-ambiguity.ts";
 import { findNormalizingPaths } from "../../../dot-prop-paths/schema-normalization.ts";
 import isPlainObject from "../../../utils/isPlainObject.ts";
-import { convertDotPropPathToPostgresJsonPath } from "./convertDotPropPathToPostgresJsonPath.ts";
-import { isLogicFilter, isValueComparisonRange, isValueComparisonScalar } from "../../typeguards.ts";
-import { ValueComparisonRangeOperators } from "../../consts.ts";
+import { convertDotPropPathToPostgresJsonPath, UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.ts";
+import { pgJsonbAccessor } from "../../../utils/sql/postgres/pgJsonbAccessor.ts";
+import { isLogicFilter } from "../../typeguards.ts";
+import { isOperatorKey, matchesMissingField, parseFieldPredicate } from "../../ast/index.ts";
+import type { ElemMatchBody, Predicate } from "../../ast/index.ts";
+import { planSqlArrayTraversal } from "../planSqlArrayTraversal.ts";
+import type { SqlPredicate, TraverseArrayPredicate } from "../planSqlArrayTraversal.ts";
+import { reconstructFieldCondition } from "../reconstructFieldCondition.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
-import { splitIntoPredicateGroups } from "../../splitOperatorPayload.ts";
 import { isPreparedStatementArgument } from "../types.ts";
 import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect, WhereClauseError } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
+import { emitMultiScalarPgComparison } from "./multiScalarPg.ts";
+import { arraySizeEquals, guardedJsonbArray, mapTypeToPostgres, pgRegexOptionPrefix, toJsonbParam } from "./pgJsonbFragments.ts";
+import type { BindValue } from "./pgJsonbFragments.ts";
 import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
 
 
+/**
+ * Where a predicate is being compared.
+ *
+ * A field condition reads differently depending on what it is held against: the column's own field, or one
+ * element of an array the emitter has already spread. `customSqlIdentifier` names the element; its absence means
+ * the field itself, where missing-ness is a question worth asking.
+ */
+type EmitContext = {
+    /** The expression holding the value under comparison, when it is an array element rather than the field. */
+    readonly customSqlIdentifier?: string;
+    /** A spread element's raw jsonb column, so a mixed-scalar element compares type-faithfully (JSON `7` ≠ `"7"`). */
+    readonly customRawJsonb?: string;
+    /** The path crosses an array but ends at a scalar or object, which is read from every spread element. */
+    readonly spreadLeafBelowArray?: boolean;
+};
 
-/** Maps our $type names to Postgres jsonb_typeof() return values ('bool' → 'boolean'). */
-function mapTypeToPostgres(typeName: string): string {
-    if (typeName === 'bool') return 'boolean';
-    return typeName;
+/** Yields a fresh `jsonb_array_elements` alias each call, so sibling and nested spreads never shadow one another. */
+type AliasFactory = () => string;
+
+/** The operators whose verdict on a field the schema does not describe is decided before any SQL is emitted. */
+const MISSING_FIELD_KINDS: ReadonlySet<Predicate['kind']> = new Set<Predicate['kind']>(['ne', 'nin', 'not', 'exists', 'type', 'size']);
+
+/** Whether an `$elemMatch` body describes an object element's fields, rather than an element's own value. */
+function isSubDocumentBody(body: ElemMatchBody): body is ElemMatchBody & { objectFilter: WhereFilterDefinition } {
+    return body.objectFilter !== undefined && !Object.keys(body.objectFilter).some(isOperatorKey);
 }
 
 /**
@@ -34,7 +61,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     readonly dialect: SqlDialect = 'pg';
     /** Schema-level errors found at construction from a Zod schema (shape-ambiguous fields); see {@link IPropertyTranslator}. */
     schemaErrors: WhereClauseError[] = [];
-    /** Dot-prop paths whose union mixes ≥2 scalar kinds — compared as raw JSON values, not a single typed cast (see {@link generateComparison}). */
+    /** Dot-prop paths whose union mixes ≥2 scalar kinds — compared as raw JSON values, not a single typed cast. */
     protected multiScalarPaths: Set<string> = new Set();
     protected nodeMap: TreeNodeMap;
     protected sqlColumnName: string;
@@ -56,21 +83,6 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         }
     }
 
-    /** Counts how many ZodArray nodes exist in the ancestry chain for a path. Determines whether array spreading is needed. */
-    private countArraysInPath(dotpropPath: string): number {
-        if ((this.nodeMap[dotpropPath]?.kind === 'array' || this.nodeMap[dotpropPath]?.descended_from_array)) {
-            let count = 0;
-            let target: TreeNode | undefined = this.nodeMap[dotpropPath];
-            while (target) {
-                if (target.kind === 'array') count++;
-                target = target?.parent;
-            }
-            return count;
-        } else {
-            return 0;
-        }
-    }
-
     /** Wraps convertDotPropPathToPostgresJsonPath, using this instance's column name and nodeMap. On failure, records error and returns 'FALSE'. */
     private getSqlIdentifier(dotPropPath: string, errorIfNotAsExpected?: ZodKind[], customColumnName?: string): string {
         const result = convertDotPropPathToPostgresJsonPath(customColumnName ?? this.sqlColumnName, dotPropPath, this.nodeMap, errorIfNotAsExpected);
@@ -81,9 +93,28 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         return result.expression;
     }
 
+    /** A path-conversion error in the shape the shared converter produces, so callers classify it uniformly. */
+    private pathError(type: 'invalid_path' | 'unsupported_kind', dotPropPath: string, message: string): WhereClauseError {
+        return { kind: 'path_conversion', error: { type, dotPropPath, message }, message };
+    }
+
+    /** The raw jsonb accessor (`(col->'a'->'b')`) for a resolved path — every key quoted, so a key can only be data. */
+    private pathAccessor(resolved: ResolvedPath, asText: boolean): string {
+        return pgJsonbAccessor(this.sqlColumnName, resolved.segments, { asText });
+    }
+
+    /**
+     * Fresh `jsonb_array_elements` aliases for one field condition, continuing the numbering of any spread already
+     * emitted. The prefix is derived from the column, so a translator scoped to a spread element cannot collide
+     * with the spread that produced that element.
+     */
+    private aliasFactory(alreadyUsed: number): AliasFactory {
+        let next = alreadyUsed;
+        return () => `${this.sqlColumnName}_e${++next}`;
+    }
+
     /** Pushes a value into the statementArguments array and returns its `$N` placeholder. Objects/arrays are JSON.stringify'd first. */
     protected generatePlaceholder(value: PreparedStatementArgumentOrObject, statementArguments: PreparedStatementArgument[]): string {
-
         if (isPlainObject(value) || Array.isArray(value)) value = JSON.stringify(value);
         if (!isPreparedStatementArgument(value)) {
             throw new Error("Placeholders for SQL can only be string/number/boolean");
@@ -92,28 +123,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         return `$${statementArguments.length}`;
     }
 
-    /** Build the raw JSONB accessor (`col->'a'->'b'`) for a dot-prop path — for type-faithful value comparison of a multi-scalar union. */
-    private rawJsonbAccessor(dotpropPath: string): string {
-        const jsonbPath = dotpropPath.split('.').map(p => `'${p}'`).join('->');
-        return `${this.sqlColumnName}->${jsonbPath}`;
-    }
-
-    /**
-     * Compare an array field's length, guarding the array-only `jsonb_array_length` against a non-array value.
-     * A `null | array` (or optional) field can hold a JSON null at runtime, on which `jsonb_array_length` errors
-     * ("cannot get array length of a scalar"). A `CASE` — not `AND`, since Postgres does not guarantee operand
-     * evaluation order and could still run the length function on the null — yields `false` for any non-array,
-     * reproducing the value-driven JS matcher, which never reports a size for a non-array.
-     */
-    private arraySizeEquals(jsonbPath: string, placeholder: string): string {
-        return `CASE WHEN jsonb_typeof(${jsonbPath}) = 'array' THEN jsonb_array_length(${jsonbPath}) = ${placeholder} ELSE false END`;
-    }
-
-    /** Bind a scalar value and wrap it as JSONB of its own type, so equality stays type-faithful (JSON `true` ≠ `1` ≠ `"true"`). */
-    private toJsonbParam(value: string | number | boolean, statementArguments: PreparedStatementArgument[]): string {
-        const placeholder = this.generatePlaceholder(value, statementArguments);
-        const cast = typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'numeric' : 'text';
-        return `to_jsonb(${placeholder}::${cast})`;
+    /** A binder over one statement's argument list, for the jsonb fragment builders that take literals. */
+    private binder(statementArguments: PreparedStatementArgument[]): BindValue {
+        return (value: string | number | boolean) => this.generatePlaceholder(value, statementArguments);
     }
 
     /**
@@ -127,588 +139,624 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
     }
 
     /**
-     * Translate JS RegExp flags ($options) into a Postgres embedded-option prefix `(?…)`, so `col ~ '(?…)pattern'`
-     * reproduces `new RegExp(pattern, $options).test(value)`. Newline-sensitivity is chosen to match JS: 'm' makes
-     * `^`/`$` match at line boundaries; 's' makes `.` match a newline; the base (neither) keeps `.` off newlines and
-     * `^`/`$` at the string ends. Returns undefined for a flag Postgres cannot faithfully express (→ skip).
+     * Forces leaf comparisons to a definite TRUE/FALSE so any enclosing NOT (from $nor or a parent $not) doesn't
+     * propagate NULL under SQL 3VL. Unconditional for a resolvable path, so semantics agree with
+     * matchJavascriptObject regardless of schema annotation; PG folds the guard against NOT NULL columns.
      */
-    private pgRegexOptionPrefix(options: string | undefined): string | undefined {
-        const flags = new Set([...(options ?? '')]);
-        const i = flags.delete('i');
-        const m = flags.delete('m');
-        const s = flags.delete('s');
-        if (flags.size > 0) return undefined; // a flag (g/u/y/…) with no faithful Postgres equivalent
-        // Newline-sensitivity letter: (m,s)→w, (m,!s)→n, (!m,s)→s, (!m,!s)→p.
-        const nl = m ? (s ? 'w' : 'n') : (s ? 's' : 'p');
-        return `(?${i ? 'i' : ''}${nl})`;
+    private optionalWrapper(resolved: ResolvedPath, sqlIdentifier: string, query: string): string {
+        if (!resolved.known) return query;
+        return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
     }
 
-    /**
-     * Whether an operator payload matches a field that is ABSENT from the schema (hence always missing),
-     * mirroring matchJavascriptObject. Only the broadening operators ($ne / $nin / $not / $exists:false) match a
-     * missing field; every narrowing operator ($eq, a range, $in, $type, $regex, $size, a bare scalar) does not.
-     */
-    private matchesMissingField(filter: unknown): boolean {
-        if (isValueComparisonNe(filter)) return true;
-        if (isValueComparisonNin(filter)) return true;
-        if (isValueComparisonNot(filter)) return !this.matchesMissingField(filter.$not);
-        if (isValueComparisonExists(filter)) return !filter.$exists;
-        return false;
+    /** Wraps Mongo "matches missing" operators ($ne / $nin / $not) with `(IS NULL OR <q>)`. */
+    private optionalWrapperNullMatches(resolved: ResolvedPath, sqlIdentifier: string, query: string): string {
+        if (!resolved.known) return query;
+        return `(${sqlIdentifier} IS NULL OR ${query})`;
     }
 
     /**
      * Generates a SQL fragment for a single dot-prop path and its filter value.
-     * Two main branches: direct comparison (no arrays), or jsonb_array_elements spreading + EXISTS wrapping (arrays).
-     * Compound array filters require all conditions to match the same element (exact document match).
+     *
+     * The path is resolved ONCE and the resolution travels with the condition, so every accessor, JSON accessor
+     * and node lookup below reads it rather than re-splitting the raw path. The condition is parsed into a predicate
+     * tree, and a path ending at an array is planned as a traversal that binds the whole condition to one leaf array.
      */
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
-        // Reset conversion errors for this call
         this.conversionErrors = [];
 
-        const result = this._generateSqlInner(dotpropPath, filter, statementArguments, errors, rootFilter);
+        const result = resolvePath(dotpropPath, this.nodeMap);
+        let sql: string;
+        if (!result.success) {
+            this.conversionErrors.push(this.pathError('invalid_path', dotpropPath, `Invalid dotPropPath. ${UNSAFE_WARNING}`));
+            sql = 'FALSE';
+        } else if (isUnspreadableRecordPath(result.resolved)) {
+            // Array spreading is planned from the schema's path map, which has no node for a record's dynamic key.
+            // Refuse the path for EVERY operator — including those that build their own accessor — so a caller sees
+            // an acknowledged capability gap rather than a confident `false` for a row that plainly matches.
+            this.conversionErrors.push(this.pathError('unsupported_kind', dotpropPath, `A dotPropPath that crosses an array beneath a record key cannot be addressed. ${UNSAFE_WARNING}`));
+            sql = 'FALSE';
+        } else {
+            sql = this.emitFieldCondition(dotpropPath, result.resolved, filter, statementArguments, errors, rootFilter);
+        }
 
-        // Merge any accumulated conversion errors into the caller's errors array
         if (this.conversionErrors.length > 0) {
             errors.push(...this.conversionErrors);
             this.conversionErrors = [];
         }
 
-        return result;
+        return sql;
     }
 
-    /** Inner implementation of generateSql, separated so conversionErrors can be collected. */
-    private _generateSqlInner(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
-        // TODO Probably provide a version of this for JSONB that others can reference
-        // Several operators on one field mean their conjunction (Mongo's implicit AND). Emit each operator's
-        // clause independently and AND them, so every operator keeps its single-op SQL verbatim and the result
-        // is order-independent — replacing a first-operator-wins dispatch. A single predicate group (a lone
-        // operator, a whole range payload, or $regex+$options) falls through to the existing emitters unchanged.
-        const groups = splitIntoPredicateGroups(filter);
-        if (groups && groups.length > 1) {
-            const clauses = groups.map(group => this._generateSqlInner(dotpropPath, group as WhereFilterDefinition<T>, statementArguments, errors, rootFilter));
-            return `(${clauses.join(' AND ')})`;
+    /** Parse the condition, choose how the path reaches its value, then emit. */
+    private emitFieldCondition(dotpropPath: string, resolved: ResolvedPath, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
+        const parsed = parseFieldPredicate(filter);
+        let predicate: SqlPredicate = parsed;
+        let context: EmitContext = {};
+
+        if (this.doNotSpreadArray && resolved.arrayDepth === 1 && parsed.kind !== 'exactArray') {
+            // A translator scoped to an array element already sits inside that array's spread: the element's own
+            // fields are read from it directly. An exact-array operand still compares the whole array.
+            context = { customSqlIdentifier: this.getSqlIdentifier(dotpropPath, undefined, this.sqlColumnName) };
+        } else if (resolved.arrayDepth > 0) {
+            predicate = planSqlArrayTraversal(resolved, parsed, this.nodeMap);
+            // The path crosses an array yet does not end at one: its leaf is read from every spread element.
+            if (predicate.kind !== 'traverseArray') context = { spreadLeafBelowArray: true };
         }
 
-        const countArraysInPath = this.countArraysInPath(dotpropPath);
-        if (countArraysInPath > 0) { // && !this.doNotSpreadArray
+        return this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, context);
+    }
 
-            //throw new Error("Unsupported");
-            // Almost all will involve the format EXISTS(SELECT 1 FROM jsonb_array_elements [CROSS JOIN...] WHERE <<as_column> run on compileWhereFilterRecursive>)
+    /**
+     * Emit one predicate. Several operators on one field mean their conjunction, so an `and` node emits each child
+     * against the same value and joins them — never a first-operator-wins dispatch.
+     */
+    private emitPredicate(dotpropPath: string, resolved: ResolvedPath, predicate: SqlPredicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>, context: EmitContext): string {
+        if (predicate.kind === 'traverseArray') {
+            return this.emitTraverseArray(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter);
+        }
+        if (predicate.kind === 'and') {
+            const clauses = predicate.children.map(child => this.emitPredicate(dotpropPath, resolved, child, statementArguments, errors, rootFilter, context));
+            return `(${clauses.join(' AND ')})`;
+        }
+        if (context.spreadLeafBelowArray) {
+            return this.emitSpreadLeafPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter);
+        }
 
-            const path = [];
-            let target: TreeNode | undefined = this.nodeMap[dotpropPath];
-            while (target) {
-                path.unshift(target);
-                target = target?.parent;
+        const strict = this.emitMultiScalarLeaf(resolved, predicate, statementArguments, context);
+        if (strict !== undefined) return strict;
+
+        // A field absent from the schema is always missing. Its verdict is the JS oracle's missing-field verdict.
+        // Resolve $exists / $type / $size here (alongside $ne / $nin / $not) BEFORE their emitters interpolate the
+        // filter key into the SQL string — so an attacker-controlled key is never a query, only a definite `false`.
+        // ($eq / $in / range / $regex / a bare scalar already resolve to FALSE via the path-validating accessor.)
+        if (context.customSqlIdentifier === undefined && !resolved.known && MISSING_FIELD_KINDS.has(predicate.kind)) {
+            return matchesMissingField(predicate) ? '1=1' : '1=0';
+        }
+
+        return this.emitLeafComparison(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, context);
+    }
+
+    /**
+     * A mixed-scalar union field compares by strict raw-JSON value-equality rather than in a single SQL type. The
+     * comparison reads the field directly, or — when the value is an already-spread array element — that element's
+     * own raw jsonb column.
+     *
+     * @returns The strict comparison, or `undefined` when the field or the predicate is not one it answers.
+     */
+    private emitMultiScalarLeaf(resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], context: EmitContext): string | undefined {
+        const applies = this.multiScalarPaths.has(resolved.lookupPath)
+            && (context.customSqlIdentifier === undefined || context.customRawJsonb !== undefined);
+        if (!applies) return undefined;
+
+        const rawId = context.customRawJsonb ?? this.pathAccessor(resolved, false);
+        return emitMultiScalarPgComparison(
+            predicate,
+            rawId,
+            value => toJsonbParam(value, this.binder(statementArguments)),
+            value => this.generatePlaceholder(value, statementArguments),
+        );
+    }
+
+    // ── Array traversal — a condition on an array path binds to ONE leaf array ──
+
+    /**
+     * Bind the condition to one leaf array, spreading whatever arrays lie above it.
+     *
+     * When arrays are spread, a row exists per intermediate element and the condition is satisfied if ANY of them
+     * holds the leaf array that satisfies it. With no intermediate elements there is no leaf array at all, which is
+     * what a missing field means; the condition's own verdict on a missing field then decides.
+     */
+    private emitTraverseArray(dotpropPath: string, resolved: ResolvedPath, node: TraverseArrayPredicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
+        if (node.intermediates.length === 0) {
+            const leafArrayExpr = pgJsonbAccessor(this.sqlColumnName, node.leafSegments, { asText: false });
+            const nextAlias = this.aliasFactory(0);
+            return this.emitLeafArrayPredicate(dotpropPath, resolved, node, leafArrayExpr, node.child, statementArguments, errors, rootFilter, nextAlias);
+        }
+
+        const spread = spreadJsonbArrays(this.sqlColumnName, [...node.intermediates]);
+        if (!spread) throw new Error("Could not locate array in path: " + dotpropPath);
+        const spreadArrayCount = node.intermediates.filter(intermediate => intermediate.kind === 'array').length;
+        const nextAlias = this.aliasFactory(spreadArrayCount);
+        const leafArrayExpr = pgJsonbAccessor(spread.output_column, node.leafSegments, { asText: false });
+        const childSql = this.emitLeafArrayPredicate(dotpropPath, resolved, node, leafArrayExpr, node.child, statementArguments, errors, rootFilter, nextAlias);
+
+        const someLeafSatisfies = `EXISTS (SELECT 1 FROM ${spread.sql} WHERE ${childSql})`;
+        return matchesMissingField(node.child)
+            ? `(${someLeafSatisfies} OR NOT EXISTS (SELECT 1 FROM ${spread.sql}))`
+            : someLeafSatisfies;
+    }
+
+    /**
+     * Emit a condition against ONE leaf array, addressed by the jsonb expression `leafArrayExpr`.
+     *
+     * A conjunction here is the whole point: every operator is judged against the same leaf array, so a `$size`
+     * and an `$all` cannot be satisfied by two different arrays reached by the same path.
+     */
+    private emitLeafArrayPredicate(dotpropPath: string, resolved: ResolvedPath, node: TraverseArrayPredicate, leafArrayExpr: string, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>, nextAlias: AliasFactory): string {
+        const emitChild = (child: Predicate): string => this.emitLeafArrayPredicate(dotpropPath, resolved, node, leafArrayExpr, child, statementArguments, errors, rootFilter, nextAlias);
+        const multiScalarElement = this.multiScalarPaths.has(resolved.lookupPath);
+        // Spread the leaf array itself, guarding against a non-array value (a JSON null under a nullable-array
+        // field), which coerces to an empty array and matches nothing rather than erroring.
+        const guardedLeafArray = guardedJsonbArray(leafArrayExpr);
+        const elements = (alias: string) => `jsonb_array_elements(${guardedLeafArray}) AS ${alias}`;
+
+        switch (predicate.kind) {
+            case 'and':
+                return `(${predicate.children.map(emitChild).join(' AND ')})`;
+
+            // $in / $nin read the array as a set: they intersect it rather than compare it whole.
+            case 'in': {
+                if (predicate.operand.length === 0) return '1 = 0';
+                const alias = nextAlias();
+                if (multiScalarElement) {
+                    const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
+                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
+                }
+                const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
+                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} #>> '{}' IN (${placeholders.join(', ')}))`;
             }
-            let sa: ReturnType<typeof spreadJsonbArrays>;
-
-            let subClause: string = '';
-            const treeNode = this.nodeMap[dotpropPath];
-            if (!treeNode) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
-            if (Array.isArray(filter)) {
-                if (treeNode.kind !== 'array') throw new Error("Cannot compare an array to a non-array");
-                if (countArraysInPath === 1) {
-                    // Just do a direct comparison
-                    return this.generateComparison(dotpropPath, filter, statementArguments);
-                } else {
-                    // Ignore the last array in the path, as this is comparing an array against it (not its elements)
-                    path.pop();
-
-                    sa = spreadJsonbArrays(this.sqlColumnName, path);
-                    if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
-
-                    if (treeNode.kind !== 'array') throw new Error("Cannot compare an array to a non-array");
-                    subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_column);
+            case 'nin': {
+                if (predicate.operand.length === 0) return '1 = 1';
+                const alias = nextAlias();
+                if (multiScalarElement) {
+                    const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
+                    return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
-
-            } else if (this.doNotSpreadArray && countArraysInPath === 1) {
-                // With just 1 array, we don't want to do the spread. In fact we're arriving from a spread (that's what column name is). So we need the identifier on it.
-                // It is probably spreading an array, and has recursed into this
-
-                const identifier = this.getSqlIdentifier(dotpropPath, undefined, this.sqlColumnName);
-                return this.generateComparison(dotpropPath, filter, statementArguments, `${identifier}`);
-            } else {
-
-                sa = spreadJsonbArrays(this.sqlColumnName, path);
-                if (!sa) throw new Error("Could not locate array in path: " + dotpropPath);
-                // When the path continues past the last array to a scalar/object field
-                // (e.g. messages.rfc822msgid where messages is the array), extract the
-                // remaining field from the spread output.
-                // Whether the path ends at a scalar/object leaf BELOW the last array (a "spread leaf"). When set,
-                // saResolved.output_column is the leaf's raw `->` JSONB accessor within the spread element, which
-                // $exists / $type probe with jsonb_typeof.
-                let isSpreadLeaf = false;
-                if (treeNode.kind !== 'array') {
-                    const remainingSegments: string[] = [];
-                    for (let i = path.length - 1; i >= 0; i--) {
-                        if (path[i]!.kind === 'array') break;
-                        if (path[i]!.name) remainingSegments.unshift(path[i]!.name);
-                    }
-                    if (remainingSegments.length > 0) {
-                        const jsonbPath = remainingSegments.map(s => `'${s}'`).join('->');
-                        const output_column = `${sa.output_column}->${jsonbPath}`;
-                        sa = { ...sa, output_column, output_identifier: `${output_column} #>> '{}'` };
-                        isSpreadLeaf = true;
-                    }
-                }
-                const saResolved = sa;
-                // A mixed-scalar element array compares the RAW JSONB element value (JSON 7 ≠ "7"), not the text
-                // identifier — so $in/$nin/$all stay type-faithful like matchJavascriptObject. Without this the text
-                // `#>> '{}'` identifier coerces a numeric filter against a string element. (F3 covered $elemMatch /
-                // plain containment only.)
-                const multiScalarElement = this.multiScalarPaths.has(dotpropPath);
-                // $in on array: at least one element must be in the list
-                if (isValueComparisonIn(filter)) {
-                    if (filter.$in.length === 0) return '1 = 0';
-                    if (multiScalarElement) {
-                        const vals = filter.$in.map(v => this.toJsonbParam(v, statementArguments));
-                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} IN (${vals.join(', ')}))`;
-                    }
-                    const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
-                    return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
-                }
-                // $nin on array: no element may be in the list
-                if (isValueComparisonNin(filter)) {
-                    if (filter.$nin.length === 0) return '1 = 1';
-                    if (multiScalarElement) {
-                        const vals = filter.$nin.map(v => this.toJsonbParam(v, statementArguments));
-                        return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} IN (${vals.join(', ')}))`;
-                    }
-                    const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
-                    return `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} IN (${placeholders.join(', ')}))`;
-                }
-                // $all: array must contain all specified values (scalars use =, objects use @> containment)
-                if (isArrayValueComparisonAll(filter)) {
-                    const conditions = filter.$all.map(v => {
-                        if (v === null) {
-                            // A JSON null element: compare the raw JSONB element to `'null'::jsonb`. The text
-                            // extraction (output_identifier) of a JSONB null is SQL NULL and never equals a bound param.
-                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = 'null'::jsonb)`;
-                        }
-                        if (isPlainObject(v)) {
-                            // Object element: EXACT deep equality via jsonb `=` (key-order-insensitive), not `@>`
-                            // containment. The JS reference is `value.some(el => deepEql(el, v))`, so an element
-                            // carrying extra keys must NOT match.
-                            const placeholder = this.generatePlaceholder(v, statementArguments);
-                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${placeholder}::jsonb)`;
-                        }
-                        if (multiScalarElement && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
-                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${this.toJsonbParam(v, statementArguments)})`;
-                        }
-                        if (typeof v === 'boolean') {
-                            // A boolean element on a non-multiscalar array: cast via to_jsonb so the comparison is
-                            // `jsonb = jsonb`, not `text = boolean` (Postgres has no such operator and errors).
-                            return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_column} = ${this.toJsonbParam(v, statementArguments)})`;
-                        }
-                        const placeholder = this.generatePlaceholder(v, statementArguments);
-                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${saResolved.output_identifier} = ${placeholder})`;
-                    });
-                    return conditions.join(' AND ');
-                }
-                // $size: array has exactly N elements
-                if (isArrayValueComparisonSize(filter)) {
-                    const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
-                    if (!sizeResult.success) {
-                        this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
-                        return 'FALSE';
-                    }
-                    const jsonbPath = sizeResult.expression;
-                    const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
-                    return this.arraySizeEquals(jsonbPath, placeholder);
-                }
-                // $not + $size on array
-                if (isValueComparisonNot(filter) && isArrayValueComparisonSize(filter.$not)) {
-                    const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
-                    if (!sizeResult.success) {
-                        this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
-                        return 'FALSE';
-                    }
-                    const jsonbPath = sizeResult.expression;
-                    const placeholder = this.generatePlaceholder(filter.$not.$size, statementArguments);
-                    const sizeSql = this.arraySizeEquals(jsonbPath, placeholder);
-                    return `(${jsonbPath} IS NULL OR NOT (${sizeSql}))`;
-                }
-                // $exists on array
-                if (isValueComparisonExists(filter)) {
-                    if (isSpreadLeaf) {
-                        // Spread leaf (a scalar/object below an array): the field exists iff some array element
-                        // carries the leaf. The converter's whole-path accessor cannot descend through the array, so
-                        // probe each spread element by jsonb_typeof (a present JSON null stays distinct from missing).
-                        const cond = `jsonb_typeof(${saResolved.output_column}) IS NOT NULL`;
-                        return filter.$exists
-                            ? `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${cond})`
-                            : `NOT EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE ${cond})`;
-                    }
-                    const existsResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
-                    if (!existsResult.success) {
-                        this.conversionErrors.push({ kind: 'path_conversion', error: existsResult.error, message: existsResult.error.message });
-                        return 'FALSE';
-                    }
-                    const jsonbPath = existsResult.expression;
-                    if (filter.$exists) {
-                        return `${jsonbPath} IS NOT NULL`;
-                    } else {
-                        return `${jsonbPath} IS NULL`;
-                    }
-                }
-                // $type on array
-                if (isValueComparisonType(filter)) {
-                    const pgType = mapTypeToPostgres(filter.$type);
-                    const placeholder = this.generatePlaceholder(pgType, statementArguments);
-                    if (isSpreadLeaf) {
-                        // Spread leaf: match the leaf's type in any array element (the whole-path accessor cannot
-                        // descend the array).
-                        return `EXISTS (SELECT 1 FROM ${saResolved.sql} WHERE jsonb_typeof(${saResolved.output_column}) = ${placeholder})`;
-                    }
-                    // Array-field $type: build the raw `->` JSONB accessor via the validating converter (noCasting)
-                    // rather than raw filter-key segments, so an accessor is only ever emitted for a known path.
-                    const typeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
-                    if (!typeResult.success) {
-                        this.conversionErrors.push({ kind: 'path_conversion', error: typeResult.error, message: typeResult.error.message });
-                        return 'FALSE';
-                    }
-                    return `jsonb_typeof(${typeResult.expression}) = ${placeholder}`;
-                }
-
-                if (isArrayValueComparisonElemMatch(filter)) {
-                    const elemVal = filter.$elemMatch;
-                    // Object sub-filter: recurse with sub-PropertyTranslator scoped to array element
-                    if (isPlainObject(elemVal) && isWhereFilterDefinition(elemVal) && !isValueComparisonRange(elemVal) && !isValueComparisonEq(elemVal) && !isValueComparisonNe(elemVal) && !isValueComparisonIn(elemVal) && !isValueComparisonNin(elemVal) && !isValueComparisonNot(elemVal) && !isValueComparisonExists(elemVal) && !isValueComparisonType(elemVal) && !isValueComparisonRegex(elemVal) && !isArrayValueComparisonSize(elemVal)) {
-                        const subPropertyMap = new PropertyTranslatorPgJsonbSchema(treeNode.schema!, sa.output_column, true);
-                        const result = compileWhereFilterRecursive(elemVal, statementArguments, subPropertyMap, errors, rootFilter);
-                        subClause = result;
-                    } else if (isValueComparisonExists(elemVal) || isValueComparisonType(elemVal)) {
-                        // $exists / $type are field-level notions with no per-element meaning. The JS reference
-                        // applies the sub-filter per element via compareValue, where {$exists|$type: …} falls through
-                        // to deepEql(element, {$exists|$type: …}) — a scalar element never equals that object literal,
-                        // so no element matches. (Contrast 18.31's accidental array≠string route.)
-                        subClause = '1 = 0';
-                    } else {
-                        // Scalar value comparison (includes $regex, $ne, $in, $eq, range, plain scalar, etc.)
-                        const testArrayContainsString = typeof elemVal === 'string';
-                        if (testArrayContainsString) {
-                            return this.generateComparison(dotpropPath, elemVal, statementArguments, undefined, testArrayContainsString);
-                        } else {
-                            let customId = sa.output_identifier;
-                            if (isValueComparisonRange(elemVal)) {
-                                const firstVal = Object.values(elemVal)[0];
-                                if (typeof firstVal === 'number') {
-                                    customId = `(${sa.output_identifier})::numeric`;
-                                }
-                            } else if (typeof elemVal === 'number') {
-                                customId = `(${sa.output_identifier})::numeric`;
-                            }
-                            // A multi-scalar element compares as a raw JSON value: pass the element's raw JSONB
-                            // column so generateComparison's strict branch stays type-faithful (range/$regex still
-                            // fall through to the typed customId above).
-                            const rawJsonbId = this.multiScalarPaths.has(dotpropPath) ? sa.output_column : undefined;
-                            subClause = this.generateComparison(dotpropPath, elemVal, statementArguments, customId, undefined, undefined, undefined, rawJsonbId);
-                        }
-                    }
-                } else {
-                    // Compound object filter on array: all conditions must match the same element
-                    if (isPlainObject(filter)) {
-                        // Logic operators ($and/$or/$nor) on array values outside $elemMatch are not valid
-                        if (isLogicFilter(filter as WhereFilterDefinition)) {
-                            throw new Error("Logic operators ($and/$or/$nor) on array values must use $elemMatch explicitly");
-                        }
-                        const subPropertyMap = new PropertyTranslatorPgJsonbSchema(treeNode.schema!, sa.output_column, true);
-                        const result = compileWhereFilterRecursive(filter as WhereFilterDefinition, statementArguments, subPropertyMap, errors, rootFilter);
-                        return `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${result})`;
-
-                    } else {
-                        const rawJsonbId = this.multiScalarPaths.has(dotpropPath) ? sa.output_column : undefined;
-                        subClause = this.generateComparison(dotpropPath, filter, statementArguments, sa.output_identifier, undefined, undefined, undefined, rawJsonbId);
-                    }
-                }
+                const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
+                return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} #>> '{}' IN (${placeholders.join(', ')}))`;
             }
 
-            const sql = `EXISTS (SELECT 1 FROM ${sa.sql} WHERE ${subClause})`;
+            case 'all': {
+                // An empty $all is vacuously satisfied by any array.
+                if (predicate.elements.length === 0) return '1 = 1';
+                const conditions = predicate.elements.map(operand => {
+                    const alias = nextAlias();
+                    if (operand === null) {
+                        // A JSON null element: compare the raw jsonb element to `'null'::jsonb`. Its text extraction
+                        // is SQL NULL and never equals a bound param.
+                        return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} = 'null'::jsonb)`;
+                    }
+                    if (isPlainObject(operand) || Array.isArray(operand)) {
+                        // A structural element: EXACT deep equality via jsonb `=` (key-order-insensitive, canonical),
+                        // never a serialized-text compare. The JS reference is `value.some(el => deepEql(el, operand))`,
+                        // so an element carrying extra keys must NOT match, while one whose keys are reordered must.
+                        const placeholder = this.generatePlaceholder(operand as PreparedStatementArgumentOrObject, statementArguments);
+                        return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} = ${placeholder}::jsonb)`;
+                    }
+                    if (multiScalarElement || typeof operand === 'boolean') {
+                        // A boolean (or any mixed-scalar element) compares as jsonb-of-its-own-type, so `text = boolean`
+                        // (which Postgres has no operator for) never arises.
+                        return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} = ${toJsonbParam(operand as string | number | boolean, this.binder(statementArguments))})`;
+                    }
+                    const placeholder = this.generatePlaceholder(operand as PreparedStatementArgumentOrObject, statementArguments);
+                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} #>> '{}' = ${placeholder})`;
+                });
+                return conditions.join(' AND ');
+            }
 
-            return sql;
+            case 'size':
+                return arraySizeEquals(leafArrayExpr, this.generatePlaceholder(predicate.n, statementArguments));
 
-        } else {
-            // Do direct comparison
+            case 'exists':
+                // jsonb_typeof keeps a present JSON null (a value) distinct from a missing key, which the extracted
+                // value cannot.
+                return predicate.expected
+                    ? `jsonb_typeof(${leafArrayExpr}) IS NOT NULL`
+                    : `jsonb_typeof(${leafArrayExpr}) IS NULL`;
 
-            return this.generateComparison(dotpropPath, filter, statementArguments, undefined, undefined, errors, rootFilter);
+            case 'type':
+                return `jsonb_typeof(${leafArrayExpr}) = ${this.generatePlaceholder(mapTypeToPostgres(predicate.typeName), statementArguments)}`;
+
+            case 'not':
+                if (predicate.inner.kind === 'size') {
+                    const sizeSql = arraySizeEquals(leafArrayExpr, this.generatePlaceholder(predicate.inner.n, statementArguments));
+                    return `(jsonb_typeof(${leafArrayExpr}) IS NULL OR NOT (${sizeSql}))`;
+                }
+                return this.emitSubFilterOverElements(node, leafArrayExpr, guardedLeafArray, predicate, statementArguments, errors, rootFilter, nextAlias);
+
+            case 'elemMatch': {
+                const alias = nextAlias();
+                if (isSubDocumentBody(predicate.body)) {
+                    const subTranslator = new PropertyTranslatorPgJsonbSchema(node.leafArrayNode.schema!, alias, true);
+                    const result = compileWhereFilterRecursive(predicate.body.objectFilter, statementArguments, subTranslator, errors, rootFilter);
+                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${result})`;
+                }
+                if (predicate.body.scalarPredicate.kind === 'compoundObject') {
+                    // $exists / $type are field-level notions with no per-element meaning. The JS reference compares
+                    // the body as data against each element, and a scalar element never equals that object literal.
+                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE 1 = 0)`;
+                }
+                if (predicate.body.scalarPredicate.kind === 'scalar' && typeof predicate.body.scalarPredicate.value === 'string') {
+                    // A bare string body asks for containment of that string among the array's elements — the jsonb
+                    // `?` operator, scoped to THIS leaf array (never the whole path, which cannot descend an array).
+                    const placeholder = this.generatePlaceholder(predicate.body.scalarPredicate.value, statementArguments);
+                    return this.optionalWrapper(resolved, leafArrayExpr, `${leafArrayExpr} ? ${placeholder}`);
+                }
+                const bodyPred = predicate.body.scalarPredicate;
+                // The element's text identifier, cast to numeric when the body compares numerically, mirroring the
+                // leaf comparison's typed accessor. A range's `<`/`>` would otherwise compare the element as TEXT
+                // (`'-8' < '-9'` is lexically true), and a conjunction can hide the range one level down.
+                const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`;
+                const body = this.emitPredicate(dotpropPath, resolved, bodyPred, statementArguments, errors, rootFilter, {
+                    customSqlIdentifier: elementId,
+                    customRawJsonb: multiScalarElement ? alias : undefined,
+                });
+                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
+            }
+
+            case 'compoundObject': {
+                const alias = nextAlias();
+                if (isLogicFilter(predicate.filter)) {
+                    throw new Error("Logic operators ($and/$or/$nor) on array values must use $elemMatch explicitly");
+                }
+                const subTranslator = new PropertyTranslatorPgJsonbSchema(node.leafArrayNode.schema!, alias, true);
+                const result = compileWhereFilterRecursive(predicate.filter, statementArguments, subTranslator, errors, rootFilter);
+                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${result})`;
+            }
+
+            case 'scalar':
+            case 'undefinedField': {
+                const alias = nextAlias();
+                const body = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, {
+                    customSqlIdentifier: `${alias} #>> '{}'`,
+                    customRawJsonb: multiScalarElement ? alias : undefined,
+                });
+                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
+            }
+
+            case 'exactArray':
+                // An exact-array operand compares against the LEAF array itself, never the element carrying it.
+                return this.optionalWrapper(resolved, leafArrayExpr, `${leafArrayExpr} = ${this.generatePlaceholder(predicate.value as PreparedStatementArgumentOrObject[], statementArguments)}::jsonb`);
+
+            // A scalar operator does not describe the array itself, so it reads as a sub-document match over the
+            // array's elements — the same reading a bare sub-document gets.
+            case 'eq':
+            case 'ne':
+            case 'range':
+            case 'regex':
+                return this.emitSubFilterOverElements(node, leafArrayExpr, guardedLeafArray, predicate, statementArguments, errors, rootFilter, nextAlias);
         }
     }
 
     /**
-     * Emits a leaf-level SQL comparison for a single value ($eq → =, range → >/</>=/<= , scalar → =, object/array → =::jsonb, undefined → IS NULL).
-     * Wraps optional/nullable paths with an IS NOT NULL guard.
+     * Whether a scalar `$elemMatch` body compares numerically, so the element identifier read from every spread
+     * element must be cast to numeric. Without it a range's `<`/`>` compares the element as TEXT (`'-8' < '-9'` is
+     * lexically true, numerically false), and a conjunction can hide the range one level down.
      */
-    protected generateComparison(dotpropPath: string, filter: WhereFilterDefinition<T> | ValueComparisonFlexi<string | number | boolean> | PreparedStatementArgumentOrObject[] | undefined, statementArguments: PreparedStatementArgument[], customSqlIdentifier?: string, testArrayContainsString?: boolean, errors?: WhereClauseError[], rootFilter?: WhereFilterDefinition<T>, customRawJsonbIdentifier?: string): string {
+    private elementNeedsNumericCast(predicate: Predicate): boolean {
+        if (predicate.kind === 'and') return predicate.children.some(child => this.elementNeedsNumericCast(child));
+        if (predicate.kind === 'range') return typeof predicate.bounds[0]?.operand === 'number';
+        if (predicate.kind === 'scalar') return typeof predicate.value === 'number';
+        return false;
+    }
 
-        /**
-         * Forces leaf comparisons to a definite TRUE/FALSE so any enclosing NOT
-         * (from $nor or a parent $not) doesn't propagate NULL under SQL 3VL.
-         * Unconditional: PG folds `IS NOT NULL` against NOT NULL columns.
-         */
-        const optionalWrapper = (sqlIdentifier: string, query: string) => {
-            if (!this.nodeMap[dotpropPath]) return query;
-            return `(${sqlIdentifier} IS NOT NULL AND ${query})`;
+    /** Apply a condition to each element of a leaf array as a sub-filter over that element's fields. */
+    private emitSubFilterOverElements(node: TraverseArrayPredicate, leafArrayExpr: string, guardedLeafArray: string, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>, nextAlias: AliasFactory): string {
+        const alias = nextAlias();
+        const subTranslator = new PropertyTranslatorPgJsonbSchema(node.leafArrayNode.schema!, alias, true);
+        const result = compileWhereFilterRecursive(reconstructFieldCondition(predicate), statementArguments, subTranslator, errors, rootFilter);
+        return `EXISTS (SELECT 1 FROM jsonb_array_elements(${guardedLeafArray}) AS ${alias} WHERE ${result})`;
+    }
+
+    // ── A scalar or object leaf beneath an array — read from every spread element ──
+
+    /**
+     * Emit a condition on a path that crosses arrays but ends at a scalar or object (`messages.rfc822msgid`).
+     *
+     * Every array on the path is spread, and the leaf is read from the resulting element. The condition matches
+     * when SOME element's leaf satisfies it.
+     */
+    private emitSpreadLeafPredicate(dotpropPath: string, resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
+        const leafNode = this.nodeMap[resolved.lookupPath];
+        if (!leafNode) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+        if (predicate.kind === 'exactArray') throw new Error("Cannot compare an array to a non-array");
+
+        const path: TreeNode[] = [];
+        let target: TreeNode | undefined = leafNode;
+        while (target) {
+            path.unshift(target);
+            target = target.parent;
         }
 
-        /**
-         * Wraps Mongo "matches missing" operators ($ne / $nin / $not) with `(IS NULL OR <q>)`.
-         * Unconditional so semantics agree with matchJavascriptObject regardless of schema
-         * annotation; PG folds the guard against NOT NULL columns.
-         */
-        const optionalWrapperNullMatches = (sqlIdentifier: string, query: string) => {
-            if (!this.nodeMap[dotpropPath]) return query;
-            return `(${sqlIdentifier} IS NULL OR ${query})`;
+        let spread = spreadJsonbArrays(this.sqlColumnName, path);
+        if (!spread) throw new Error("Could not locate array in path: " + dotpropPath);
+
+        // The raw spread element (before any remaining-leaf extraction) and the leaf keys within it, for operators
+        // ($exists / $type) that must probe the element by jsonb_typeof rather than compare its extracted scalar value.
+        const spreadElement = spread.output_column;
+        const remainingSegments: string[] = [];
+        for (let i = path.length - 1; i >= 0; i--) {
+            if (path[i]!.kind === 'array') break;
+            if (path[i]!.name) remainingSegments.unshift(path[i]!.name);
+        }
+        if (remainingSegments.length > 0) {
+            const leafColumn = pgJsonbAccessor(spreadElement, remainingSegments, { asText: false });
+            spread = { ...spread, output_column: leafColumn, output_identifier: `${leafColumn} #>> '{}'` };
+        }
+        const resolvedSpread = spread;
+        const multiScalarElement = this.multiScalarPaths.has(resolved.lookupPath);
+
+        switch (predicate.kind) {
+            case 'in': {
+                if (predicate.operand.length === 0) return '1 = 0';
+                if (multiScalarElement) {
+                    const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
+                    return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
+                }
+                const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_identifier} IN (${placeholders.join(', ')}))`;
+            }
+            case 'nin': {
+                if (predicate.operand.length === 0) return '1 = 1';
+                if (multiScalarElement) {
+                    const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
+                    return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
+                }
+                const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
+                return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_identifier} IN (${placeholders.join(', ')}))`;
+            }
+            case 'all': {
+                const conditions = predicate.elements.map(operand => {
+                    if (operand === null) {
+                        return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} = 'null'::jsonb)`;
+                    }
+                    if (isPlainObject(operand) || Array.isArray(operand)) {
+                        const placeholder = this.generatePlaceholder(operand as PreparedStatementArgumentOrObject, statementArguments);
+                        return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} = ${placeholder}::jsonb)`;
+                    }
+                    if (multiScalarElement || typeof operand === 'boolean') {
+                        return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} = ${toJsonbParam(operand as string | number | boolean, this.binder(statementArguments))})`;
+                    }
+                    const placeholder = this.generatePlaceholder(operand as PreparedStatementArgumentOrObject, statementArguments);
+                    return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_identifier} = ${placeholder})`;
+                });
+                return conditions.length === 0 ? '1 = 1' : conditions.join(' AND ');
+            }
+            case 'size':
+                return arraySizeEquals(this.pathAccessor(resolved, false), this.generatePlaceholder(predicate.n, statementArguments));
+            case 'not':
+                if (predicate.inner.kind === 'size') {
+                    const acc = this.pathAccessor(resolved, false);
+                    const sizeSql = arraySizeEquals(acc, this.generatePlaceholder(predicate.inner.n, statementArguments));
+                    return `(${acc} IS NULL OR NOT (${sizeSql}))`;
+                }
+                break;
+            case 'exists': {
+                if (remainingSegments.length > 0) {
+                    // The field exists iff some array element carries the leaf. A whole-path jsonb_typeof cannot
+                    // descend through the array, so probe each spread element.
+                    const cond = `jsonb_typeof(${resolvedSpread.output_column}) IS NOT NULL`;
+                    return predicate.expected
+                        ? `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${cond})`
+                        : `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${cond})`;
+                }
+                const acc = this.pathAccessor(resolved, false);
+                return predicate.expected ? `jsonb_typeof(${acc}) IS NOT NULL` : `jsonb_typeof(${acc}) IS NULL`;
+            }
+            case 'type': {
+                const placeholder = this.generatePlaceholder(mapTypeToPostgres(predicate.typeName), statementArguments);
+                if (remainingSegments.length > 0) {
+                    return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE jsonb_typeof(${resolvedSpread.output_column}) = ${placeholder})`;
+                }
+                return `jsonb_typeof(${this.pathAccessor(resolved, false)}) = ${placeholder}`;
+            }
+            case 'elemMatch': {
+                let subClause: string;
+                if (isSubDocumentBody(predicate.body)) {
+                    const subTranslator = new PropertyTranslatorPgJsonbSchema(leafNode.schema!, resolvedSpread.output_column, true);
+                    subClause = compileWhereFilterRecursive(predicate.body.objectFilter, statementArguments, subTranslator, errors, rootFilter);
+                } else if (predicate.body.scalarPredicate.kind === 'compoundObject') {
+                    subClause = '1 = 0';
+                } else {
+                    const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                    subClause = this.emitPredicate(dotpropPath, resolved, predicate.body.scalarPredicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                }
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
+            }
+            case 'scalar':
+            case 'undefinedField': {
+                const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
+            }
+            default:
+                break;
         }
 
-        // Multi-scalar union field (e.g. boolean|number|string): compare as a raw JSON value so JSON `true` ≠ `1`
-        // ≠ `"true"`, matching matchJavascriptObject's strict `===`. The schema gives no single column type, so a
-        // typed cast would coerce across scalar kinds and can cast-error on arbitrary strings. Applies to a
-        // top-level field (raw accessor) and to an array-spread element (the caller passes the element's raw
-        // JSONB column as customRawJsonbIdentifier); the string-containment shortcut (handled below) and
-        // range/$regex operators fall through to the typed path.
-        if (this.multiScalarPaths.has(dotpropPath) && !testArrayContainsString && (customSqlIdentifier === undefined || customRawJsonbIdentifier !== undefined)) {
-            const rawId = customRawJsonbIdentifier ?? this.rawJsonbAccessor(dotpropPath);
-            // A bare `{ field: null }` arrives as the JSON value `null` (not `{ $eq: null }`, which the param type
-            // omits — hence the unknown widening); treat it identically — match SQL NULL (missing path) or JSON
-            // null — so it never reaches the first-arm typed cast that would error on a string/number row.
-            const filterValue: unknown = filter;
-            if (filterValue === null) return `(${rawId} IS NULL OR ${rawId} = 'null'::jsonb)`;
-            if (isValueComparisonEq(filter)) {
-                if (filter.$eq === null) return `(${rawId} IS NULL OR ${rawId} = 'null'::jsonb)`;
-                // Nothing equals NaN — short-circuit to a constant rather than binding NaN as jsonb. See MONGO-DIVERGENCES.md §7.
-                if (typeof filter.$eq === 'number' && Number.isNaN(filter.$eq)) return '1 = 0';
-                return `(${rawId} IS NOT NULL AND ${rawId} = ${this.toJsonbParam(filter.$eq, statementArguments)})`;
-            }
-            if (isValueComparisonNe(filter)) {
-                // "ne matches missing" like matchJavascriptObject; `$ne: null` matches every value.
-                if (filter.$ne === null) return '1 = 1';
-                // NaN equals nothing, so $ne: NaN matches every value — short-circuit before the strict path. See MONGO-DIVERGENCES.md §7.
-                if (typeof filter.$ne === 'number' && Number.isNaN(filter.$ne)) return '1 = 1';
-                return `(${rawId} IS NULL OR ${rawId} != ${this.toJsonbParam(filter.$ne, statementArguments)})`;
-            }
-            if (isValueComparisonIn(filter)) {
-                if (filter.$in.length === 0) return '1 = 0';
-                const vals = filter.$in.map(v => this.toJsonbParam(v, statementArguments));
-                return `(${rawId} IS NOT NULL AND ${rawId} IN (${vals.join(', ')}))`;
-            }
-            if (isValueComparisonNin(filter)) {
-                if (filter.$nin.length === 0) return '1 = 1';
-                const vals = filter.$nin.map(v => this.toJsonbParam(v, statementArguments));
-                return `(${rawId} IS NULL OR ${rawId} NOT IN (${vals.join(', ')}))`;
-            }
-            if (isValueComparisonScalar(filter)) {
-                return `(${rawId} IS NOT NULL AND ${rawId} = ${this.toJsonbParam(filter, statementArguments)})`;
-            }
-            if (isValueComparisonRange(filter)) {
-                // A range operator on a multi-scalar field applies only to a stored value of the operand's own
-                // type — matchJavascriptObject throws when the runtime types differ ("Cannot compare value of type
-                // X with filter of type Y"). Compare within that type in the THEN; any other stored type hits the
-                // ELSE, where casting the JSON type name (a non-numeric word) to numeric raises a query-time error,
-                // surfacing as a rejection exactly as the reference throws — never a silent coercion.
-                const operandIsNumber = typeof Object.values(filter)[0] === 'number';
-                const valueExpr = `(${rawId} #>> '{}')${operandIsNumber ? '::numeric' : ''}`;
-                const comparisons = ValueComparisonRangeOperators
-                    .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
-                    .map(x => {
-                        const v = filter[x]!;
-                        if (typeof v === 'number' && Number.isNaN(v)) return '1=0'; // MongoDB: every comparison with NaN is false. See MONGO-DIVERGENCES.md §7.
-                        return ValueComparisonRangeOperatorsSqlFunctions[x](valueExpr, this.generatePlaceholder(v, statementArguments));
-                    });
-                const body = comparisons.length > 1 ? `(${comparisons.join(' AND ')})` : comparisons[0]!;
-                return `CASE WHEN jsonb_typeof(${rawId}) = '${operandIsNumber ? 'number' : 'string'}' THEN ${body} ELSE (jsonb_typeof(${rawId}))::numeric = 0 END`;
-            }
-            // $exists / $type / $not / $regex on a multi-scalar field fall through to the typed handling.
+        // Every remaining operator reads as a sub-document match over the spread elements.
+        const condition = reconstructFieldCondition(predicate);
+        if (isLogicFilter(condition)) {
+            throw new Error("Logic operators ($and/$or/$nor) on array values must use $elemMatch explicitly");
         }
+        const subTranslator = new PropertyTranslatorPgJsonbSchema(leafNode.schema!, resolvedSpread.output_column, true);
+        const result = compileWhereFilterRecursive(condition, statementArguments, subTranslator, errors, rootFilter);
+        return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${result})`;
+    }
 
-        // A field absent from the schema is always missing. Its verdict is the JS oracle's missing-field verdict —
-        // the broadening operators ($ne / $nin / $not / $exists:false) match, every narrowing one ($eq, a range,
-        // $in, $type, $regex, $size, $exists:true, a bare scalar) does not. Resolve $exists / $type / $size here
-        // (alongside $ne / $nin / $not) BEFORE their emitters interpolate the raw filter key into the SQL string —
-        // so an attacker-controlled key is never a query, only ever a definite `false`. ($eq / $in / range / $regex
-        // / bare scalar already resolve to FALSE via the path-validating getSqlIdentifier, so need no guard here.)
-        if (customSqlIdentifier === undefined && !this.nodeMap[dotpropPath]
-            && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter)
-                || isValueComparisonExists(filter) || isValueComparisonType(filter) || isArrayValueComparisonSize(filter))) {
-            return this.matchesMissingField(filter) ? '1=1' : '1=0';
-        }
+    // ── Leaf comparisons — the field itself, or one already-spread element ──
+
+    /**
+     * Emit a leaf-level SQL comparison of one value.
+     * $eq → =, range → >/</>=/<= , $regex → ~ , scalar → =, object/array → =::jsonb, undefined → IS NULL.
+     * Optional/nullable paths are wrapped with a guard that keeps the verdict definite.
+     */
+    private emitLeafComparison(dotpropPath: string, resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>, context: EmitContext): string {
+        const { customSqlIdentifier } = context;
 
         // A scalar-equality filter whose operand's runtime type differs from the field's declared scalar kind can
         // never match — matchJavascriptObject compares with === (`'7' === 7` is false) — yet Postgres's typed cast
-        // would coerce text↔numeric and spuriously match (SQLite is naturally type-strict here). Return a definite
-        // non-match. Enums keep their own cast path; multi-scalar and literal unions already returned above.
-        const scalarKind = this.nodeMap[dotpropPath]?.kind;
-        if (customSqlIdentifier === undefined && (scalarKind === 'string' || scalarKind === 'number' || scalarKind === 'boolean')) {
-            const eqOperand = isValueComparisonEq(filter) ? filter.$eq
-                : ((typeof filter === 'string' || typeof filter === 'number' || typeof filter === 'boolean') ? filter : undefined);
-            if (eqOperand !== undefined && eqOperand !== null && typeof eqOperand !== scalarKind) {
+        // would coerce text↔numeric and spuriously match. Return a definite non-match. (Enums keep their own cast
+        // path; multi-scalar and literal unions already returned via emitMultiScalarLeaf.)
+        if (customSqlIdentifier === undefined && (resolved.leafKind === 'string' || resolved.leafKind === 'number' || resolved.leafKind === 'boolean')) {
+            const eqOperand = predicate.kind === 'eq' ? predicate.operand
+                : predicate.kind === 'scalar' ? predicate.value : undefined;
+            if (eqOperand !== undefined && eqOperand !== null && typeof eqOperand !== resolved.leafKind) {
                 return '1 = 0';
             }
         }
 
-        // $ne
-        if (isValueComparisonNe(filter)) {
-            // MongoDB: NaN equals nothing, so $ne: NaN matches every value (and Mongo's "ne matches missing" rule also applies). See MONGO-DIVERGENCES.md §7.
-            if (typeof filter.$ne === 'number' && Number.isNaN(filter.$ne)) {
-                return '1=1';
-            }
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            const placeholder = this.generatePlaceholder(filter.$ne, statementArguments);
-            return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} != ${placeholder}`);
-        }
-        // $in
-        if (isValueComparisonIn(filter)) {
-            if (filter.$in.length === 0) return '1 = 0';
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            const placeholders = filter.$in.map(v => this.generatePlaceholder(v, statementArguments));
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IN (${placeholders.join(', ')})`);
-        }
-        // $nin
-        if (isValueComparisonNin(filter)) {
-            if (filter.$nin.length === 0) return '1 = 1';
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            const placeholders = filter.$nin.map(v => this.generatePlaceholder(v, statementArguments));
-            return optionalWrapperNullMatches(sqlIdentifier, `${sqlIdentifier} NOT IN (${placeholders.join(', ')})`);
-        }
-        // $not — negate inner comparison
-        if (isValueComparisonNot(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            const innerSql = this.generateComparison(dotpropPath, filter.$not as any, statementArguments, customSqlIdentifier, testArrayContainsString, errors, rootFilter, customRawJsonbIdentifier);
-            // A top-level multi-scalar field has no single column type — the outer null-guard must read the raw
-            // (uncast) JSONB, or a first-arm cast (e.g. ::boolean) errors on a row of another scalar kind even though
-            // the inner comparison is already raw. Mirrors the bare-null fix. (A spread element guards via its
-            // uncast text identifier, which does not cast-error.)
-            const guardIdentifier = (this.multiScalarPaths.has(dotpropPath) && customSqlIdentifier === undefined)
-                ? this.rawJsonbAccessor(dotpropPath)
-                : sqlIdentifier;
-            return optionalWrapperNullMatches(guardIdentifier, `NOT (${innerSql})`);
-        }
-        // $exists — use jsonb_typeof on the raw jsonb value (-> not ->>) so JSON null
-        // (a present value) is distinguished from a missing path. `->>` text-extracts
-        // and returns SQL NULL for both, conflating them.
-        if (isValueComparisonExists(filter)) {
-            const parts = dotpropPath.split('.');
-            const jsonbPath = parts.map(p => `'${p}'`).join('->');
-            const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
-            if (filter.$exists) {
-                return `jsonb_typeof(${rawJsonbExpr}) IS NOT NULL`;
-            } else {
-                return `jsonb_typeof(${rawJsonbExpr}) IS NULL`;
-            }
-        }
-        // $type
-        if (isValueComparisonType(filter)) {
-            // For Postgres JSONB, use jsonb_typeof on the raw JSONB value (-> not ->>).
-            // Build the -> chain manually since convertDotPropPathToPostgresJsonPath uses ->> for leaf scalars.
-            const parts = dotpropPath.split('.');
-            const jsonbPath = parts.map(p => `'${p}'`).join('->');
-            const rawJsonbExpr = `${this.sqlColumnName}->${jsonbPath}`;
-            const pgType = mapTypeToPostgres(filter.$type);
-            const placeholder = this.generatePlaceholder(pgType, statementArguments);
-            return `jsonb_typeof(${rawJsonbExpr}) = ${placeholder}`;
-        }
-        // $size (needed here for $not + $size to work via recursive generateComparison)
-        if (isArrayValueComparisonSize(filter)) {
-            const sizeResult = convertDotPropPathToPostgresJsonPath(this.sqlColumnName, dotpropPath, this.nodeMap, undefined, true);
-            if (!sizeResult.success) {
-                this.conversionErrors.push({ kind: 'path_conversion', error: sizeResult.error, message: sizeResult.error.message });
-                return 'FALSE';
-            }
-            const placeholder = this.generatePlaceholder(filter.$size, statementArguments);
-            // Guard the array-only jsonb_array_length against a scalar/missing value (CASE → false), matching the
-            // value-driven JS matcher — a bare `jsonb_array_length(<scalar>)` errors ("cannot get array length of a
-            // scalar"). Feed the raw `->` JSONB accessor, not the converter's `->>` text extraction for a scalar leaf
-            // (the convert call above still validates the path — an unknown one returns FALSE before reaching here).
-            return this.arraySizeEquals(this.rawJsonbAccessor(dotpropPath), placeholder);
-        }
-        // $regex — Postgres POSIX regex (`~`); JS flags become an embedded `(?…)` option prefix.
-        if (isValueComparisonRegex(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
-            // Mirror the JS oracle (`new RegExp($regex, $options)`): an invalid pattern or an invalid flag is a
-            // REJECTION (the reference throws), surfaced as 'not well-defined' so the seam rethrows (vs a skip).
-            try {
-                new RegExp(filter.$regex, filter.$options);
-            } catch {
-                this.pushRegexError(dotpropPath, filter, rootFilter, `$regex is not well-defined: /${filter.$regex}/${filter.$options ?? ''}`);
-                return 'FALSE';
-            }
-            const prefix = this.pgRegexOptionPrefix(filter.$options);
-            if (prefix === undefined) {
-                // A valid JS flag Postgres cannot faithfully express (e.g. sticky/unicode) → capability gap (skip).
-                this.pushRegexError(dotpropPath, filter, rootFilter, '$regex $options is unsupported for Postgres translation');
-                return 'FALSE';
-            }
-            const placeholder = this.generatePlaceholder(prefix + filter.$regex, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ~ ${placeholder}`);
-        }
-
-        if (isValueComparisonEq(filter)) {
-            // MongoDB: nothing equals NaN. See MONGO-DIVERGENCES.md §7.
-            if (typeof filter.$eq === 'number' && Number.isNaN(filter.$eq)) {
-                return '1=0';
-            }
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            if (filter.$eq === null) {
-                return `${sqlIdentifier} IS NULL`;
-            }
-            const placeholder = this.generatePlaceholder(filter.$eq, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
-        } else if (isValueComparisonRange(filter)) {
-
-            // Range comparison can be string or filter, so we need to determinate what we're dealing with to set the SQL straight.
-            // E.g. if the filter is {$gt: 'A'}, this will be 'string'. If the filter is {$gt: 1}, this will be 'number'.
-            const firstFilterValueType = typeof (Object.values(filter)[0]);
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstFilterValueType === 'string' ? 'string' : 'number']);
-
-            const operators = ValueComparisonRangeOperators
-                .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
-                .map(x => {
-                    const v = filter[x]!;
-                    // MongoDB: every comparison with NaN returns false. See MONGO-DIVERGENCES.md §7.
-                    if (typeof v === 'number' && Number.isNaN(v)) {
-                        return '1=0';
-                    }
-                    const placeholder = this.generatePlaceholder(v, statementArguments);
-                    return ValueComparisonRangeOperatorsSqlFunctions[x](sqlIdentifier, placeholder);
-                });
-            const result = optionalWrapper(sqlIdentifier, operators.length > 1 ? `(${operators.join(' AND ')})` : operators[0]!);
-            return result;
-
-        } else if (isValueComparisonScalar(filter)) {
-
-            const placeholder = this.generatePlaceholder(filter, statementArguments);
-            if (testArrayContainsString) {
-                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
-                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} ? ${placeholder}`);
-            } else {
+        switch (predicate.kind) {
+            case 'ne': {
+                // MongoDB: NaN equals nothing, so $ne: NaN matches every value (and Mongo's "ne matches missing" rule also applies). See MONGO-DIVERGENCES.md §7.
+                if (typeof predicate.operand === 'number' && Number.isNaN(predicate.operand)) return '1=1';
                 const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-                return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
+                const placeholder = this.generatePlaceholder(predicate.operand as PreparedStatementArgumentOrObject, statementArguments);
+                return this.optionalWrapperNullMatches(resolved, sqlIdentifier, `${sqlIdentifier} != ${placeholder}`);
             }
-        } else if (isPlainObject(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['object']);
-            const placeholder = this.generatePlaceholder(filter, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
-        } else if (Array.isArray(filter)) {
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
-            const placeholder = this.generatePlaceholder(filter, statementArguments);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
-        } else if (filter === null) {
-            // Explicit null filter → match SQL NULL (no optionalWrapper — IS NOT NULL guard would contradict)
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            return `${sqlIdentifier} IS NULL`;
-        } else if (filter === undefined) {
-            // Want it to return nothing (same as matchJavascriptObject), so treat it as a null
-            const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
-            return optionalWrapper(sqlIdentifier, `${sqlIdentifier} IS NULL`);
-        } else {
-            let filterString = 'na';
-            try {
-                filterString = JSON.stringify(filter);
-            } finally {
-                throw new Error("Unknown filter type: " + filterString);
+            case 'in': {
+                if (predicate.operand.length === 0) return '1 = 0';
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
+                return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} IN (${placeholders.join(', ')})`);
+            }
+            case 'nin': {
+                if (predicate.operand.length === 0) return '1 = 1';
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
+                return this.optionalWrapperNullMatches(resolved, sqlIdentifier, `${sqlIdentifier} NOT IN (${placeholders.join(', ')})`);
+            }
+            case 'not':
+                return this.emitNot(dotpropPath, resolved, predicate.inner, statementArguments, errors, rootFilter, context);
+
+            // $exists / $type / $size probe the stored jsonb (-> not ->>): jsonb_typeof keeps a present JSON null (a
+            // value) distinct from a missing path, which the extracted identifier cannot.
+            case 'exists':
+                return predicate.expected
+                    ? `jsonb_typeof(${this.pathAccessor(resolved, false)}) IS NOT NULL`
+                    : `jsonb_typeof(${this.pathAccessor(resolved, false)}) IS NULL`;
+            case 'type':
+                return `jsonb_typeof(${this.pathAccessor(resolved, false)}) = ${this.generatePlaceholder(mapTypeToPostgres(predicate.typeName), statementArguments)}`;
+            case 'size':
+                return arraySizeEquals(this.pathAccessor(resolved, false), this.generatePlaceholder(predicate.n, statementArguments));
+
+            case 'regex':
+                return this.emitRegex(dotpropPath, resolved, predicate, statementArguments, rootFilter, customSqlIdentifier);
+
+            case 'eq': {
+                // MongoDB: nothing equals NaN. See MONGO-DIVERGENCES.md §7.
+                if (typeof predicate.operand === 'number' && Number.isNaN(predicate.operand)) return '1=0';
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                if (predicate.operand === null) return `${sqlIdentifier} IS NULL`;
+                const placeholder = this.generatePlaceholder(predicate.operand, statementArguments);
+                return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
+            }
+            case 'range': {
+                const firstOperandIsString = typeof predicate.bounds[0]?.operand === 'string';
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, [firstOperandIsString ? 'string' : 'number']);
+                const operators = predicate.bounds.map(bound => {
+                    // MongoDB: every comparison with NaN returns false. See MONGO-DIVERGENCES.md §7.
+                    if (typeof bound.operand === 'number' && Number.isNaN(bound.operand)) return '1=0';
+                    const placeholder = this.generatePlaceholder(bound.operand as PreparedStatementArgumentOrObject, statementArguments);
+                    return ValueComparisonRangeOperatorsSqlFunctions[bound.operator as ValueComparisonRangeOperatorsTyped](sqlIdentifier, placeholder);
+                });
+                return this.optionalWrapper(resolved, sqlIdentifier, operators.length > 1 ? `(${operators.join(' AND ')})` : operators[0]!);
             }
 
+            case 'scalar': {
+                if (predicate.value === null) {
+                    // An explicit null filter matches SQL NULL. No guard: an IS NOT NULL wrapper would contradict it.
+                    const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                    return `${sqlIdentifier} IS NULL`;
+                }
+                const placeholder = this.generatePlaceholder(predicate.value, statementArguments);
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} = ${placeholder}`);
+            }
+            case 'undefinedField': {
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath);
+                return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} IS NULL`);
+            }
+
+            case 'exactArray': {
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['array']);
+                const placeholder = this.generatePlaceholder(predicate.value as PreparedStatementArgumentOrObject[], statementArguments);
+                return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
+            }
+            // An operator payload the field's own shape cannot answer (an array operator on a scalar field) compares
+            // as data, exactly as the value-driven matcher does — and nothing equals an operator payload.
+            case 'compoundObject':
+            case 'elemMatch':
+            case 'all': {
+                const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['object']);
+                const value = predicate.kind === 'compoundObject' ? predicate.filter : reconstructFieldCondition(predicate);
+                const placeholder = this.generatePlaceholder(value as PreparedStatementArgumentOrObject, statementArguments);
+                return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} = ${placeholder}::jsonb`);
+            }
+
+            case 'and':
+                // Conjunctions are decomposed before a leaf is reached.
+                throw new Error("A conjunction cannot be emitted as a leaf comparison");
         }
+    }
+
+    /**
+     * Negation complements its operand, on a present field and on a missing one alike: `{$not: {$ne: 5}}` does not
+     * match a missing field, because `{$ne: 5}` does.
+     *
+     * The guard is a PRESENCE probe rather than the extracted value. The raw `->` accessor is SQL NULL only for an
+     * absent path; a stored JSON null reads back as `'null'::jsonb`. Text extraction (`->>`) returns SQL NULL for
+     * both, and under negation that conflation flips the verdict — so the probe stays on the raw jsonb value. Which
+     * way it reads — short-circuit on absence, or require presence — is decided by what the whole negation says
+     * about a missing field.
+     */
+    private emitNot(dotpropPath: string, resolved: ResolvedPath, inner: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>, context: EmitContext): string {
+        const innerSql = this.emitPredicate(dotpropPath, resolved, inner, statementArguments, errors, rootFilter, context);
+        if (context.customSqlIdentifier !== undefined) {
+            // An array element is always present, so presence is not a question its negation can ask.
+            return this.optionalWrapperNullMatches(resolved, context.customSqlIdentifier, `NOT (${innerSql})`);
+        }
+        if (!resolved.known) return `NOT (${innerSql})`;
+
+        const presence = this.pathAccessor(resolved, false);
+        return matchesMissingField({ kind: 'not', inner })
+            ? `(${presence} IS NULL OR NOT (${innerSql}))`
+            : `(${presence} IS NOT NULL AND NOT (${innerSql}))`;
+    }
+
+    /**
+     * $regex — Postgres POSIX regex (`~`); JS flags become an embedded `(?…)` option prefix.
+     *
+     * A broken pattern is a REJECTION (the value-driven matcher throws on it too), surfaced as 'not well-defined'
+     * so the seam rethrows; a valid pattern Postgres cannot faithfully express is a capability gap, surfaced as a skip.
+     */
+    private emitRegex(dotpropPath: string, resolved: ResolvedPath, predicate: Predicate & { kind: 'regex' }, statementArguments: PreparedStatementArgument[], rootFilter: WhereFilterDefinition<T>, customSqlIdentifier: string | undefined): string {
+        const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
+        // Mirror the JS oracle (`new RegExp($regex, $options)`): an invalid pattern or an invalid flag is a
+        // REJECTION (the reference throws), surfaced as 'not well-defined' so the seam rethrows (vs a skip).
+        try {
+            new RegExp(predicate.pattern, predicate.options);
+        } catch {
+            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, `$regex is not well-defined: /${predicate.pattern}/${predicate.options ?? ''}`);
+            return 'FALSE';
+        }
+        const prefix = pgRegexOptionPrefix(predicate.options);
+        if (prefix === undefined) {
+            // A valid JS flag Postgres cannot faithfully express (e.g. sticky/unicode) → capability gap (skip).
+            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, '$regex $options is unsupported for Postgres translation');
+            return 'FALSE';
+        }
+        const placeholder = this.generatePlaceholder(prefix + predicate.pattern, statementArguments);
+        return this.optionalWrapper(resolved, sqlIdentifier, `${sqlIdentifier} ~ ${placeholder}`);
     }
 }
 

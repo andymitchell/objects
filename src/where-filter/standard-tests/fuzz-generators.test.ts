@@ -84,5 +84,15 @@ describe('the multi-operator fuzz generators draw payloads that can expose a dro
             });
             expect(discriminating.length).toBeGreaterThan(5);
         });
+
+        test('some draws are a lone $nin on a row with no leaf array — the missing-field verdict', () => {
+            // `$nin` is the one operator here a missing field satisfies, so a lone `$nin` on an absent `groups`
+            // is the draw that separates a correct missing-leaf-array verdict (a missing field holds none of the
+            // forbidden values → true) from the bare "some leaf satisfied this" reading (false). Without such a
+            // draw the fuzz cannot reach the missing-leaf-array law at all — only the section-04 example pins do.
+            const missingLeaf = corpus(13, genLeafScopeOps).filter(({ row, drawn }) =>
+                (row.groups ?? []).length === 0 && drawn.length === 1 && drawn[0]?.op === '$nin' && slowLeafScopeEval(row, drawn));
+            expect(missingLeaf.length).toBeGreaterThan(5);
+        });
     });
 });

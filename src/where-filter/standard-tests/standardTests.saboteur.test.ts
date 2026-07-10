@@ -154,7 +154,7 @@ const GROUP_A: Saboteur[] = [
     { name: 'S3 ignoresNegation', matcher: rewriteMatcher(ignoresNegation), trips: [1, 2, 7] },
     { name: 'S4 swapsNeEq', matcher: rewriteMatcher(swapsNeEq), trips: [1] },
     { name: 'S5 flipsExists', matcher: rewriteMatcher(flipsExists), trips: [1] },
-    { name: 'S6 sizeOffByOne', matcher: rewriteMatcher(sizeOffByOne), trips: [1] },
+    { name: 'S6 sizeOffByOne', matcher: rewriteMatcher(sizeOffByOne), trips: [13] },
     { name: 'S7 swapsInNin', matcher: rewriteMatcher(swapsInNin), trips: [1] },
     { name: 'S8 emptyOrMatchesAll', matcher: emptyOrMatchesAll, trips: [8] },
     { name: 'S9 swallowsInvalidFilter', matcher: swallowsInvalidFilter, trips: [9] },
@@ -193,9 +193,10 @@ async function collectFuzzResults(matcher: MatchJavascriptObjectInTesting): Prom
         errorsAsValues: false,
         // The generator draws from a broad shape space (optional arrays, empty-`{}` logic arms, multi-op combos),
         // so a rare-operator defect — e.g. a $size off-by-one, which only bites on a PRESENT array of a specific
-        // length — is diluted across many iterations. Enough iterations to catch it with a comfortable margin
-        // (~6 catches for S6 at this seed); the honest matcher still passes every property, and more iterations
-        // only ADD catches, so every declared-trip subset holds.
+        // length — is diluted across many iterations. Enough iterations to catch each with a comfortable margin
+        // (e.g. 13 catches for S6, whose $size break the leaf-scope property WF-P13 exercises directly at this
+        // seed); the honest matcher still passes every property, and more iterations only ADD catches, so every
+        // declared-trip subset holds.
         fuzz: { iterations: 120, seed: DEFAULT_FUZZ_SEED },
         ...makeHelpers(realExpect, false, 'saboteur-probe'),
     };

@@ -431,6 +431,12 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 expect(await noLeafArray(absent, { 'groups.tags': { $exists: true } })).toBe(false);
                 expect(await noLeafArray(empty, { 'groups.tags': { $exists: true } })).toBe(false);
             });
+            test('present leaf arrays are still judged per leaf: $nin holds when ANY one leaf holds none of the forbidden values', async () => {
+                // The one leaf array holds 'x', so no leaf satisfies $nin — the row does not match.
+                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(false);
+                // The first leaf array holds none of them, so it satisfies $nin — pooling both leaves would wrongly see 'x'.
+                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+            });
         });
 
         // ── An exact-array operand compares the leaf array, not the element holding it ─────────────
@@ -463,6 +469,34 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
             });
             test('a leaf array merely containing the operand’s element does not match', async () => {
                 expect(await exactLeafArray(noChildEquals)).toBe(false);
+            });
+        });
+
+        // ── A bare-string $elemMatch beneath an intermediate array is leaf-scoped ─────────────────
+        //
+        // `{'groups.tags': {$elemMatch: 'a'}}` asks whether ONE `groups` entry's `tags` contains `'a'`. The
+        // whole-path accessor cannot descend the outer array, so the verdict is read per leaf array.
+        describe('a string $elemMatch beneath an intermediate array is scoped to one leaf array', () => {
+            const onNested = (row: NestedScalarArray, filter: unknown) =>
+                matchJavascriptObject(row, filter as WhereFilterDefinition<NestedScalarArray>, NestedScalarArraySchema);
+
+            test('a leaf array containing the string matches', async () => {
+                expect(await onNested({ id: 'x', groups: [{ tags: ['a'] }] }, { 'groups.tags': { $elemMatch: 'a' } })).toBe(true);
+            });
+            test('a leaf array not containing the string does not match', async () => {
+                expect(await onNested({ id: 'x', groups: [{ tags: ['b'] }] }, { 'groups.tags': { $elemMatch: 'a' } })).toBe(false);
+            });
+        });
+
+        // ── An empty $all is vacuously satisfied ─────────────────────────────────────────────────
+        //
+        // `$all: []` is the conjunction of no conditions — true for any leaf array the path reaches. (A leaf
+        // array must be present for the outer array to hold one; an absent outer array is the missing-field
+        // case pinned above.)
+        describe('an empty $all is vacuously satisfied by a leaf array under an intermediate array', () => {
+            test('a present leaf array under an intermediate array satisfies { $all: [] }', async () => {
+                const row: SpreadNested = { parent_name: 'p', children: [{ child_name: 's', grandchildren: [{ grandchild_name: 'r' }] }] };
+                expect(await matchJavascriptObject(row, { 'children.grandchildren': { $all: [] } } as WhereFilterDefinition<SpreadNested>, SpreadNestedSchema)).toBe(true);
             });
         });
 

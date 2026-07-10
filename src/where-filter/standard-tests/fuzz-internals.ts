@@ -280,15 +280,19 @@ export function genElemMatchCombo(rng: Rng, row: FuzzRow): { field: 'tags' | 'sc
 /**
  * One operator of a compound predicate on {@link NESTED_ARRAY_PATH}.
  *
- * Only operators that do NOT match a missing field appear here. A leaf-scoped reading of the path asks "does
- * some leaf array satisfy the whole predicate", which is `false` when there are no leaf arrays at all; an
- * operator like `$ne` or `$nin`, which a missing field satisfies, would answer `true` instead and confound the
- * law with the unrelated question of missing-field polarity.
+ * `$nin` is the one operator here that a missing field satisfies. When a row has no leaf array — an absent
+ * `groups` — the path names a missing field, so a lone `$nin` must still match, and every other operator fails
+ * a missing field. This is exactly what lets the fuzz reach the missing-leaf-array verdict that the section-04
+ * example pins otherwise cover alone; {@link slowLeafScopeEval} encodes the missing-field reading directly.
+ *
+ * `$ne` is deliberately absent: on a scalar array it reads as a sub-document match rather than containment, so
+ * its verdict diverges from "the array holds this value" and would need a separate oracle.
  */
 export type LeafScopeOp =
     | { readonly op: '$size'; readonly n: number }
     | { readonly op: '$all'; readonly values: readonly string[] }
     | { readonly op: '$in'; readonly values: readonly string[] }
+    | { readonly op: '$nin'; readonly values: readonly string[] }
     | { readonly op: '$elemMatch'; readonly innerOp: string; readonly innerOperand: string | readonly string[] };
 
 const pickSubtag = (rng: Rng, row: FuzzRow): string => {
@@ -303,20 +307,26 @@ const pickLeafLength = (rng: Rng, row: FuzzRow): number => {
 };
 
 /**
- * Two distinct operators forming a compound predicate on the nested-array path.
+ * A predicate on the nested-array path: usually two distinct operators, sometimes a lone `$nin`.
  *
- * Operand widths are kept at or below a leaf array's length: an operand demanding three distinct values of a
- * two-element leaf is unsatisfiable under either reading of leaf scope, so it can never separate them.
+ * A lone `$nin` is the draw whose missing-field verdict is true, so it drives the missing-leaf-array coverage;
+ * the two-operator draws exercise leaf scoping proper. Operand widths are kept at or below a leaf array's
+ * length: an operand demanding three distinct values of a two-element leaf is unsatisfiable under either
+ * reading of leaf scope, so it can never separate them.
  */
 export function genLeafScopeOps(rng: Rng, row: FuzzRow): LeafScopeOp[] {
-    const kinds = ['$size', '$all', '$in', '$elemMatch'] as const;
-    const [kindA, kindB] = drawOpPair(rng, kinds);
     const subtagPair = (): string[] => Array.from({ length: rng.intRange(1, 2) }, () => pickSubtag(rng, row));
+    // A lone $nin is the only predicate here a missing field satisfies, so it is the only one that separates a
+    // correct missing-leaf-array verdict (true) from the bare "did some leaf satisfy this" reading (false).
+    if (rng.bool(0.25)) return [{ op: '$nin', values: subtagPair() }];
+    const kinds = ['$size', '$all', '$in', '$nin', '$elemMatch'] as const;
+    const [kindA, kindB] = drawOpPair(rng, kinds);
     const build = (kind: string): LeafScopeOp => {
         switch (kind) {
             case '$size': return { op: '$size', n: pickLeafLength(rng, row) };
             case '$all': return { op: '$all', values: subtagPair() };
             case '$in': return { op: '$in', values: subtagPair() };
+            case '$nin': return { op: '$nin', values: subtagPair() };
             default: {
                 const innerOp = rng.pick(ELEM_MATCH_COMBO_OPS);
                 const innerOperand = innerOp === '$in' || innerOp === '$nin' ? subtagPair() : pickSubtag(rng, row);
@@ -334,6 +344,7 @@ export function leafScopeFilterPayload(ops: readonly LeafScopeOp[]): Record<stri
         if (o.op === '$size') payload.$size = o.n;
         else if (o.op === '$all') payload.$all = [...o.values];
         else if (o.op === '$in') payload.$in = [...o.values];
+        else if (o.op === '$nin') payload.$nin = [...o.values];
         else payload.$elemMatch = { [o.innerOp]: Array.isArray(o.innerOperand) ? [...o.innerOperand] : o.innerOperand };
     }
     return payload;
@@ -378,6 +389,7 @@ export function leafSatisfiesAll(leaf: readonly string[], ops: readonly LeafScop
             case '$size': return leaf.length === o.n;
             case '$all': return o.values.every(v => leaf.includes(v));
             case '$in': return o.values.some(v => leaf.includes(v));
+            case '$nin': return !o.values.some(v => leaf.includes(v));
             case '$elemMatch': return leaf.some(el => evalScalarOp(el, o.innerOp, o.innerOperand));
         }
     });
@@ -385,11 +397,15 @@ export function leafSatisfiesAll(leaf: readonly string[], ops: readonly LeafScop
 
 /**
  * The independent oracle for {@link NESTED_ARRAY_PATH}: a compound predicate matches when SOME leaf array
- * satisfies all of it. Hand-written for the same reason as {@link fuzzDeepEqual} — a law comparing an engine
- * against a copy of that engine's own traversal would be blind to a shared misreading of leaf scope.
+ * satisfies all of it — and, when there is no leaf array at all (an absent `groups`), when the predicate is one
+ * a missing field satisfies. Only `$nin` matches a missing field, so that reduces to "every operator is $nin".
+ * Hand-written for the same reason as {@link fuzzDeepEqual} — a law comparing an engine against a copy of that
+ * engine's own traversal would be blind to a shared misreading of leaf scope or of the missing-field verdict.
  */
 export function slowLeafScopeEval(row: FuzzRow, ops: readonly LeafScopeOp[]): boolean {
-    return (row.groups ?? []).some(g => leafSatisfiesAll(g.subtags, ops));
+    const leaves = row.groups ?? [];
+    if (leaves.length === 0) return ops.every(o => o.op === '$nin');
+    return leaves.some(g => leafSatisfiesAll(g.subtags, ops));
 }
 
 // ═══════════════════════════════════════════════════════════════════

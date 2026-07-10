@@ -155,6 +155,26 @@ single registry, so each operator's operand schema is declared once rather than 
 
 ---
 
+## 9. Schema path resolution ignores inherited object properties
+
+**Context**: A dot-prop path is resolved against a schema's flat path map — a plain object keyed by path. A
+plain object inherits `__proto__`, `constructor`, `hasOwnProperty`, `toString` and the rest from
+`Object.prototype`, so a bracket lookup for one of those keys returns a truthy value even though no schema
+declares it. A path such as `__proto__` or `constructor` would then resolve as a known field, and an engine
+would try to address it.
+
+**Decision**: Every path-map lookup is guarded by an own-property check, so an inherited key resolves as
+unknown. A record key that a row genuinely holds — even one spelled `__proto__` — still resolves as value
+data; only resolution *through inheritance* is refused.
+
+**Why**: Resolving an inherited key as a declared field is a resolver-level version of prototype pollution —
+it reports a path no schema holds as known. The in-memory matcher already refuses such paths by an explicit
+denylist; the resolver, being the single place that decides what a path means, must not undercut it. Guarding
+the lookup is a total fix — it covers every inherited name rather than an enumerated few — and makes every
+engine deny a disallowed path with the same verdict, rather than one engine silently declining it.
+
+---
+
 ## Release notes
 
 Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The exported types are

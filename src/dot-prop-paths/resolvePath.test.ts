@@ -76,6 +76,37 @@ describe('a path is resolved against the schema that describes it', () => {
         });
     });
 
+    describe('a key inherited from Object.prototype is not a schema field', () => {
+        // The path map is a plain object, so `nodeMap['__proto__']` reads `Object.prototype` and
+        // `nodeMap['constructor']` the `Object` constructor. Reading those inherited members as declared
+        // nodes would report `known: true` for a path no schema holds — the resolver's own version of the
+        // prototype-pollution hole the JS matcher already denylists. Every lookup here must be own-property.
+
+        test.each(['__proto__', 'constructor', 'hasOwnProperty', 'toString', 'valueOf'])(
+            'the inherited key "%s" resolves as unknown, not a declared leaf', (key) => {
+                const resolved = resolve(Schema, key);
+                expect(resolved.known).toBe(false);
+                expect(resolved.origin).toBe('unknown');
+                expect(resolved.leafKind).toBe(undefined);
+            });
+
+        test('an inherited key as an ancestor does not fabricate a descent', () => {
+            // `constructor.name` must not be read as "the Object constructor has a `name`": the ancestor
+            // walk must ignore inherited keys too, not only the leaf lookup.
+            expect(resolve(Schema, 'constructor.name').known).toBe(false);
+            expect(resolve(Schema, '__proto__.id').known).toBe(false);
+        });
+
+        test('a record key that happens to spell an inherited name is still legitimate value data', () => {
+            // The guard is surgical: a genuine dynamic record key named `__proto__` resolves to the value
+            // type, so a filter can still address it. Only a schema lookup through inheritance is refused.
+            const resolved = resolve(RecordSchema, 'data.__proto__.value');
+            expect(resolved.known).toBe(true);
+            expect(resolved.origin).toBe('record_value');
+            expect(resolved.leafKind).toBe('string');
+        });
+    });
+
     describe('a key containing a literal dot', () => {
 
         test('the escape names one key', () => {

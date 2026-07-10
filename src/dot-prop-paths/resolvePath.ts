@@ -69,7 +69,9 @@ export function resolvePath(dotPropPath: string, nodeMap: TreeNodeMap): ResolveP
     const lookupPath = segments.join('.');
     const unknown: ResolvedPath = { lookupPath, segments, arrayDepth: 0, known: false, origin: 'unknown', leafKind: undefined, leafSchema: undefined };
 
-    const enumerated = nodeMap[lookupPath];
+    // Own-property only: a plain object inherits `__proto__`, `constructor`, `toString`, … from
+    // `Object.prototype`, and reading one as a declared node would report a path no schema holds as known.
+    const enumerated = Object.hasOwn(nodeMap, lookupPath) ? nodeMap[lookupPath] : undefined;
     if (enumerated) {
         return {
             success: true,
@@ -146,7 +148,8 @@ function countArraysInAncestry(node: TreeNode): number {
  */
 function findRecordAncestor(segments: readonly string[], nodeMap: TreeNodeMap): { node: TreeNode, schema: AnyZodSchema, depth: number } | undefined {
     for (let depth = segments.length - 1; depth >= 0; depth--) {
-        const ancestor = nodeMap[segments.slice(0, depth).join('.')];
+        const ancestorPath = segments.slice(0, depth).join('.');
+        const ancestor = Object.hasOwn(nodeMap, ancestorPath) ? nodeMap[ancestorPath] : undefined;
         if (!ancestor) continue;
         if (ancestor.kind === 'record' && ancestor.schema) return { node: ancestor, schema: ancestor.schema, depth };
         return undefined;

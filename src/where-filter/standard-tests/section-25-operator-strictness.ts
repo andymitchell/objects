@@ -1,4 +1,4 @@
-import { NullishGridSchema, TagsSchema, RegexSchema, BooleanContactSchema, ArrayOperandSchema } from "./fixtures.ts";
+import { NullishGridSchema, TagsSchema, RegexSchema, BooleanContactSchema, ArrayOperandSchema, MultiScalarSchema } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
@@ -328,6 +328,48 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
             test('25.10e on a present field $not is the plain complement', async () => {
                 expect(await matchJavascriptObject({ id: 'x', n: 5 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema)).toBe(true);
                 expect(await matchJavascriptObject({ id: 'x', n: 6 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema)).toBe(false);
+            });
+        });
+
+        // ── 25.11 $not distinguishes a stored JSON null from an absent field ──────────────────────
+        //
+        // A stored null is a PRESENT value, not a missing field, so `$not` negates its operand's verdict on
+        // that null. An engine that decides "missing" by whether the extracted value is null — rather than
+        // whether the path is there — inverts every row here; SQL uses a presence probe to separate the two.
+        // All four engines agree, so this is a cross-engine law.
+        describe('25.11 $not distinguishes a stored JSON null from an absent field', () => {
+            const onStoredNull = (payload: unknown) => matchJavascriptObject({ id: 'x', n: null }, bad({ n: payload }), NullishGridSchema);
+
+            test('25.11a a stored null exists, so negating $exists:true excludes the row', async () => {
+                expect(await onStoredNull({ $not: { $exists: true } })).toBe(false);
+            });
+            test('25.11b a stored null exists, so negating $exists:false matches the row', async () => {
+                expect(await onStoredNull({ $not: { $exists: false } })).toBe(true);
+            });
+            test('25.11c a stored null differs from 5, so negating that difference excludes the row', async () => {
+                expect(await onStoredNull({ $not: { $ne: 5 } })).toBe(false);
+            });
+            test('25.11d a stored null equals a null operand, so negating that equality excludes the row', async () => {
+                expect(await onStoredNull({ $not: { $eq: null } })).toBe(false);
+            });
+        });
+
+        // ── 25.12 $not over a multi-scalar field does not conflate scalar kinds ───────────────────
+        //
+        // `{$not:{$eq:true}}` excludes only the row equal to `true`; a string or number row is a genuine
+        // non-match of `$eq:true`, so its negation matches. An engine that coerced the stored value to the
+        // operand's type before comparing would wrongly exclude them. Cross-engine law.
+        describe('25.12 $not over a multi-scalar field does not conflate scalar kinds', () => {
+            const notEqTrue = (secret: unknown) => matchJavascriptObject({ id: '1', secret }, bad({ secret: { $not: { $eq: true } } }), MultiScalarSchema);
+
+            test('25.12a a string row is not equal to true, so its negation matches', async () => {
+                expect(await notEqTrue('hush')).toBe(true);
+            });
+            test('25.12b a numeric row is not equal to true, so its negation matches', async () => {
+                expect(await notEqTrue(7)).toBe(true);
+            });
+            test('25.12c the true row is equal to true, so its negation excludes it', async () => {
+                expect(await notEqTrue(true)).toBe(false);
             });
         });
 

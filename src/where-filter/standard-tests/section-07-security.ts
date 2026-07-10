@@ -25,7 +25,10 @@ export function registerSecurity(ctx: SectionCtx): void {
                         ContactSchema
                     );
 
-                    expectOrAcknowledgeUnsupported(result, false);
+                    // A disallowed path resolves to nothing on every engine, so the row cannot match — a
+                    // strict false, never an acknowledged skip. resolvePath's own-property guard makes SQL
+                    // deny an inherited key (`__proto__`, `constructor`) rather than silently decline it.
+                    expect(result).toBe(false);
 
                 });
             }

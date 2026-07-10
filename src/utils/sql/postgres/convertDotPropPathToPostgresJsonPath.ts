@@ -1,15 +1,22 @@
 import { z } from "zod";
-import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree, resolveRecordValueNode, parseDotPropPathSegments } from "../../../dot-prop-paths/schema-tree.ts";
+import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
+import { isUnspreadableRecordPath, resolvePath } from "../../../dot-prop-paths/resolvePath.ts";
 import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
 import type { DotPropPathConversionResult } from "../types.ts";
+import { pgJsonbAccessor } from "./pgJsonbAccessor.ts";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
 
+/** A structural leaf must stay jsonb to be compared; a scalar leaf is read as text so it can be cast. */
+const STRUCTURAL_KINDS: readonly ZodKind[] = ['array', 'object'];
+
 /**
  * Converts a dot-prop path into a type-cast Postgres JSONB accessor expression.
- * Uses the TreeNodeMap (or Zod schema) to determine the correct `->` / `->>` operators and Pg type cast.
- * Rejects unknown paths to prevent SQL injection.
+ *
+ * The path is resolved against the schema first, so only a field the schema describes produces an
+ * expression, and the leaf's kind decides both the final operator (`->` for jsonb, `->>` for text) and the
+ * cast. Each key is quoted, which makes a key that carries a quote or a comment marker inert data.
  *
  * @example
  * convertDotPropPathToPostgresJsonPath('data', 'contact.name', nodeMap)
@@ -35,15 +42,16 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         nodeMap = result.map;
     }
 
-    // Split honouring the dot-prop escape: `a\.b` is one literal key, `a.b` is nested — matching the JS matcher.
-    // The node map joins keys with '.', so the escape is normalised for the lookup and only the accessor below
-    // distinguishes a literal-dot field from a nested path. A record (z.record) key is a dynamic string absent
-    // from the node map and resolves against the record's value type (cast by that value's kind, e.g. ::text).
-    const jsonbParts = parseDotPropPathSegments(dotPropPath);
-    const lookupPath = jsonbParts.join('.');
-    const nodeMapForPath = nodeMap[lookupPath] ?? resolveRecordValueNode(lookupPath, nodeMap);
-    if( !nodeMapForPath ) {
+    const result = resolvePath(dotPropPath, nodeMap);
+    if( !result.success ) {
+        return { success: false, error: { type: 'invalid_path', dotPropPath, message: `Invalid dotPropPath. ${UNSAFE_WARNING}` } };
+    }
+    const resolved = result.resolved;
+    if( !resolved.known ) {
         return { success: false, error: { type: 'unknown_path', dotPropPath, message: `Unknown dotPropPath. ${UNSAFE_WARNING}` } };
+    }
+    if( isUnspreadableRecordPath(resolved) ) {
+        return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `A dotPropPath that crosses an array beneath a record key cannot be addressed. ${UNSAFE_WARNING}` } };
     }
 
     const castingMap:Partial<Record<ZodKind, string>> = {
@@ -56,29 +64,20 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         'null': '',
     }
 
-    const zodKind = nodeMapForPath.kind;
-
-    let jsonbPath:string = '';
-    while(jsonbParts.length) {
-        const part = jsonbParts.shift();
-        if( !part ) {
-            return { success: false, error: { type: 'invalid_path', dotPropPath, message: `Unknown part in dotPropPath. ${UNSAFE_WARNING}` } };
-        }
-        jsonbPath += `${jsonbParts.length>0 || (jsonbParts.length===0 && ['array', 'object'].includes(zodKind))? '->' : '->>'}'${part}'`;
-    }
-
+    const zodKind = resolved.leafKind;
 
     // An enum has no fixed cast entry — its column type is the scalar kind its members share — so resolve it from
     // the schema (single-kind enums only: a mixed-scalar enum is routed to the raw-JSONB comparison path upstream
     // by findMultiScalarUnionPaths and never reaches here). Every other kind keeps its direct map entry, including
     // the existing treatment of an empty/unmapped cast as an unsupported kind.
-    const mappedCast = zodKind === 'enum' ? enumScalarCast(nodeMapForPath.schema) : castingMap[zodKind];
+    const mappedCast = zodKind === 'enum' ? enumScalarCast(resolved.leafSchema) : castingMap[zodKind];
 
     if( !mappedCast ) return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `Unknown ZodKind Postgres cast: ${zodKind}. ${UNSAFE_WARNING}` } };
     if( errorIfNotAsExpected && !errorIfNotAsExpected.includes(zodKind) ) return { success: false, error: { type: 'unexpected_kind', dotPropPath, message: `ZodKind Postgres cast was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${UNSAFE_WARNING}` } };
 
+    const accessor = pgJsonbAccessor(columnName, resolved.segments, { asText: !STRUCTURAL_KINDS.includes(zodKind) });
     const cast = noCasting? '' : mappedCast;
-    return { success: true, expression: `(${columnName}${jsonbPath})${cast}` };
+    return { success: true, expression: `${accessor}${cast}` };
 }
 
 /**
@@ -90,8 +89,8 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
  * shape — a single-scalar-kind enum reaches the cast and is resolved here; a mixed-scalar enum is diverted to the
  * raw-JSONB comparison path upstream and never does.
  *
- * @param schema the enum's Zod schema, taken from the path's TreeNode (`undefined` when the tree was built without
- * schema references).
+ * @param schema the enum's Zod schema, taken from the path's resolved leaf (`undefined` when the tree was built
+ * without schema references).
  * @returns the cast — `::text` (string), `::numeric` (number), or `::boolean` (boolean) — or `undefined` for an
  * empty, mixed-scalar, non-scalar, or schema-less enum, so the caller raises a clean `unsupported_kind` error
  * instead of emitting a cast that would fail at query time.

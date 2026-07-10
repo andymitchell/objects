@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prepareObjectTableQuery } from './prepareObjectTableQuery.ts';
 import { flattenQueryClausesToSql } from './flattenQueryClauses.ts';
 import type { ObjectTableInfo, SortAndSlice } from '../types.ts';
+import { pgJsonbAccessor } from '../../utils/sql/postgres/pgJsonbAccessor.ts';
 
 const EmailSchema = z.object({
     id: z.string(),
@@ -63,7 +64,7 @@ describe('prepareObjectTableQuery', () => {
                 });
                 expect(result.success).toBe(true);
                 if (!result.success) return;
-                expect(result.order_by_statement).toContain("data->>'date'");
+                expect(result.order_by_statement).toContain(pgJsonbAccessor('data', ['date'], { asText: true }));
             });
 
             it('handles nested dot-prop paths', () => {

@@ -5,7 +5,6 @@ import {
     getArrayElement,
     getObjectShape,
     getUnionOptions,
-    getRecordValueType,
     isDiscriminatedUnion,
     isTransparentWrapper,
     type ZodKind,
@@ -232,54 +231,6 @@ function _convertSchemaToDotPropPathTree(
 
 }
 
-
-/**
- * Split a dot-prop path into its key segments, honouring the dot-prop escape convention where `\.` is a
- * literal dot inside a key rather than a path separator — matching how the JS matcher's `getProperty` resolves
- * keys. So `a\.b` → `['a.b']` (one literal key) while `a.b` → `['a', 'b']` (nested). A leading/trailing/doubled
- * unescaped dot yields an empty segment, which callers treat as an invalid path.
- *
- * @example parseDotPropPathSegments('a\\.b') // ['a.b']
- * @example parseDotPropPathSegments('a.b')   // ['a', 'b']
- */
-export function parseDotPropPathSegments(path: string): string[] {
-    const segments: string[] = [];
-    let current = '';
-    for (let i = 0; i < path.length; i++) {
-        if (path[i] === '\\' && path[i + 1] === '.') { current += '.'; i++; continue; } // escaped dot → literal
-        if (path[i] === '.') { segments.push(current); current = ''; continue; }
-        current += path[i];
-    }
-    segments.push(current);
-    return segments;
-}
-
-/**
- * Resolve a dot-prop path that has no enumerated node but descends as a single dynamic key from a record
- * (`z.record`) ancestor, returning the record's value type so a converter can build a typed accessor for it.
- *
- * Record keys are dynamic strings, so they never appear in the flat node map — yet `Record<string, X>` makes
- * any single key a valid `X`-typed field. This walks up from the path's parent to the nearest known ancestor:
- * if that ancestor is a record and the path is exactly one key below it, the value type (kind + schema) is
- * returned; any other known ancestor (a plain object, or a record more than one level up) means the path is
- * genuinely unknown and `undefined` is returned so the caller keeps its unknown-path rejection.
- *
- * @returns the record value's `{ kind, schema }` for a resolvable single record key, else `undefined`.
- */
-export function resolveRecordValueNode(dotPropPath: string, nodeMap: TreeNodeMap): { kind: ZodKind, schema?: AnyZodSchema } | undefined {
-    const segments = dotPropPath.split('.');
-    for (let i = segments.length - 1; i >= 0; i--) {
-        const ancestor = nodeMap[segments.slice(0, i).join('.')];
-        if (!ancestor) continue; // no node at this prefix — keep walking up
-        // Nearest known ancestor found: a record exactly one key up resolves; anything else is a real miss.
-        if (ancestor.kind === 'record' && ancestor.schema && segments.length - i === 1) {
-            const valueSchema = getRecordValueType(ancestor.schema);
-            return { kind: getZodKind(valueSchema), schema: valueSchema };
-        }
-        return undefined;
-    }
-    return undefined;
-}
 
 /** Returns the ZodKind at a dot-prop path within a schema, unwrapping arrays and transparent wrappers (optional/nullable/default/catch/readonly). */
 export function getZodKindAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath): ZodKind | undefined {

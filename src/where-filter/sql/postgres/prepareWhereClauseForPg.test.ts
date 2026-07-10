@@ -7,6 +7,7 @@ import type { WhereFilterDefinition } from "../../types.ts";
 import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
 
 import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.ts";
+import { pgJsonbAccessor } from "../../../utils/sql/postgres/pgJsonbAccessor.ts";
 import { acquireSchema, warmUp, disposeAllForTest } from "./testSchemaPartition.ts";
 
 
@@ -322,7 +323,7 @@ describe('postgres where clause builder', () => {
             const clause = prepareWhereClauseForPg({ status: 'active' }, pm);
             expect(clause.success).toBe(true);
             const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
-            expect(stmt).toContain("->>'status')::text");
+            expect(stmt).toContain(`${pgJsonbAccessor('recordColumn', ['status'], { asText: true })}::text`);
         });
 
         test('a numeric (TS) enum casts the JSONB accessor to ::numeric', () => {
@@ -332,7 +333,7 @@ describe('postgres where clause builder', () => {
             const clause = prepareWhereClauseForPg({ rank: Rank.Low }, pm);
             expect(clause.success).toBe(true);
             const stmt = (clause.success ? clause.where_clause_statement : undefined) ?? '';
-            expect(stmt).toContain("->>'rank')::numeric");
+            expect(stmt).toContain(`${pgJsonbAccessor('recordColumn', ['rank'], { asText: true })}::numeric`);
         });
     });
 

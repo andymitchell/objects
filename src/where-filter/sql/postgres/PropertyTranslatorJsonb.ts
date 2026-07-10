@@ -46,6 +46,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         this.nodeMap = nodeMap;
         this.sqlColumnName = sqlColumnName;
         this.doNotSpreadArray = doNotSpreadArray ?? false;
+        // A literal-kind field (a lone z.literal, or a same-scalar-kind union of literals like
+        // z.union([z.literal(0), z.literal(1)])) has no single Postgres column cast — the converter rejects it as
+        // an unsupported kind. Compare it as a raw JSON value, type-faithfully, exactly like a multi-scalar union
+        // (so a numeric-literal field's 0 matches a stored 0 but not a stored "0"). A mixed-scalar literal union is
+        // already covered by findMultiScalarUnionPaths.
+        for (const path of Object.keys(nodeMap)) {
+            if (nodeMap[path]?.kind === 'literal') this.multiScalarPaths.add(path);
+        }
     }
 
     /** Counts how many ZodArray nodes exist in the ancestry chain for a path. Determines whether array spreading is needed. */
@@ -492,7 +500,25 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             if (isValueComparisonScalar(filter)) {
                 return `(${rawId} IS NOT NULL AND ${rawId} = ${this.toJsonbParam(filter, statementArguments)})`;
             }
-            // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
+            if (isValueComparisonRange(filter)) {
+                // A range operator on a multi-scalar field applies only to a stored value of the operand's own
+                // type — matchJavascriptObject throws when the runtime types differ ("Cannot compare value of type
+                // X with filter of type Y"). Compare within that type in the THEN; any other stored type hits the
+                // ELSE, where casting the JSON type name (a non-numeric word) to numeric raises a query-time error,
+                // surfacing as a rejection exactly as the reference throws — never a silent coercion.
+                const operandIsNumber = typeof Object.values(filter)[0] === 'number';
+                const valueExpr = `(${rawId} #>> '{}')${operandIsNumber ? '::numeric' : ''}`;
+                const comparisons = ValueComparisonRangeOperators
+                    .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
+                    .map(x => {
+                        const v = filter[x]!;
+                        if (typeof v === 'number' && Number.isNaN(v)) return '1=0'; // MongoDB: every comparison with NaN is false. See MONGO-DIVERGENCES.md §7.
+                        return ValueComparisonRangeOperatorsSqlFunctions[x](valueExpr, this.generatePlaceholder(v, statementArguments));
+                    });
+                const body = comparisons.length > 1 ? `(${comparisons.join(' AND ')})` : comparisons[0]!;
+                return `CASE WHEN jsonb_typeof(${rawId}) = '${operandIsNumber ? 'number' : 'string'}' THEN ${body} ELSE (jsonb_typeof(${rawId}))::numeric = 0 END`;
+            }
+            // $exists / $type / $not / $regex on a multi-scalar field fall through to the typed handling.
         }
 
         // A field absent from the schema is always missing. Its verdict is the JS oracle's missing-field verdict —
@@ -505,6 +531,19 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             && (isValueComparisonNe(filter) || isValueComparisonNin(filter) || isValueComparisonNot(filter)
                 || isValueComparisonExists(filter) || isValueComparisonType(filter) || isArrayValueComparisonSize(filter))) {
             return this.matchesMissingField(filter) ? '1=1' : '1=0';
+        }
+
+        // A scalar-equality filter whose operand's runtime type differs from the field's declared scalar kind can
+        // never match — matchJavascriptObject compares with === (`'7' === 7` is false) — yet Postgres's typed cast
+        // would coerce text↔numeric and spuriously match (SQLite is naturally type-strict here). Return a definite
+        // non-match. Enums keep their own cast path; multi-scalar and literal unions already returned above.
+        const scalarKind = this.nodeMap[dotpropPath]?.kind;
+        if (customSqlIdentifier === undefined && (scalarKind === 'string' || scalarKind === 'number' || scalarKind === 'boolean')) {
+            const eqOperand = isValueComparisonEq(filter) ? filter.$eq
+                : ((typeof filter === 'string' || typeof filter === 'number' || typeof filter === 'boolean') ? filter : undefined);
+            if (eqOperand !== undefined && eqOperand !== null && typeof eqOperand !== scalarKind) {
+                return '1 = 0';
+            }
         }
 
         // $ne
@@ -697,7 +736,8 @@ export class PropertyTranslatorPgJsonbSchema<T extends Record<string, any> = Rec
                 message: `Field '${n.dotprop_path}' has a value-normalizing schema (${n.reason}); a schema-driven SQL engine compares the raw stored value and cannot replicate the coercion/transform.`,
             })),
         ];
-        this.multiScalarPaths = new Set(findMultiScalarUnionPaths(schema).map((m) => m.dotprop_path));
+        // Union into (not overwrite) the literal-kind paths the base constructor already added from the node map.
+        for (const m of findMultiScalarUnionPaths(schema)) this.multiScalarPaths.add(m.dotprop_path);
     }
 }
 /**

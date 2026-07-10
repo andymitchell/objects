@@ -464,7 +464,27 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             if (isValueComparisonScalar(filter)) {
                 return strict(filter);
             }
-            // $exists / $type / $not / range / $regex on a multi-scalar field fall through to the typed handling.
+            if (isValueComparisonRange(filter)) {
+                // A range operator on a multi-scalar field applies only to a stored value of the operand's own
+                // type — matchJavascriptObject throws when the runtime types differ ("Cannot compare value of type
+                // X with filter of type Y"). Compare within that type in the THEN; any other stored type hits the
+                // ELSE, which parses a deliberately-malformed json() literal to raise a query-time error, surfacing
+                // as a rejection exactly as the reference throws. SQLite has no strict cast that errors on a
+                // mismatched value (unlike Postgres's ::numeric), so the error is forced here; the CASE is lazy, so
+                // the matching-type path never reaches it.
+                const operandIsNumber = typeof Object.values(filter)[0] === 'number';
+                const typeGuard = operandIsNumber ? `${typeExpr} IN ('integer', 'real')` : `${typeExpr} = 'text'`;
+                const comparisons = ValueComparisonRangeOperators
+                    .filter((x): x is ValueComparisonRangeOperatorsTyped => x in filter && filter[x] !== undefined && filter[x] !== null)
+                    .map(x => {
+                        const v = filter[x]!;
+                        if (typeof v === 'number' && Number.isNaN(v)) return '1=0'; // MongoDB: every comparison with NaN is false. See MONGO-DIVERGENCES.md §7.
+                        return ValueComparisonRangeOperatorsSqlFunctions[x](valueExpr, this.generatePlaceholder(v, statementArguments));
+                    });
+                const body = comparisons.length > 1 ? `(${comparisons.join(' AND ')})` : comparisons[0]!;
+                return `CASE WHEN ${typeGuard} THEN ${body} ELSE json_extract(json('<multi-scalar range type mismatch>'), '$') END`;
+            }
+            // $exists / $type / $not / $regex on a multi-scalar field fall through to the typed handling.
         }
 
         // A field absent from the schema is always missing. Its verdict is the JS oracle's missing-field verdict —

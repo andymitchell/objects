@@ -59,7 +59,17 @@ describe('postgres where clause builder', () => {
             ? `SELECT * FROM ${table} WHERE ${clause.where_clause_statement}`
             : `SELECT * FROM ${table}`;
 
-        const result = await client.query(queryStr, clause.statement_arguments);
+        // A very wide clause (e.g. a 1000-key implicit $and over a record) can abort an accumulated PGlite heap
+        // at query time with 'memory access out of bounds', though a fresh heap runs the identical query fine —
+        // the same failure mode acquireSchema already rebuilds for on a large insert. Give a wide query a fresh
+        // instance and re-insert the single row, so the true verdict surfaces (never swallowed into a boolean).
+        let queryClient = client;
+        if (clause.statement_arguments.length >= 256) {
+            ({ client: queryClient } = await acquireSchema(0, true));
+            await queryClient.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [json]);
+        }
+
+        const result = await queryClient.query(queryStr, clause.statement_arguments);
         return result.rows.length>0;
     }
 

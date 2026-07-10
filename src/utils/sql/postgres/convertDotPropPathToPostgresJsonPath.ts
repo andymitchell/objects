@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
+import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree, resolveRecordValueNode } from "../../../dot-prop-paths/schema-tree.ts";
 import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
 import type { DotPropPathConversionResult } from "../types.ts";
@@ -35,7 +35,11 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         nodeMap = result.map;
     }
 
-    if( !nodeMap[dotPropPath] ) {
+    // A record (z.record) key is a dynamic string absent from the node map; resolve it against the record's
+    // value type so any key becomes a valid accessor cast by that value's kind (e.g. a string-valued record
+    // casts to ::text). A genuinely unknown path (no record ancestor) still rejects.
+    const nodeMapForPath = nodeMap[dotPropPath] ?? resolveRecordValueNode(dotPropPath, nodeMap);
+    if( !nodeMapForPath ) {
         return { success: false, error: { type: 'unknown_path', dotPropPath, message: `Unknown dotPropPath. ${UNSAFE_WARNING}` } };
     }
 
@@ -50,8 +54,6 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         'null': '',
     }
 
-    const nodeMapForPath = nodeMap[dotPropPath];
-    if( !nodeMapForPath ) return { success: false, error: { type: 'unknown_path', dotPropPath, message: `No details at nodeMap[dotPropPath] for ${dotPropPath}` } };
     const zodKind = nodeMapForPath.kind;
 
     let jsonbPath:string = '';

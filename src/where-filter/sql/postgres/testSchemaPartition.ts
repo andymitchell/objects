@@ -68,9 +68,10 @@ async function ensureTable(client: PGlite): Promise<void> {
  * client is rebuilt once and the acquire retried, so the damage stays contained to the test that triggered
  * it (which still correctly reds).
  */
-export async function acquireSchema(payloadBytes = 0): Promise<{ client: PGlite; schemaName: string; table: string; dispose: () => Promise<void> }> {
-    // A large insert on an accumulated heap can crash the WASM instance — give it a fresh one first.
-    if (payloadBytes >= REBUILD_BEFORE_PAYLOAD_BYTES && sharedClient !== null) {
+export async function acquireSchema(payloadBytes = 0, forceRebuild = false): Promise<{ client: PGlite; schemaName: string; table: string; dispose: () => Promise<void> }> {
+    // A large insert — or, via `forceRebuild`, a large query the caller is about to run — on an accumulated heap
+    // can crash the WASM instance; give it a fresh one first.
+    if ((forceRebuild || payloadBytes >= REBUILD_BEFORE_PAYLOAD_BYTES) && sharedClient !== null) {
         const old = sharedClient;
         sharedClient = null;
         tableReady = false;

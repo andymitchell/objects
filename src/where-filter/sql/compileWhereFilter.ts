@@ -40,6 +40,19 @@ export function compileWhereFilter<T extends Record<string, any> = any>(filter: 
 }
 
 /**
+ * Join clauses with a boolean keyword as a BALANCED binary tree of parentheses rather than a flat left-deep
+ * chain. `AND`/`OR` are associative, so the grouping is semantically irrelevant — but a flat `a AND b AND …`
+ * of N terms parses into an N-deep expression tree, overflowing SQLite's maximum expression depth (1000) and
+ * crashing PGlite's WASM stack on a wide implicit `$and` (e.g. a 1000-key record filter). Balancing keeps the
+ * parse-tree depth at ~log2(N). A single clause returns unwrapped; two or more are wrapped once at each split.
+ */
+function joinBalanced(clauses: string[], keyword: string): string {
+    if (clauses.length === 1) return clauses[0]!;
+    const mid = clauses.length >> 1;
+    return `(${joinBalanced(clauses.slice(0, mid), keyword)} ${keyword} ${joinBalanced(clauses.slice(mid), keyword)})`;
+}
+
+/**
  * Recursive engine: normalises multi-key filters into $and, handles $and/$or/$nor logic,
  * and delegates single-key property filters to the IPropertyTranslator dialect layer.
  */
@@ -69,11 +82,11 @@ export function compileWhereFilterRecursive<T extends Record<string, any> = any>
                     return clause === '' ? '1 = 1' : clause;
                 });
                 if (type === '$nor') {
-                    subClauseString = subClauses.length === 0 ? '1 = 1' : `NOT (${subClauses.join(' OR ')})`;
+                    subClauseString = subClauses.length === 0 ? '1 = 1' : `NOT (${joinBalanced(subClauses, 'OR')})`;
                 } else if (subClauses.length > 0) {
                     if (typeof subClauses[0] !== 'string') throw new Error("subClauses[0] was empty");
                     const sqlKeyword = type === '$and' ? 'AND' : 'OR';
-                    subClauseString = subClauses.length === 1 ? subClauses[0] : `(${subClauses.join(` ${sqlKeyword} `)})`;
+                    subClauseString = joinBalanced(subClauses, sqlKeyword);
                 } else {
                     if (type === '$and') {
                         subClauseString = '1 = 1';
@@ -85,7 +98,7 @@ export function compileWhereFilterRecursive<T extends Record<string, any> = any>
             }
         }
 
-        return andClauses.length === 1 ? andClauses[0]! : `(${andClauses.join(' AND ')})`;
+        return joinBalanced(andClauses, 'AND');
 
     } else {
         const key = keys[0];

@@ -333,6 +333,37 @@ describe("validateWhereFilter — non-strict objects fail-allow (unknown_field f
     });
 });
 
+describe("validateWhereFilter — inherited-key paths (`__proto__`, `constructor`) never crash the schema index", () => {
+    // The schema index is looked up by filter-supplied paths, so a path that collides with an inherited
+    // object key must resolve as absent — not as `Object.prototype`/`Object` (which would throw when the
+    // walker treats it as a node list). Computed keys throughout: a literal `__proto__:` in an object
+    // initialiser sets the prototype instead of creating the own key the matcher/validator actually receive.
+    const INHERITED_KEYS: string[] = ['__proto__', 'constructor', 'toString'];
+    const filterOn = (key: string) => ({ [key]: 'x' }) as WhereFilterDefinition<Record<string, unknown>>;
+
+    it("returns issues (never throws) under a non-strict schema, and fail-allows like any unknown key", () => {
+        const Strip = z.object({ id: z.string(), age: z.number() }); // default = strip mode
+        const vStrip = compileValidateWhereFilter(Strip);
+        for (const key of INHERITED_KEYS) {
+            expect(vStrip(filterOn(key))).toEqual([]);
+        }
+    });
+
+    it("flags an inherited-key path as unknown_field under a .strict() schema, same as any undeclared key", () => {
+        const Strict = z.object({ id: z.string(), age: z.number() }).strict();
+        const vStrict = compileValidateWhereFilter(Strict);
+        for (const key of INHERITED_KEYS) {
+            expect(vStrict(filterOn(key))).toMatchObject([{ reason: "unknown_field", path: key }]);
+        }
+    });
+
+    it("resolves an inherited-key path nested under a declared object without crashing", () => {
+        const Nested = z.object({ contact: z.object({ name: z.string() }) }).strict();
+        const v = compileValidateWhereFilter(Nested);
+        expect(v({ ['contact.__proto__']: 'x' } as WhereFilterDefinition<Record<string, unknown>>)).toEqual([]); // non-strict inner → fail-allow
+    });
+});
+
 describe("validateWhereFilter — mixed-strictness unions (a tolerant variant can carry the key, so never flag)", () => {
     // A strict variant declares `a`; a passthrough sibling omits it and tolerates extras. A passthrough-variant
     // conforming row can carry `a` (or any undeclared key) of any type, which the matcher matches.

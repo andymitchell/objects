@@ -233,6 +233,20 @@ export function matchedPks(world: FuzzItem[], where: WhereFilterDefinition<FuzzI
 }
 
 /**
+ * PKs whose row was removed or content-changed between two worlds — the value-diff projection a
+ * reconstruction-mode adapter reports as affected.
+ */
+export function valueDiffPks(before: FuzzItem[], after: FuzzItem[]): string[] {
+    const afterByPk = new Map(after.map((r) => [r.id, r]));
+    const out: string[] = [];
+    for (const row of before) {
+        const now = afterByPk.get(row.id);
+        if (now === undefined || !fuzzDeepEqual(now, row)) out.push(row.id);
+    }
+    return out.sort();
+}
+
+/**
  * Hand-written structural deep-equal — deliberately NOT the unit-under-test's own `deepEquals`, so the
  * differential oracle never trusts the code it is judging. NaN≡NaN; undefined≡missing; arrays order-sensitive.
  */

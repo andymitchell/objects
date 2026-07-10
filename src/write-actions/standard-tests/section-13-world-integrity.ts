@@ -1,5 +1,5 @@
 import { FlatSchema, flatDdl, type Flat } from "./fixtures.ts";
-import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
+import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
 
 /**
  * §13: world integrity & immutability.
@@ -11,6 +11,10 @@ import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./h
  */
 export function registerWorldIntegrity(ctx: SectionCtx): void {
     const { test, expect, createAdapter, implName, expectedFailToday } = ctx;
+
+    // T-13.11 drives a NON-ATOMIC multi-action batch. An impl that cannot express one acknowledges-unsupported,
+    // which would VACUOUSLY pass the body and invert the test.fails ratchet — so it registers as a visible skip instead.
+    const efNonAtomicMulti = resolveCapability(ctx.capabilities, 'nonAtomicMultiAction') ? expectedFailToday : ctx.test.skip;
 
     const world = (): Flat[] => [
         { id: '1', text: 'one', count: 1, tags: ['a'] },
@@ -211,7 +215,7 @@ export function registerWorldIntegrity(ctx: SectionCtx): void {
             // (`{id:'1',text:'orig',...}` survives alongside the recreated `{id:'1',text:'new',count:5}`).
             // The ideal is a single clean row; registered expected-fail-today until the change-set
             // reconciliation for same-batch delete+recreate is fixed.
-            expectedFailToday('delete then recreate then mutate the same PK leaves no stale fields', async () => {
+            efNonAtomicMulti('delete then recreate then mutate the same PK leaves no stale fields', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', text: 'orig', count: 9, tags: ['old'] }],

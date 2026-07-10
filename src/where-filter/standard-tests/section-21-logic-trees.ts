@@ -36,7 +36,9 @@ export function registerLogicTrees(ctx: SectionCtx): void {
         });
 
         test('21.5 a 1000-key implicit $and, all matching, is true', async () => {
-            const WideSchema = z.record(z.string(), z.string());
+            // A 1000-key object root: the torture targets filter-tree WIDTH; an object root keeps the case
+            // constructible by schema-gated engines (a record root is not a single object shape).
+            const WideSchema = z.object(Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`f${i}`, z.string()])));
             const wide: Record<string, string> = {};
             for (let i = 0; i < 1000; i++) wide[`f${i}`] = `v${i}`;
             const result = await matchJavascriptObject(wide, { ...wide } as unknown as WhereFilterDefinition, WideSchema);
@@ -44,7 +46,8 @@ export function registerLogicTrees(ctx: SectionCtx): void {
         });
 
         test('21.6 a 1000-key implicit $and with one mismatch is false', async () => {
-            const WideSchema = z.record(z.string(), z.string());
+            // A 1000-key object root — see 21.5.
+            const WideSchema = z.object(Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`f${i}`, z.string()])));
             const wide: Record<string, string> = {};
             for (let i = 0; i < 1000; i++) wide[`f${i}`] = `v${i}`;
             const filter = { ...wide, f500: 'WRONG' };

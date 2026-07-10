@@ -1,5 +1,5 @@
 import { FlatSchema, flatDdl } from "./fixtures.ts";
-import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
+import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
 import { getWriteErrors, getWriteFailures } from "../helpers.ts";
 
 /**
@@ -17,12 +17,16 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
 export function registerIdempotency(ctx: SectionCtx): void {
     const { expect, createAdapter, implName, itIfSupported, expectedFailToday } = ctx;
 
+    // T-7.1/T-7.2 drive a NON-ATOMIC multi-action batch. An impl that cannot express one acknowledges-unsupported,
+    // which would VACUOUSLY pass the body and invert the test.fails ratchet — so they register as a visible skip instead.
+    const efNonAtomicMulti = resolveCapability(ctx.capabilities, 'nonAtomicMultiAction') ? expectedFailToday : ctx.test.skip;
+
     describe('7. Idempotency & uuid_conflict', () => {
 
         describe('7.1 In-batch duplicate uuid', () => {
 
             // T-7.1 [EF]
-            expectedFailToday('two actions sharing a uuid but carrying different payloads is a uuid_conflict, committing nothing', async () => {
+            efNonAtomicMulti('two actions sharing a uuid but carrying different payloads is a uuid_conflict, committing nothing', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
@@ -45,7 +49,7 @@ export function registerIdempotency(ctx: SectionCtx): void {
             });
 
             // T-7.2 [EF]
-            expectedFailToday('two actions sharing a uuid AND a deep-equal payload apply exactly once, as a single outcome', async () => {
+            efNonAtomicMulti('two actions sharing a uuid AND a deep-equal payload apply exactly once, as a single outcome', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],

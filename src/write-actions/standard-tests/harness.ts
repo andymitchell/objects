@@ -53,6 +53,16 @@ export type WriteTestCapabilities = {
      * validate-where-sync consumer (which throws on any invalid_filter) runs UNCHANGED.
      */
     invalidWhereCorpus?: boolean;
+    /** Impl can express a multi-action batch WITHOUT the all-or-nothing option (sequential-halt / partial-success). DEFAULT true. */
+    nonAtomicMultiAction?: boolean;
+    /** Impl applies a SINGLE action all-or-nothing across every row it matches — a multi-match validation failure commits nothing. DEFAULT false. */
+    atomicPerAction?: boolean;
+    /**
+     * Adapter RECONSTRUCTS `result`/`changes` from observable state (an initial-vs-final value diff) rather than
+     * relaying the engine's own report. Outcome multiplicity, zero-match outcome entries, and matched-but-unchanged
+     * "dirty" marks are then unobservable, so the tests/oracles that pin engine-report observability relax. DEFAULT false.
+     */
+    reconstructsOutcomes?: boolean;
 };
 
 export type StandardTestConfig = {
@@ -75,6 +85,9 @@ export const CAPABILITY_DEFAULTS: Required<WriteTestCapabilities> = {
     assignMethod: true,
     scalarArrayUpdate: true,
     invalidWhereCorpus: false,
+    nonAtomicMultiAction: true,
+    atomicPerAction: false,
+    reconstructsOutcomes: false,
 };
 
 /** Resolve a single capability flag against the defaults. */

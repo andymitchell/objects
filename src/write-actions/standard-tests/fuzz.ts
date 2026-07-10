@@ -5,7 +5,7 @@ import {
     mulberry32, mixSeed, DEFAULT_FUZZ_SEED, DEFAULT_FUZZ_ITERATIONS,
     FuzzSchema, fuzzDdl, type FuzzItem, type Rng, makeWriteAction,
     genWorld, genWhere, genWriteAction, genBatch, genInvalidAction,
-    sortByPk, matchedPks, touchedPks, fuzzDeepEqual, outcomeSignature, repro, invariant,
+    sortByPk, matchedPks, valueDiffPks, touchedPks, fuzzDeepEqual, outcomeSignature, repro, invariant,
 } from "./fuzz-internals.ts";
 
 /**
@@ -21,6 +21,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
     const seed = ctx.fuzz?.seed ?? DEFAULT_FUZZ_SEED;
     const iterations = ctx.fuzz?.iterations ?? DEFAULT_FUZZ_ITERATIONS;
     const invalidWhereCorpus = resolveCapability(ctx.capabilities, 'invalidWhereCorpus');
+    const reconstructs = resolveCapability(ctx.capabilities, 'reconstructsOutcomes');
 
     const reference = (initialItems: FuzzItem[], actions: ReturnType<typeof genBatch>, options?: { atomic?: boolean }) =>
         writeToItemsArray(actions, structuredClone(initialItems), FuzzSchema, fuzzDdl, options);
@@ -64,7 +65,10 @@ export function runFuzzSection(ctx: SectionCtx): void {
             const ref = reference(world, batch, { atomic });
             invariant(r.result.ok === ref.ok, () => repro('P1', seed, 1, iter, world, batch, `ok mismatch: adapter=${r.result.ok} ref=${ref.ok} atomic=${atomic}`));
             invariant(fuzzDeepEqual(sortByPk(r.finalItems), sortByPk(ref.changes.final_items)), () => repro('P1', seed, 1, iter, world, batch, `final_items mismatch atomic=${atomic}`));
-            invariant(fuzzDeepEqual(outcomeSignature(r.result), outcomeSignature(ref)), () => repro('P1', seed, 1, iter, world, batch, `outcome signature mismatch atomic=${atomic}`));
+            // A zero-match action produces NO engine outcome entry (actions is not 1:1 with the batch), and dual
+            // outcomes can repeat a uuid — a synthesizing adapter cannot mirror that multiplicity. ok + final_items
+            // above remain the differential core.
+            if (!reconstructs) invariant(fuzzDeepEqual(outcomeSignature(r.result), outcomeSignature(ref)), () => repro('P1', seed, 1, iter, world, batch, `outcome signature mismatch atomic=${atomic}`));
         });
 
         // P2 — the caller's input world is never mutated
@@ -171,7 +175,12 @@ export function runFuzzSection(ctx: SectionCtx): void {
             const outcome = r.result.actions[0];
             if (outcome && outcome.ok) {
                 const aiPks = (outcome.affected_items ?? []).map(ai => String(ai.item_pk)).sort();
-                invariant(fuzzDeepEqual(aiPks, matchedPks(world, where)), () => repro('P8', seed, 8, iter, world, [action], `affected_items ${JSON.stringify(aiPks)} != matched ${JSON.stringify(matchedPks(world, where))}`));
+                // A reconstruction-mode adapter reports the value-diff projection (a matched-but-unchanged row is
+                // unobservable to it), so the expectation is the diff of the reference run, not the raw match set.
+                const expected = reconstructs
+                    ? valueDiffPks(world, reference(world, [action]).changes.final_items)
+                    : matchedPks(world, where);
+                invariant(fuzzDeepEqual(aiPks, expected), () => repro('P8', seed, 8, iter, world, [action], `affected_items ${JSON.stringify(aiPks)} != expected ${JSON.stringify(expected)}`));
             }
         });
 

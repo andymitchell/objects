@@ -1,5 +1,5 @@
 import { BoundedSchema, boundedDdl } from "./fixtures.ts";
-import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
+import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
 import { getWriteErrors } from "../helpers.ts";
 
 /**
@@ -20,11 +20,15 @@ import { getWriteErrors } from "../helpers.ts";
 export function registerMultiMatchPartialFailure(ctx: SectionCtx): void {
     const { expect, createAdapter, implName, expectedFailToday } = ctx;
 
+    // An impl guaranteeing per-action atomicity satisfies the ideal contract; run it as a plain test there,
+    // keep the expected-fail ratchet for the reference engine.
+    const itIdeal = resolveCapability(ctx.capabilities, 'atomicPerAction') ? ctx.test : expectedFailToday;
+
     describe('17. Multi-match partial failure (atomic-per-action)', () => {
 
         // T-17.1 [EF] — reference emits TWO outcomes under one uuid (a success for the passing rows + a
         // failure for the violating row) and commits the passing rows; the ideal is one atomic failure.
-        expectedFailToday('an update matching 3 rows where the last fails validation fails atomically, committing nothing', async () => {
+        itIdeal('an update matching 3 rows where the last fails validation fails atomically, committing nothing', async () => {
             const adapter = createAdapter(BoundedSchema, boundedDdl);
             const r = await adapter.apply({
                 initialItems: [

@@ -219,7 +219,9 @@ function dedupeIssues(issues: WhereFilterValidationIssue[]): WhereFilterValidati
 
 /** DFS the schema tree into a multimap (all nodes per path) and a set of paths that have a distinct child path. */
 function buildSchemaIndex(root: TreeNode): SchemaIndex {
-    const multimap: NodeMultimap = {};
+    // Null-prototype: the multimap is indexed by filter-supplied paths, so an inherited key like
+    // '__proto__' or 'constructor' must look up as absent — never resolve an inherited object.
+    const multimap: NodeMultimap = Object.create(null);
     const hasChildren = new Set<string>();
     const strictCandidate = new Set<string>();
     const open = new Set<string>();

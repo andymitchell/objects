@@ -8,7 +8,7 @@ import {
     MatchSchema, matchDdl,
     NumericPkSchema, numericPkDdl,
 } from "./fixtures.ts";
-import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
+import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
 import { assertWriteArrayScope, getWriteErrors, getWriteFailures, getWriteSuccesses } from "../helpers.ts";
 
 /**
@@ -22,6 +22,10 @@ import { assertWriteArrayScope, getWriteErrors, getWriteFailures, getWriteSucces
  */
 export function registerDeepVerbSemantics(ctx: SectionCtx): void {
     const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+
+    // Engine-report observability pins (12.12): a value-diff-reconstructing adapter cannot observe a no-op
+    // dirty mark, so those pins register as a visible skip there.
+    const itEngineReport = resolveCapability(ctx.capabilities, 'reconstructsOutcomes') ? ctx.test.skip : ctx.test;
 
     describe('12. Deep verb semantics', () => {
 
@@ -534,7 +538,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
         describe('12.12 pinned quirks (value-observable)', () => {
 
             // T-12.30 [PIN] — update has no no-op short-circuit
-            test('update marks a matched row dirty even when the written value is identical', async () => {
+            itEngineReport('update marks a matched row dirty even when the written value is identical', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', text: 'same' }],
@@ -550,7 +554,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
             });
 
             // T-12.31 [PIN] — array_scope always dirties matched parents
-            test('array_scope marks a matched parent dirty even when the sub-action is a no-op', async () => {
+            itEngineReport('array_scope marks a matched parent dirty even when the sub-action is a no-op', async () => {
                 const adapter = createAdapter(NestedSchema, nestedDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', children: [{ cid: 'c1', items: [] }] }],
@@ -601,7 +605,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
             });
 
             // T-12.33 [PIN] — affected_items report matched rows, not just changed rows
-            test('a matched-but-unchanged row is still reported in affected_items', async () => {
+            itEngineReport('a matched-but-unchanged row is still reported in affected_items', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', count: 10 }],

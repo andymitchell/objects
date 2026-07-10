@@ -2,6 +2,7 @@ import { describe, it, expect, expectTypeOf } from "vitest";
 import { z } from "zod";
 import { validateWhereFilter, compileValidateWhereFilter } from "./validateWhereFilter.ts";
 import matchJavascriptObject from "./matchJavascriptObject.ts";
+import { isWhereFilterDefinition, WhereFilterFieldConditionSchema } from "./schemas.ts";
 import type { WhereFilterDefinition } from "./types.ts";
 
 // `.strict()` throughout: `unknown_field` is flagged only under strict objects (the only mode the engine
@@ -536,6 +537,61 @@ describe("validateWhereFilter — structural hardening", () => {
             expect(validate({ ghost: { $ne: 5 } })).toEqual([]);
             expect(validate({ age: { $not: { $gt: 5 } } })).toEqual([]);
         });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The validator localises a malformed field condition by parsing it against the gate's OWN exported
+// field-condition union (`WhereFilterFieldConditionSchema`, schemas.ts) — the very schema the gate's
+// `WhereFilterSchema.catchall(...)` applies to each non-logic key. These pins hold the two together so they
+// can never drift: were the validator to hand-roll its own "is this operand well-formed?" test, or the gate
+// to swap the schema behind its catchall, this net breaks. The coincidence is three-way — a per-field
+// condition is malformed FOR THE VALIDATOR exactly when the EXPORTED UNION rejects it, which is exactly when
+// the whole `{field: condition}` filter fails the GATE.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("validateWhereFilter — leaf localisation is the gate's exported field-condition union", () => {
+    const V = z.object({ age: z.number() }).strict();
+    // Only the malformed issues the validator localises to `age` — the observable of the step it drives off
+    // `WhereFilterFieldConditionSchema`. (It short-circuits after localising, so a rejected condition yields
+    // exactly one such issue and no path-less duplicate.)
+    const localisedMalformed = (condition: unknown) =>
+        validateWhereFilter({ age: condition } as WhereFilterDefinition<{ age: number }>, V)
+            .filter((i) => i.reason === "malformed" && i.path === "age");
+
+    it("the exported union IS the gate's per-field verdict (catchall equivalence)", () => {
+        // `WhereFilterSchema` is `.catchall(WhereFilterFieldConditionSchema)`, so a field condition passes the
+        // exported union iff the whole one-field filter passes the gate — for any plain (non-`$`) field key.
+        const conditions: unknown[] = [
+            { $eq: 5 }, { $gt: 5, $lt: 10 }, { $ne: 5 }, "plain", 5, null, // well-formed
+            { $eq: 5, $mod: 3 }, { $size: 2, $gt: 5 }, { $in: [true] }, { $in: [{}] }, // malformed
+        ];
+        for (const c of conditions) {
+            expect(WhereFilterFieldConditionSchema.safeParse(c).success).toBe(isWhereFilterDefinition({ someField: c }));
+        }
+    });
+
+    const malformedConditions: [string, unknown][] = [
+        ["an unknown operator riding a known one", { $eq: 5, $mod: 3 }],
+        ["an unknown operator riding a range op", { $gt: 5, $mod: 3 }],
+        ["mixed array + value operators (cross-category)", { $size: 2, $gt: 5 }],
+        ["a wrong-typed $in member", { $in: [true] }],
+        ["a non-scalar $in member", { $in: [{}] }],
+    ];
+    it.each(malformedConditions)("localises `malformed` at the field when the union rejects: %s", (_label, condition) => {
+        expect(WhereFilterFieldConditionSchema.safeParse(condition).success).toBe(false); // the union rejects it
+        expect(isWhereFilterDefinition({ age: condition })).toBe(false);                  // so the gate rejects the whole filter
+        expect(localisedMalformed(condition)).toMatchObject([{ reason: "malformed", path: "age" }]); // and the validator pins it to `age`
+    });
+
+    const wellFormedConditions: [string, unknown][] = [
+        ["a single positive operator", { $eq: 5 }],
+        ["conjoined range bounds", { $gt: 5, $lt: 10 }],
+        ["a lone broadening operator", { $ne: 5 }],
+    ];
+    it.each(wellFormedConditions)("never localises `malformed` when the union accepts: %s", (_label, condition) => {
+        expect(WhereFilterFieldConditionSchema.safeParse(condition).success).toBe(true); // the union accepts it
+        expect(isWhereFilterDefinition({ age: condition })).toBe(true);                  // so the gate accepts the whole filter
+        expect(localisedMalformed(condition)).toEqual([]);                               // and the validator localises nothing
     });
 });
 

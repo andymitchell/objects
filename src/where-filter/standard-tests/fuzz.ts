@@ -3,8 +3,9 @@ import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 import {
     mulberry32, mixSeed, DEFAULT_FUZZ_SEED, DEFAULT_FUZZ_ITERATIONS,
-    FuzzSchema, type FuzzRow, type Rng, asFilter,
-    genRow, genFilter, genComboPair, REJECTING_FILTERS, invariant, repro,
+    FuzzSchema, type FuzzRow, type Rng, asFilter, NESTED_ARRAY_PATH,
+    genRow, genFilter, genComboPair, genElemMatchCombo, genLeafScopeOps,
+    leafScopeFilterPayload, slowLeafScopeEval, REJECTING_FILTERS, invariant, repro,
 } from "./fuzz-internals.ts";
 
 /**
@@ -14,12 +15,16 @@ import {
  * the in-package JS reference matcher (the one deliberate reference import). WF-P2–P8 are metamorphic laws
  * (De Morgan, double-negation, `$in`≡`$or` of `$eq`, commutativity/idempotence, monotonicity, `$nor`≡¬`$or`,
  * empty-logic identities) that only compare the adapter against ITSELF, so they hold even where an engine
- * diverges from the reference. WF-P9 pins the rejection contract. WF-P10 is the multi-operator AND law
- * (`{p:{opA,opB}} ≡ {$and:[{p:{opA}},{p:{opB}}]}`), a self-comparison that catches first-operator-wins
- * dispatch. Every failure throws with the exact `(seed, propertyIndex, iteration)` triple so it replays
- * deterministically. The generator's uniform profile
- * is confined to operators the example sections proved agree across all three engines — a WF-P1 red means a
- * NEW divergence the profile missed: tighten the generator, never the assertion.
+ * diverges from the reference. WF-P9 pins the rejection contract.
+ *
+ * WF-P10–P12 police multi-operator payloads, the shape a first-operator-wins dispatch silently truncates:
+ * the AND law at the top level (`{p:{opA,opB}} ≡ {$and:[{p:{opA}},{p:{opB}}]}`), the complement law under
+ * `$not`, and the implication law inside a scalar `$elemMatch`. WF-P13 checks a compound predicate on a path
+ * crossing two arrays against an independent leaf-scope evaluator.
+ *
+ * Every failure throws with the exact `(seed, propertyIndex, iteration)` triple so it replays deterministically.
+ * The generator's uniform profile is confined to operators the example sections proved agree across all three
+ * engines — a WF-P1 red means a NEW divergence the profile missed: tighten the generator, never the assertion.
  */
 export function runFuzzSection(ctx: SectionCtx): void {
     const seed = ctx.fuzz?.seed ?? DEFAULT_FUZZ_SEED;
@@ -191,6 +196,53 @@ export function runFuzzSection(ctx: SectionCtx): void {
             const exp = await run(row, split);
             if (got === undefined || exp === undefined) return 'skip';
             invariant(got === exp, () => repro('WF-P10', seed, 10, iter, row, { combo, split }, `combo=${got} and-split=${exp}`));
+            return 'ok';
+        });
+
+        // WF-P11 — $not is the complement of its operand. `{p:{$not:X}}` matches exactly the rows `{p:X}` does
+        // not, whatever X is and whether or not p is present. An engine that drops an operator inside $not, or
+        // short-circuits $not on a missing field, breaks the complement.
+        property(11, '$not complement', async (rng, iter) => {
+            const row = genRow(rng);
+            const { field, opA, opB, a, b } = genComboPair(rng, row);
+            const inner = { [opA]: a, [opB]: b };
+            const negated = await run(row, asFilter({ [field]: { $not: inner } }));
+            const plain = await run(row, asFilter({ [field]: inner }));
+            if (negated === undefined || plain === undefined) return 'skip';
+            invariant(negated === !plain, () => repro('WF-P11', seed, 11, iter, row, { field, inner }, `$not=${negated} inner=${plain}`));
+            return 'ok';
+        });
+
+        // WF-P12 — a scalar $elemMatch conjunction implies each of its operators alone. One element satisfying
+        // both operators satisfies each of them, so weakening the body can only widen the match. The converse
+        // does not hold (two elements may satisfy one operator each), which is what makes this a necessary
+        // condition an operator-dropping engine still fails.
+        property(12, 'scalar $elemMatch AND-implication', async (rng, iter) => {
+            const row = genRow(rng);
+            const { field, opA, opB, a, b } = genElemMatchCombo(rng, row);
+            const both = await run(row, asFilter({ [field]: { $elemMatch: { [opA]: a, [opB]: b } } }));
+            const onlyA = await run(row, asFilter({ [field]: { $elemMatch: { [opA]: a } } }));
+            const onlyB = await run(row, asFilter({ [field]: { $elemMatch: { [opB]: b } } }));
+            if ([both, onlyA, onlyB].some(x => x === undefined)) return 'skip';
+            if (both === true) {
+                const detail = { field, opA, a, opB, b };
+                invariant(onlyA === true, () => repro('WF-P12', seed, 12, iter, row, detail, `both=true but ${opA} alone=${onlyA}`));
+                invariant(onlyB === true, () => repro('WF-P12', seed, 12, iter, row, detail, `both=true but ${opB} alone=${onlyB}`));
+            }
+            return 'ok';
+        });
+
+        // WF-P13 — a compound predicate on a path crossing two arrays must be satisfied within ONE leaf array,
+        // judged against a hand-written evaluator rather than the engine's own traversal. An engine that scopes
+        // each operator to the whole spread pools elements from different leaves and matches too much.
+        property(13, 'nested-array leaf scope', async (rng, iter) => {
+            const row = genRow(rng);
+            const ops = genLeafScopeOps(rng, row);
+            const filter = asFilter({ [NESTED_ARRAY_PATH]: leafScopeFilterPayload(ops) });
+            const got = await run(row, filter);
+            if (got === undefined) return 'skip';
+            const exp = slowLeafScopeEval(row, ops);
+            invariant(got === exp, () => repro('WF-P13', seed, 13, iter, row, filter, `engine=${got} leaf-scope oracle=${exp}`));
             return 'ok';
         });
     });

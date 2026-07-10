@@ -4,15 +4,16 @@ import type { WhereFilterDefinition } from "../types.ts";
 import type { MatchJavascriptObjectInTesting, SectionCtx } from "./harness.ts";
 import { makeHelpers } from "./harness.ts";
 import { runFuzzSection } from "./fuzz.ts";
-import { DEFAULT_FUZZ_SEED } from "./fuzz-internals.ts";
+import { DEFAULT_FUZZ_SEED, NESTED_ARRAY_PATH } from "./fuzz-internals.ts";
 
 /**
  * TEETH for §24. This dev-only harness proves the fuzz section actually catches misbehaving matchers
  * rather than passing everything. It runs ONLY `runFuzzSection` (the full battery accrues expected-fail
  * reds, so it is the wrong yardstick) against:
- *   - the HONEST reference matcher → every property must pass;
- *   - nine saboteurs, each a small deliberate defect → at least one property must catch it, including the
- *     specific properties we claim guard that behaviour.
+ *   - the HONEST reference matcher → it must pass every property whose law its semantics satisfy, and fail
+ *     exactly {@link REFERENCE_VIOLATED_PROPERTIES};
+ *   - a saboteur per deliberate defect → at least one property must catch it, including the specific
+ *     properties we claim guard that behaviour.
  *
  * A saboteur's `trips` is asserted as a SUBSET of its actual failures (extra catches are fine — a broken
  * matcher may fail several laws). Two saboteurs (emptyOrMatchesAll, swallowsInvalidFilter) are caught by a
@@ -92,6 +93,43 @@ const firstOpWins: Rewrite = (obj) => {
     return obj;
 };
 
+/** Keep only the first operator of a multi-operator payload, leaving the rest of the filter alone. */
+const truncatePayload = (payload: Record<string, unknown>): Record<string, unknown> => {
+    const first = Object.keys(payload)[0]!;
+    return { [first]: payload[first] };
+};
+
+/**
+ * First-operator-wins INSIDE `$not`. The outer payload is untouched, so only a law that reaches through the
+ * negation sees it.
+ */
+const notInnerFirstOpWins: Rewrite = (obj) => {
+    const inner = obj.$not;
+    if (!isPlainRecord(inner) || Object.keys(inner).length < 2) return obj;
+    return { ...obj, $not: truncatePayload(inner) };
+};
+
+/** First-operator-wins inside a scalar `$elemMatch` body — an object sub-filter body is left alone. */
+const elemMatchInnerFirstOpWins: Rewrite = (obj) => {
+    const inner = obj.$elemMatch;
+    if (!isPlainRecord(inner) || Object.keys(inner).length < 2) return obj;
+    if (!Object.keys(inner).every(k => VALUE_OP_KEYS.has(k))) return obj;
+    return { ...obj, $elemMatch: truncatePayload(inner) };
+};
+
+/**
+ * Scope each operator of a nested-array predicate to the whole spread rather than to one leaf array, by
+ * splitting the payload into an `$and` of single-operator predicates. Two leaves may then satisfy one
+ * operator each and the row matches, though no single leaf satisfies the compound.
+ */
+const crossLeafScope: Rewrite = (obj) => {
+    const payload = obj[NESTED_ARRAY_PATH];
+    if (Object.keys(obj).length !== 1 || !isPlainRecord(payload)) return obj;
+    const operators = Object.entries(payload);
+    if (operators.length < 2) return obj;
+    return { $and: operators.map(([op, operand]) => ({ [NESTED_ARRAY_PATH]: { [op]: operand } })) };
+};
+
 /** Ignore the filter entirely and match everything. */
 const alwaysTrue: MatchJavascriptObjectInTesting = async () => true;
 /** Ignore the filter entirely and match nothing. */
@@ -122,6 +160,12 @@ const GROUP_A: Saboteur[] = [
     { name: 'S8 emptyOrMatchesAll', matcher: emptyOrMatchesAll, trips: [8] },
     { name: 'S9 swallowsInvalidFilter', matcher: swallowsInvalidFilter, trips: [9] },
     { name: 'S10 firstOpWins', matcher: rewriteMatcher(firstOpWins), trips: [10] },
+    // S11 and S12 re-impose a defect the reference itself has, so the differential (WF-P1), whose oracle IS the
+    // reference, cannot see them: only the law that reaches inside the payload does. Their teeth are latent while
+    // that property is in REFERENCE_VIOLATED_PROPERTIES, and become live the moment it leaves.
+    { name: 'S11 notInnerFirstOpWins', matcher: rewriteMatcher(notInnerFirstOpWins), trips: [11] },
+    { name: 'S12 elemMatchInnerFirstOpWins', matcher: rewriteMatcher(elemMatchInnerFirstOpWins), trips: [12] },
+    { name: 'S13 crossLeafScope', matcher: rewriteMatcher(crossLeafScope), trips: [13] },
 ];
 
 type Collected = { name: string; passed: boolean; error?: string };
@@ -178,11 +222,22 @@ async function collectFuzzResults(matcher: MatchJavascriptObjectInTesting): Prom
 const failingIndices = (results: Collected[]): Set<number> =>
     new Set(results.filter(r => !r.passed).map(r => Number(r.name.split(' ')[0]!.split('.')[1])));
 
+/**
+ * The properties the reference matcher itself violates. It keeps only the first operator of a multi-operator
+ * payload nested inside `$not` (WF-P11) or inside a scalar `$elemMatch` (WF-P12), and short-circuits `$not` on
+ * a missing field. Asserting the EXACT set is the inverted tooth: it proves each law bites the real defect
+ * rather than passing vacuously, and it fails loudly the moment the defect is fixed.
+ */
+// TODO Remove once the shared predicate tree evaluates nested payloads as conjunctions — the set becomes empty.
+const REFERENCE_VIOLATED_PROPERTIES = [11, 12];
+
 describe('§24 fuzz saboteur harness (teeth)', () => {
 
-    test('the honest reference matcher passes every fuzz property', async () => {
+    test('the honest reference matcher passes every fuzz property but the multi-operator laws it violates', async () => {
         const results = await collectFuzzResults(honestMatcher);
-        expect(results.filter(r => !r.passed).map(r => `${r.name}: ${r.error}`)).toEqual([]);
+        const failing = [...failingIndices(results)].sort((a, b) => a - b);
+        const detail = results.filter(r => !r.passed).map(r => `${r.name}: ${r.error}`).join('\n');
+        expect(failing, detail).toEqual(REFERENCE_VIOLATED_PROPERTIES);
     });
 
     for (const sab of GROUP_A) {

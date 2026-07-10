@@ -45,8 +45,17 @@ export const FuzzSchema = z.object({
     tags: z.array(z.string()).optional(),
     scores: z.array(z.number()).optional(),
     items: z.array(z.object({ k: z.string(), v: z.number().optional() }).strict()).optional(),
+    // An array nested under an array: `groups.subtags` is a path with two array hops, so a compound predicate
+    // on it must be satisfied within ONE `subtags` array rather than pooled across all of them.
+    groups: z.array(z.object({ subtags: z.array(z.string()) }).strict()).optional(),
+    // An array whose elements are themselves arrays: the only field whose operands are structural rather than
+    // scalar, so equality here cannot be decided by comparing serialized text.
+    matrix: z.array(z.array(z.number())).optional(),
 }).strict();
 export type FuzzRow = z.infer<typeof FuzzSchema>;
+
+/** The one path in {@link FuzzSchema} that crosses two arrays. Its leaf arrays scope a compound predicate. */
+export const NESTED_ARRAY_PATH = 'groups.subtags';
 
 // Lowercase-ASCII ONLY. Mixed case / non-ASCII would hit PG/SQLite collation vs JS code-point
 // divergence in string ranges. Do not extend the alphabet without excluding string-range ops.
@@ -83,6 +92,14 @@ export function genRow(rng: Rng): FuzzRow {
         if (rng.bool(0.7)) si.v = rng.intRange(-10, 20);
         return si;
     });
+    // Several small leaf arrays, drawn from a four-value pool: a compound predicate is then frequently
+    // satisfiable across two leaves while satisfiable within none, which is what makes leaf scoping observable.
+    // An absent `groups`, a lone leaf, and an empty leaf all still occur — each exercises a different edge.
+    if (rng.bool(0.8)) row.groups = Array.from({ length: rng.intRange(1, 3) }, () => ({
+        subtags: Array.from({ length: rng.int(3) }, () => rng.pick(TAG_POOL)),
+    }));
+    if (rng.bool(0.8)) row.matrix = Array.from({ length: rng.int(4) }, () =>
+        Array.from({ length: rng.intRange(1, 2) }, () => rng.intRange(0, 3)));
     return row;
 }
 
@@ -101,7 +118,7 @@ const list = <X>(rng: Rng, gen: () => X): X[] => Array.from({ length: rng.intRan
  * exact-array / multi-key deep-object literals, and unknown paths.
  */
 function genLeaf(rng: Rng, row: FuzzRow): WhereFilterDefinition<FuzzRow> {
-    switch (rng.int(19)) {
+    switch (rng.int(23)) {
         case 0: return asFilter({ name: pickName(rng, row) });
         case 1: return asFilter({ name: { $eq: pickName(rng, row) } });
         case 2: return asFilter({ name: { $ne: pickName(rng, row) } });
@@ -125,6 +142,22 @@ function genLeaf(rng: Rng, row: FuzzRow): WhereFilterDefinition<FuzzRow> {
             const { field, opA, opB, a, b } = genComboPair(rng, row);
             return asFilter({ [field]: { [opA]: a, [opB]: b } });
         }
+        case 18: {
+            // The same conjunction under a `$not`: negation must distribute over the whole payload.
+            const { field, opA, opB, a, b } = genComboPair(rng, row);
+            return asFilter({ [field]: { $not: { [opA]: a, [opB]: b } } });
+        }
+        case 19: {
+            // A conjunction inside a scalar `$elemMatch`: ONE element must satisfy both operators.
+            const { field, opA, opB, a, b } = genElemMatchCombo(rng, row);
+            return asFilter({ [field]: { $elemMatch: { [opA]: a, [opB]: b } } });
+        }
+        case 20:
+            // A compound predicate on a path crossing two arrays: it must hold within one leaf array.
+            return asFilter({ [NESTED_ARRAY_PATH]: leafScopeFilterPayload(genLeafScopeOps(rng, row)) });
+        case 21:
+            // A structural operand: the `$all` element is an array, so equality is decided by structure.
+            return asFilter({ matrix: { $all: [pickMatrixRow(rng, row)] } });
         default: {
             const sub: SubItem = { k: pickTag(rng, row) };
             if (rng.bool(0.5)) sub.v = pickAge(rng, row);
@@ -180,6 +213,22 @@ export const REJECTING_FILTERS: readonly unknown[] = [
  * combo is a pure conjunction with no paired-predicate special case.
  */
 const COMBO_VALUE_OPS = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$exists'] as const;
+const RANGE_OP_SET: ReadonlySet<string> = new Set(RANGE_OPS);
+
+/**
+ * Draw two distinct operators that occupy DIFFERENT predicate groups.
+ *
+ * A payload's operators are grouped before evaluation, and every range bound (`$gt`/`$gte`/`$lt`/`$lte`) shares
+ * a single group. Two range operators therefore always travel together, and a payload made of them cannot
+ * reveal an engine that keeps only the first operator and drops the rest — the very defect the multi-operator
+ * laws exist to catch. Excluding that pairing keeps every generated combo able to bite.
+ */
+function drawOpPair(rng: Rng, ops: readonly string[]): [string, string] {
+    const opA = rng.pick(ops);
+    let opB = rng.pick(ops);
+    while (opB === opA || (RANGE_OP_SET.has(opA) && RANGE_OP_SET.has(opB))) opB = rng.pick(ops);
+    return [opA, opB];
+}
 
 const comboOperand = (rng: Rng, op: string, field: 'name' | 'age', row: FuzzRow): unknown => {
     if (op === '$exists') return rng.bool();
@@ -190,15 +239,167 @@ const comboOperand = (rng: Rng, op: string, field: 'name' | 'age', row: FuzzRow)
 
 /**
  * A single-field, two-operator combo and the fields needed to split it into `$and` of one-operator payloads.
- * WF-P10 asserts `{field:{opA,opB}} ≡ {$and:[{field:{opA}},{field:{opB}}]}` — the AND law. Present-biased
- * operands make both operators straddle the row value, so the two ops frequently disagree and the law bites.
+ * WF-P10 asserts `{field:{opA,opB}} ≡ {$and:[{field:{opA}},{field:{opB}}]}` — the AND law; WF-P11 wraps the same
+ * payload in `$not`. Present-biased operands make both operators straddle the row value, so the two ops
+ * frequently disagree and the laws bite.
  */
 export function genComboPair(rng: Rng, row: FuzzRow): { field: 'name' | 'age'; opA: string; opB: string; a: unknown; b: unknown } {
     const field = rng.bool() ? 'name' : 'age';
-    const opA = rng.pick(COMBO_VALUE_OPS);
-    let opB = rng.pick(COMBO_VALUE_OPS);
-    while (opB === opA) opB = rng.pick(COMBO_VALUE_OPS);
+    const [opA, opB] = drawOpPair(rng, COMBO_VALUE_OPS);
     return { field, opA, opB, a: comboOperand(rng, opA, field, row), b: comboOperand(rng, opB, field, row) };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Scalar $elemMatch conjunction (WF-P12)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * The operators an `$elemMatch` body combines when the array's elements are scalars. `$exists` and `$type`
+ * are excluded: on a scalar element they diverge across engines, which the example sections already record.
+ */
+const ELEM_MATCH_COMBO_OPS = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin'] as const;
+
+const pickScore = (rng: Rng, row: FuzzRow): number => (row.scores && row.scores.length && rng.bool(0.5) ? rng.pick(row.scores) : rng.intRange(-10, 20));
+
+/**
+ * A two-operator `$elemMatch` body over a scalar array. One element must satisfy BOTH operators, so the
+ * conjunction cannot be spread across two elements — the law WF-P12 polices.
+ */
+export function genElemMatchCombo(rng: Rng, row: FuzzRow): { field: 'tags' | 'scores'; opA: string; opB: string; a: unknown; b: unknown } {
+    const field = rng.bool() ? 'tags' : 'scores';
+    const [opA, opB] = drawOpPair(rng, ELEM_MATCH_COMBO_OPS);
+    const value = () => (field === 'tags' ? pickTag(rng, row) : pickScore(rng, row));
+    const operand = (op: string): unknown => (op === '$in' || op === '$nin' ? list(rng, value) : value());
+    return { field, opA, opB, a: operand(opA), b: operand(opB) };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Nested-array leaf scope (WF-P13) — generator + an INDEPENDENT oracle
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * One operator of a compound predicate on {@link NESTED_ARRAY_PATH}.
+ *
+ * Only operators that do NOT match a missing field appear here. A leaf-scoped reading of the path asks "does
+ * some leaf array satisfy the whole predicate", which is `false` when there are no leaf arrays at all; an
+ * operator like `$ne` or `$nin`, which a missing field satisfies, would answer `true` instead and confound the
+ * law with the unrelated question of missing-field polarity.
+ */
+export type LeafScopeOp =
+    | { readonly op: '$size'; readonly n: number }
+    | { readonly op: '$all'; readonly values: readonly string[] }
+    | { readonly op: '$in'; readonly values: readonly string[] }
+    | { readonly op: '$elemMatch'; readonly innerOp: string; readonly innerOperand: string | readonly string[] };
+
+const pickSubtag = (rng: Rng, row: FuzzRow): string => {
+    const present = (row.groups ?? []).flatMap(g => g.subtags);
+    return present.length && rng.bool(0.6) ? rng.pick(present) : rng.pick(TAG_POOL);
+};
+
+/** A `$size` operand biased toward a leaf length the row actually has, so the operator is often satisfiable. */
+const pickLeafLength = (rng: Rng, row: FuzzRow): number => {
+    const lengths = (row.groups ?? []).map(g => g.subtags.length);
+    return lengths.length && rng.bool(0.6) ? rng.pick(lengths) : rng.int(3);
+};
+
+/**
+ * Two distinct operators forming a compound predicate on the nested-array path.
+ *
+ * Operand widths are kept at or below a leaf array's length: an operand demanding three distinct values of a
+ * two-element leaf is unsatisfiable under either reading of leaf scope, so it can never separate them.
+ */
+export function genLeafScopeOps(rng: Rng, row: FuzzRow): LeafScopeOp[] {
+    const kinds = ['$size', '$all', '$in', '$elemMatch'] as const;
+    const [kindA, kindB] = drawOpPair(rng, kinds);
+    const subtagPair = (): string[] => Array.from({ length: rng.intRange(1, 2) }, () => pickSubtag(rng, row));
+    const build = (kind: string): LeafScopeOp => {
+        switch (kind) {
+            case '$size': return { op: '$size', n: pickLeafLength(rng, row) };
+            case '$all': return { op: '$all', values: subtagPair() };
+            case '$in': return { op: '$in', values: subtagPair() };
+            default: {
+                const innerOp = rng.pick(ELEM_MATCH_COMBO_OPS);
+                const innerOperand = innerOp === '$in' || innerOp === '$nin' ? subtagPair() : pickSubtag(rng, row);
+                return { op: '$elemMatch', innerOp, innerOperand };
+            }
+        }
+    };
+    return [build(kindA), build(kindB)];
+}
+
+/** Render the drawn operators as the filter payload the engines receive. */
+export function leafScopeFilterPayload(ops: readonly LeafScopeOp[]): Record<string, unknown> {
+    const payload: Record<string, unknown> = {};
+    for (const o of ops) {
+        if (o.op === '$size') payload.$size = o.n;
+        else if (o.op === '$all') payload.$all = [...o.values];
+        else if (o.op === '$in') payload.$in = [...o.values];
+        else payload.$elemMatch = { [o.innerOp]: Array.isArray(o.innerOperand) ? [...o.innerOperand] : o.innerOperand };
+    }
+    return payload;
+}
+
+type RangeCompare = <X extends string | number>(a: X, b: X) => boolean;
+const RANGE_COMPARES: Readonly<Record<string, RangeCompare>> = {
+    '$gt': (a, b) => a > b,
+    '$gte': (a, b) => a >= b,
+    '$lt': (a, b) => a < b,
+    '$lte': (a, b) => a <= b,
+};
+
+/**
+ * Evaluate one value operator against one scalar — hand-written, so the laws that use it never borrow the
+ * judgement of the code they are judging.
+ *
+ * @param value The stored value, or `undefined` for a missing field.
+ * @returns Whether the operator holds. A wrong-typed range bound does not match (type bracketing).
+ */
+export function evalScalarOp(value: string | number | undefined, op: string, operand: unknown): boolean {
+    switch (op) {
+        case '$exists': return operand === (value !== undefined);
+        case '$eq': return value === operand;
+        case '$ne': return value === undefined || value !== operand;
+        case '$in': return value !== undefined && Array.isArray(operand) && operand.includes(value);
+        case '$nin': return value === undefined || (Array.isArray(operand) && !operand.includes(value));
+        default: {
+            const compare = RANGE_COMPARES[op];
+            if (!compare || value === undefined) return false;
+            if (typeof value === 'number' && typeof operand === 'number') return compare(value, operand);
+            if (typeof value === 'string' && typeof operand === 'string') return compare(value, operand);
+            return false;
+        }
+    }
+}
+
+/** Whether a single leaf array satisfies EVERY operator of the compound predicate. */
+export function leafSatisfiesAll(leaf: readonly string[], ops: readonly LeafScopeOp[]): boolean {
+    return ops.every(o => {
+        switch (o.op) {
+            case '$size': return leaf.length === o.n;
+            case '$all': return o.values.every(v => leaf.includes(v));
+            case '$in': return o.values.some(v => leaf.includes(v));
+            case '$elemMatch': return leaf.some(el => evalScalarOp(el, o.innerOp, o.innerOperand));
+        }
+    });
+}
+
+/**
+ * The independent oracle for {@link NESTED_ARRAY_PATH}: a compound predicate matches when SOME leaf array
+ * satisfies all of it. Hand-written for the same reason as {@link fuzzDeepEqual} — a law comparing an engine
+ * against a copy of that engine's own traversal would be blind to a shared misreading of leaf scope.
+ */
+export function slowLeafScopeEval(row: FuzzRow, ops: readonly LeafScopeOp[]): boolean {
+    return (row.groups ?? []).some(g => leafSatisfiesAll(g.subtags, ops));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Structural operands
+// ═══════════════════════════════════════════════════════════════════
+
+/** An operand for `{matrix: {$all: [...]}}` — biased toward a row actually present, so the filter often matches. */
+export function pickMatrixRow(rng: Rng, row: FuzzRow): number[] {
+    if (row.matrix && row.matrix.length && rng.bool(0.5)) return [...rng.pick(row.matrix)];
+    return Array.from({ length: rng.intRange(1, 2) }, () => rng.intRange(0, 3));
 }
 
 /**

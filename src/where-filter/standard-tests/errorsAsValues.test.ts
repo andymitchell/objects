@@ -1,6 +1,9 @@
 import matchJavascriptObjectReference from "../matchJavascriptObject.ts";
 import type { MatchJavascriptObjectInTesting } from "./harness.ts";
 import { standardTests } from "./index.ts";
+import { AcknowledgementCollector } from "./outcomes.ts";
+import { assertNoCapabilityDrift } from "./manifests/driftGuard.ts";
+import { ERRORS_AS_VALUES_MANIFEST } from "./manifests/errorsAsValues.manifest.ts";
 
 /**
  * The fourth conformance consumer: the JS reference matcher wrapped as an ERRORS-AS-VALUES seam — a
@@ -20,6 +23,8 @@ const matchAsValues: MatchJavascriptObjectInTesting = async (obj, filter) => {
     }
 };
 
+const acknowledgements = new AcknowledgementCollector();
+
 standardTests({
     test,
     expect,
@@ -27,4 +32,9 @@ standardTests({
     implementationName: 'js-errors-as-values',
     errorsAsValues: true,
     fuzz: { iterations: 100 },
+    acknowledgements,
+});
+
+test('capability manifest — the errors-as-values reference acknowledges no seam', () => {
+    assertNoCapabilityDrift(acknowledgements, ERRORS_AS_VALUES_MANIFEST, expect);
 });

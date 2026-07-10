@@ -1,16 +1,18 @@
 import Database from 'better-sqlite3';
 import { z } from "zod";
 import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from "./index.ts";
-import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
+import { standardTests, classifyWhereClauseErrors, AcknowledgementCollector, assertNoCapabilityDrift, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
+import { SQLITE_MANIFEST } from "../../standard-tests/manifests/sqlite.manifest.ts";
 import type { PreparedWhereClauseResult } from "../types.ts";
 import matchJavascriptObject from "../../matchJavascriptObject.ts";
 import type { WhereFilterDefinition } from "../../types.ts";
-import { SQLITE_UNSAFE_WARNING } from "./convertDotPropPathToSqliteJsonPath.ts";
 import { sqliteJsonPathSegments, sqliteSqlStringLiteral } from "../../../utils/sql/sqlite/sqliteJsonPath.ts";
 
 
 
 describe('sqlite where clause builder', () => {
+
+    const acknowledgements = new AcknowledgementCollector();
 
     const matchJavascriptObjectInDb: MatchJavascriptObjectInTesting = async (object, filter, schema) => {
         const db = new Database(':memory:');
@@ -20,50 +22,27 @@ describe('sqlite where clause builder', () => {
 
             const pm = new PropertyTranslatorSqliteJsonSchema(schema, 'recordColumn');
 
-            let clause: PreparedWhereClauseResult | undefined;
-            try {
-                clause = prepareWhereClauseForSqlite(filter, pm);
-            } catch (e) {
-                if (e instanceof Error) {
-                    if (e.message.toLowerCase().indexOf('unsupported') > -1) {
-                        return undefined;
-                    }
-                }
-                throw e;
-            }
+            const clause: PreparedWhereClauseResult = prepareWhereClauseForSqlite(filter, pm);
 
             if (!clause.success) {
-                // A path the engine cannot address at all (an array beneath a record's dynamic key) is an
-                // acknowledged capability gap, not a non-match: it must skip rather than answer `false`.
-                if (clause.errors.some(e => e.kind === 'path_conversion' && e.error.type === 'unsupported_kind')) {
-                    return undefined;
+                // Decide the seam's verdict from the errors' typed shape, never their message text.
+                const outcome = classifyWhereClauseErrors(clause.errors);
+                if (outcome.kind === 'rejected') {
+                    // A malformed/contradictory filter (or a broken regex) must be rejected, not silently matched —
+                    // the value-driven matcher throws on it too, so the seam rethrows.
+                    throw new Error(clause.errors.map(e => e.message).join('; '));
                 }
-                // A path the schema does not describe IS a missing field, so an unresolvable path is a non-match.
-                const msg = clause.errors.map(e => e.message).join('; ');
-                if (msg.includes(SQLITE_UNSAFE_WARNING)) {
-                    return false;
-                }
-                // Re-throw validation errors so standardTests error-handling tests still work.
-                // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
-                if (msg.toLowerCase().includes('not well-defined')) {
-                    throw new Error(msg);
-                }
-                return undefined;
+                // `matched` is a definite non-match (an unresolvable path is a missing field); `unsupported` is an
+                // acknowledged capability gap that skips.
+                return outcome.kind === 'matched' ? outcome.value : undefined;
             }
 
-            let queryStr: string;
-            if (clause.where_clause_statement) {
-                queryStr = `SELECT * FROM test_table WHERE ${clause.where_clause_statement}`;
-            } else {
-                queryStr = `SELECT * FROM test_table`;
-            }
+            const queryStr = clause.where_clause_statement
+                ? `SELECT * FROM test_table WHERE ${clause.where_clause_statement}`
+                : `SELECT * FROM test_table`;
 
-            try {
-                const rows = db.prepare(queryStr).all(...clause.statement_arguments);
-                return rows.length > 0;
-            } catch (e) {
-                throw e;
-            }
+            const rows = db.prepare(queryStr).all(...clause.statement_arguments);
+            return rows.length > 0;
         } finally {
             db.close();
         }
@@ -74,8 +53,13 @@ describe('sqlite where clause builder', () => {
         expect,
         matchJavascriptObject: matchJavascriptObjectInDb,
         implementationName: 'sqlite',
-        fuzz: { iterations: 100 }
+        fuzz: { iterations: 100 },
+        acknowledgements,
     })
+
+    test('capability manifest — the acknowledged-seam set has not drifted', () => {
+        assertNoCapabilityDrift(acknowledgements, SQLITE_MANIFEST, expect);
+    });
 
     // A multi-scalar union field compares by strict JSON value-equality via json_type + json_extract — json_extract
     // alone returns 1 for both JSON `true` and `1`, so the type tag distinguishes them, reproducing

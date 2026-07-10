@@ -4,11 +4,11 @@ import type { PreparedWhereClauseResult } from "../types.ts";
 import matchJavascriptObject from "../../matchJavascriptObject.ts";
 import type { WhereFilterDefinition } from "../../types.ts";
 
-import { standardTests, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
+import { standardTests, classifyWhereClauseErrors, classifyInsertError, AcknowledgementCollector, assertNoCapabilityDrift, type MatchJavascriptObjectInTesting } from "../../standardTests.ts";
+import { POSTGRES_MANIFEST } from "../../standard-tests/manifests/postgres.manifest.ts";
 
-import { UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.ts";
 import { pgJsonbAccessor } from "../../../utils/sql/postgres/pgJsonbAccessor.ts";
-import { acquireSchema, warmUp, disposeAllForTest } from "./testSchemaPartition.ts";
+import { acquireSchema, warmUp, disposeAllForTest, runQueryWithHeapGuard } from "./testSchemaPartition.ts";
 
 
 
@@ -19,6 +19,8 @@ describe('postgres where clause builder', () => {
     // one-time WASM init off the first test; disposeAllForTest drops each test's schemas afterwards.
     beforeAll(warmUp);
     afterEach(disposeAllForTest);
+
+    const acknowledgements = new AcknowledgementCollector();
 
     const matchJavascriptObjectInDb:MatchJavascriptObjectInTesting = async (object, filter, schema) => {
 
@@ -36,60 +38,33 @@ describe('postgres where clause builder', () => {
             // filter targeting it never matches. Acknowledge as a DIVERGENCE (a definite `false`, paired with the
             // D-helper at test 19.19) — NOT a silent `undefined` skip — while JS and SQLite still bind and match it.
             // Any OTHER insert error is a real fault and rethrows.
-            if (e instanceof Error && /unsupported Unicode escape/i.test(e.message)) {
-                return false;
-            }
+            const env = classifyInsertError(e);
+            if (env) return env.value;
             throw e;
         }
 
-        let clause:PreparedWhereClauseResult | undefined;
-        try {
-            clause = prepareWhereClauseForPg(filter, pm);
-
-        } catch(e) {
-            if( e instanceof Error ) {
-                if( e.message.toLowerCase().indexOf('unsupported')>-1 ) {
-                    return undefined;
-                }
-            }
-            throw e;
-        }
+        const clause:PreparedWhereClauseResult = prepareWhereClauseForPg(filter, pm);
 
         if( !clause.success ) {
-            // A path the engine cannot address at all (an array beneath a record's dynamic key) is an
-            // acknowledged capability gap, not a non-match: it must skip rather than answer `false`.
-            if (clause.errors.some(e => e.kind === 'path_conversion' && e.error.type === 'unsupported_kind')) {
-                return undefined;
+            // Decide the seam's verdict from the errors' typed shape, never their message text.
+            const outcome = classifyWhereClauseErrors(clause.errors);
+            if (outcome.kind === 'rejected') {
+                // A malformed/contradictory filter (or a broken regex) must be rejected, not silently matched —
+                // the value-driven matcher throws on it too, so the seam rethrows.
+                throw new Error(clause.errors.map(e => e.message).join('; '));
             }
-            // Check for path conversion errors (previously thrown as UNSAFE_WARNING)
-            const msg = clause.errors.map(e => e.message).join('; ');
-            if( msg.includes(UNSAFE_WARNING) ) {
-                return false;
-            }
-            // Re-throw validation errors so standardTests error-handling tests still work.
-            // Capability-gap errors (e.g. $regex on SQLite) return undefined to skip.
-            if( msg.toLowerCase().includes('not well-defined') ) {
-                throw new Error(msg);
-            }
-            return undefined;
+            // `matched` is a definite non-match (an unresolvable path is a missing field); `unsupported` is an
+            // acknowledged capability gap that skips.
+            return outcome.kind === 'matched' ? outcome.value : undefined;
         }
 
         const queryStr = clause.where_clause_statement
             ? `SELECT * FROM ${table} WHERE ${clause.where_clause_statement}`
             : `SELECT * FROM ${table}`;
 
-        // A very wide clause (e.g. a 1000-key implicit $and over a record) can abort an accumulated PGlite heap
-        // at query time with 'memory access out of bounds', though a fresh heap runs the identical query fine —
-        // the same failure mode acquireSchema already rebuilds for on a large insert. Give a wide query a fresh
-        // instance and re-insert the single row, so the true verdict surfaces (never swallowed into a boolean).
-        let queryClient = client;
-        if (clause.statement_arguments.length >= 256) {
-            ({ client: queryClient } = await acquireSchema(0, true));
-            await queryClient.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [json]);
-        }
-
-        const result = await queryClient.query(queryStr, clause.statement_arguments);
-        return result.rows.length>0;
+        // A very wide clause needs a fresh heap so its true verdict surfaces (never swallowed into a crash).
+        const result = await runQueryWithHeapGuard(client, table, json, queryStr, clause.statement_arguments);
+        return result.rows.length > 0;
     }
 
     standardTests({
@@ -97,8 +72,13 @@ describe('postgres where clause builder', () => {
         expect,
         matchJavascriptObject:matchJavascriptObjectInDb,
         implementationName: 'postgres',
-        fuzz: { iterations: 100 }
+        fuzz: { iterations: 100 },
+        acknowledgements,
     })
+
+    test('capability manifest — the acknowledged-seam set has not drifted', () => {
+        assertNoCapabilityDrift(acknowledgements, POSTGRES_MANIFEST, expect);
+    });
 
     // A multi-scalar union field (boolean|number|string|null) must compare by strict JSON value-equality —
     // JSON `true` ≠ `1` ≠ `"true"` — reproducing matchJavascriptObject's `===`. A first-arm typed cast

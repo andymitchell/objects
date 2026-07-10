@@ -5,12 +5,13 @@ export type LikeComparison = 'equals' | 'startsWith' | 'endsWith' | 'contains';
  * A pattern SQLite can answer, or the reason it cannot.
  *
  * `not_well_defined` means the pattern is broken and no engine could honour it — the value-driven matcher throws
- * on it too, so a caller should reject the filter. `unsupported` means the pattern is valid but asks for more
- * than `LIKE` can express, which is a capability gap: a caller should decline rather than answer.
+ * on it too, so a caller should reject the filter. `options_unsupported` and `too_complex` mean the pattern is
+ * valid but asks for more than `LIKE` can express (a non-`i` flag, or any regex metacharacter) — a capability
+ * gap the caller should decline rather than answer.
  */
 export type LikeTranslation =
     | { readonly success: true; readonly comparison: LikeComparison; readonly operand: string }
-    | { readonly success: false; readonly reason: 'not_well_defined' | 'unsupported'; readonly message: string };
+    | { readonly success: false; readonly reason: 'not_well_defined' | 'options_unsupported' | 'too_complex'; readonly message: string };
 
 /**
  * Translate a `$regex` payload into a `LIKE` comparison, when one exists.
@@ -25,7 +26,7 @@ export type LikeTranslation =
  *
  * @example
  * translateRegexToLike('^ann', undefined);  // { success: true, comparison: 'startsWith', operand: 'ann%' }
- * translateRegexToLike('a.b', undefined);   // { success: false, reason: 'unsupported', … } — `.` is a wildcard
+ * translateRegexToLike('a.b', undefined);   // { success: false, reason: 'too_complex', … } — `.` is a wildcard
  * translateRegexToLike('a[', undefined);    // { success: false, reason: 'not_well_defined', … }
  *
  * @remarks
@@ -45,7 +46,7 @@ export function translateRegexToLike(pattern: string, options: string | undefine
 
     // Any flag other than `i` (m/s/u/y/…) changes matching in a way LIKE cannot reproduce.
     if ([...opts].some(flag => flag !== 'i')) {
-        return { success: false, reason: 'unsupported', message: '$regex $options is unsupported for SQLite LIKE translation' };
+        return { success: false, reason: 'options_unsupported', message: '$regex $options is unsupported for SQLite LIKE translation' };
     }
 
     const anchoredStart = pattern.startsWith('^');
@@ -58,7 +59,7 @@ export function translateRegexToLike(pattern: string, options: string | undefine
     // wildcard `.`, alternation `|`, a backslash escape, or a mid-string anchor `^`/`$` — is a genuine regex
     // feature LIKE cannot express. A body of literal characters (letters, digits, `-`, `%`, `_`) translates.
     if (/[[\](){}+*?.|\\^$]/.test(body)) {
-        return { success: false, reason: 'unsupported', message: '$regex pattern is too complex for SQLite LIKE translation' };
+        return { success: false, reason: 'too_complex', message: '$regex pattern is too complex for SQLite LIKE translation' };
     }
 
     const literal = body.replace(/%/g, '\\%').replace(/_/g, '\\_');

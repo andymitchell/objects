@@ -17,7 +17,7 @@ import type { SqlPredicate, TraverseArrayPredicate } from "../planSqlArrayTraver
 import { reconstructFieldCondition } from "../reconstructFieldCondition.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
-import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect, WhereClauseError } from "../types.ts";
+import type { IPropertyTranslator, PreparedStatementArgument, PreparedStatementArgumentOrObject, SqlDialect, WhereClauseError, WhereClauseFilterReasonCode } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
 import { emitMultiScalarPgComparison } from "./multiScalarPg.ts";
 import { arraySizeEquals, guardedJsonbArray, mapTypeToPostgres, pgRegexOptionPrefix, toJsonbParam } from "./pgJsonbFragments.ts";
@@ -133,9 +133,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      * pattern/flag — the JS oracle throws on those too); any other message routes it to a SKIP (a capability gap).
      * Pushed to conversionErrors so it surfaces whether or not the caller threaded an errors array.
      */
-    private pushRegexError(dotpropPath: string, filter: unknown, rootFilter: WhereFilterDefinition<T> | undefined, message: string): void {
+    private pushRegexError(dotpropPath: string, filter: unknown, rootFilter: WhereFilterDefinition<T> | undefined, reasonCode: WhereClauseFilterReasonCode, message: string): void {
         const sub = { [dotpropPath]: filter } as WhereFilterDefinition;
-        this.conversionErrors.push({ kind: 'filter', sub_filter: sub, root_filter: rootFilter ?? sub, message });
+        this.conversionErrors.push({ kind: 'filter', reasonCode, sub_filter: sub, root_filter: rootFilter ?? sub, message });
     }
 
     /**
@@ -746,13 +746,13 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         try {
             new RegExp(predicate.pattern, predicate.options);
         } catch {
-            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, `$regex is not well-defined: /${predicate.pattern}/${predicate.options ?? ''}`);
+            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, 'regex_invalid', `$regex is not well-defined: /${predicate.pattern}/${predicate.options ?? ''}`);
             return 'FALSE';
         }
         const prefix = pgRegexOptionPrefix(predicate.options);
         if (prefix === undefined) {
             // A valid JS flag Postgres cannot faithfully express (e.g. sticky/unicode) → capability gap (skip).
-            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, '$regex $options is unsupported for Postgres translation');
+            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, 'regex_options', '$regex $options is unsupported for Postgres translation');
             return 'FALSE';
         }
         const placeholder = this.generatePlaceholder(prefix + predicate.pattern, statementArguments);

@@ -2,7 +2,8 @@ import { createDraft } from "immer";
 import { z } from "zod";
 import matchJavascriptObjectReal, { compileMatchJavascriptObject, type ObjOrDraft } from "./matchJavascriptObject.js";
 import { type WhereFilterDefinition } from "./types.js";
-import { standardTests } from "./standardTests.js";
+import { standardTests, AcknowledgementCollector, assertNoCapabilityDrift } from "./standardTests.js";
+import { JS_MANIFEST } from "./standard-tests/manifests/js.manifest.ts";
 
 
 async function matchJavascriptObject<T extends Record<string, any>>(object: ObjOrDraft<T>, filter: WhereFilterDefinition<T>):Promise<ReturnType<typeof matchJavascriptObjectReal>> {
@@ -13,14 +14,21 @@ async function matchJavascriptObject<T extends Record<string, any>>(object: ObjO
 
 
 describe('testMatchJavascriptObject', () => {
-    
+
+    const acknowledgements = new AcknowledgementCollector();
+
     standardTests({
         test,
         expect,
         matchJavascriptObject,
         implementationName: 'javascript',
-        fuzz: { iterations: 300 }
+        fuzz: { iterations: 300 },
+        acknowledgements,
     })
+
+    test('capability manifest — the reference acknowledges no seam', () => {
+        assertNoCapabilityDrift(acknowledgements, JS_MANIFEST, expect);
+    });
 
 
     test('compiling', () => {

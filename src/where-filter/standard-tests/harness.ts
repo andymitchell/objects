@@ -1,5 +1,6 @@
 import type { ZodSchema } from "zod";
 import type { MatchJavascriptObject, WhereFilterDefinition } from "../types.ts";
+import type { AcknowledgementCollector } from "./outcomes.ts";
 
 /**
  * The one seam every conformance harness injects: given an object, a filter, and the object's schema,
@@ -27,6 +28,13 @@ export type StandardTestConfig = {
      * fewer than the pure-JS oracle).
      */
     fuzz?: { iterations?: number, seed?: number },
+    /**
+     * Optional sink for acknowledged seams (a filter the engine skipped as unsupported, or answered against
+     * spec as a documented divergence). When supplied, the assertion helpers record every acknowledgement here
+     * so a drift-guard test can freeze the set against a capability manifest. Behaviour is unchanged whether or
+     * not it is supplied — recording is a side effect, never a verdict.
+     */
+    acknowledgements?: AcknowledgementCollector,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -60,7 +68,10 @@ export type SectionCtx = {
  * Build the three assertion helpers a section uses, closed over the caller's `expect`, its
  * `errorsAsValues` contract, and `implementationName` (used in skip/divergence diagnostics).
  */
-export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues: boolean, implementationName: string) {
+export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues: boolean, implementationName: string, acknowledgements?: AcknowledgementCollector) {
+
+    /** The full `describe > … > test` name of the assertion in flight, so recorded seams stay distinct. */
+    const currentTestName = (): string => (expect as { getState?: () => { currentTestName?: string } }).getState?.()?.currentTestName ?? '';
 
     /** Replaces scattered `if (result === undefined) return` with explicit acknowledgement. */
     function expectOrAcknowledgeUnsupported(
@@ -69,7 +80,9 @@ export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues
         reason?: string
     ): void {
         if (result === undefined) {
-            console.warn(`[ACKNOWLEDGED UNSUPPORTED: ${implementationName}] ${reason ?? 'not supported'}`);
+            const note = reason ?? 'not supported';
+            console.warn(`[ACKNOWLEDGED UNSUPPORTED: ${implementationName}] ${note}`);
+            acknowledgements?.record({ kind: 'unsupported', reason: note, testName: currentTestName() });
             return;
         }
         expect(result).toBe(expected);
@@ -113,10 +126,12 @@ export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues
     ): void {
         if (result === undefined) {
             console.warn(`[ACKNOWLEDGED UNSUPPORTED: ${implementationName}] ${reason}`);
+            acknowledgements?.record({ kind: 'unsupported', reason, testName: currentTestName() });
             return;
         }
         if (result !== expected) {
             console.warn(`[ACKNOWLEDGED DIVERGENCE: ${implementationName}] ${reason}: got ${result}, spec says ${expected}`);
+            acknowledgements?.record({ kind: 'divergence', reason, testName: currentTestName() });
             return;
         }
         expect(result).toBe(expected);

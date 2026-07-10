@@ -55,7 +55,7 @@ export function standardTests(testConfig: StandardTestConfig): void {
         implementationName,
         errorsAsValues,
         fuzz: testConfig.fuzz,
-        ...makeHelpers(expect, errorsAsValues, implementationName),
+        ...makeHelpers(expect, errorsAsValues, implementationName, testConfig.acknowledgements),
     };
 
     registerFilterForms(ctx);

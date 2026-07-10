@@ -98,6 +98,36 @@ export async function acquireSchema(payloadBytes = 0, forceRebuild = false): Pro
     };
 }
 
+/**
+ * A query at or above this many bound arguments gets a fresh heap before it runs.
+ *
+ * A very wide clause (e.g. a 1000-key implicit `$and` over a record) can abort an accumulated PGlite heap at
+ * query time with `memory access out of bounds`, though a fresh heap runs the identical query fine — the same
+ * failure mode {@link acquireSchema} already rebuilds for on a large insert.
+ */
+const HEAP_GUARD_REBUILD_ARG_COUNT = 256;
+
+/**
+ * Run one prepared SELECT against the shared PGlite, rebuilding the heap first for a very wide query so its true
+ * verdict surfaces rather than being swallowed into a crash. A query below the argument threshold runs on the
+ * client the row was inserted into; a wide one gets a fresh instance with its single row re-inserted.
+ *
+ * @param client The client the single row was inserted into (used when no rebuild is needed).
+ * @param table The fully-qualified shared table, so the row can be re-inserted after a rebuild.
+ * @param json The single row's JSON, re-inserted verbatim after a rebuild.
+ * @param queryStr The SELECT to execute.
+ * @param args The clause's bound arguments; their count decides whether a rebuild is warranted.
+ * @returns The query result; the caller reads `rows.length` for the match verdict.
+ */
+export async function runQueryWithHeapGuard(client: PGlite, table: string, json: string, queryStr: string, args: unknown[]): Promise<{ rows: unknown[] }> {
+    let queryClient = client;
+    if (args.length >= HEAP_GUARD_REBUILD_ARG_COUNT) {
+        ({ client: queryClient } = await acquireSchema(0, true));
+        await queryClient.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [json]);
+    }
+    return queryClient.query(queryStr, args);
+}
+
 /** No-op: the shared table is cleared on the next {@link acquireSchema}. Kept for the `afterEach` contract. */
 export async function disposeAllForTest(): Promise<void> {
     // Intentionally empty — see the module note.

@@ -18,7 +18,7 @@ import type { SqlPredicate, TraverseArrayPredicate } from "../planSqlArrayTraver
 import { reconstructFieldCondition } from "../reconstructFieldCondition.ts";
 import { compileWhereFilterRecursive } from "../compileWhereFilter.ts";
 import { isPreparedStatementArgument } from "../types.ts";
-import type { IPropertyTranslator, PreparedStatementArgument, SqlDialect, WhereClauseError } from "../types.ts";
+import type { IPropertyTranslator, PreparedStatementArgument, SqlDialect, WhereClauseError, WhereClauseFilterReasonCode } from "../types.ts";
 import { ValueComparisonRangeOperatorsSqlFunctions } from "../sharedSqlOperators.ts";
 import { emitMultiScalarComparison } from "./multiScalarSqlite.ts";
 import { arraySizeEquals, asScalarOperand, jsonDeepEquals, jsonTypeTest, strictJsonValueEquals } from "./sqliteJsonFragments.ts";
@@ -114,9 +114,9 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
      * LIKE cannot express). Pushed to conversionErrors so it surfaces whether or not the caller threaded an errors
      * array (e.g. from inside $elemMatch).
      */
-    private pushRegexError(dotpropPath: string, filter: unknown, rootFilter: WhereFilterDefinition<T>, message: string): void {
+    private pushRegexError(dotpropPath: string, filter: unknown, rootFilter: WhereFilterDefinition<T>, reasonCode: WhereClauseFilterReasonCode, message: string): void {
         const sub = { [dotpropPath]: filter } as WhereFilterDefinition;
-        this.conversionErrors.push({ kind: 'filter', sub_filter: sub, root_filter: rootFilter, message });
+        this.conversionErrors.push({ kind: 'filter', reasonCode, sub_filter: sub, root_filter: rootFilter, message });
     }
 
     /** A path-conversion error in the shape the shared converter produces, so callers classify it uniformly. */
@@ -724,7 +724,9 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
 
         const translation = translateRegexToLike(predicate.pattern, predicate.options);
         if (!translation.success) {
-            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, translation.message);
+            const reasonCode = translation.reason === 'not_well_defined' ? 'regex_invalid'
+                : translation.reason === 'options_unsupported' ? 'regex_options' : 'regex_too_complex';
+            this.pushRegexError(dotpropPath, reconstructFieldCondition(predicate), rootFilter, reasonCode, translation.message);
             return 'FALSE';
         }
 

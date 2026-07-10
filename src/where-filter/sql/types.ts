@@ -37,9 +37,19 @@ export interface IPropertyTranslator<T extends Record<string, any>> {
     generateSql(dotpropPath: string, filter: WhereFilterDefinition<T>, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string;
 }
 
+/**
+ * Why a filter-level compilation failure occurred, as a stable machine-readable code rather than a
+ * substring of the human message. A consumer decides an outcome from this code, not from the prose:
+ * `malformed_filter` and `regex_invalid` are REJECTIONS (a broken filter — the value-driven matcher throws
+ * on them too), whereas `regex_options` and `regex_too_complex` are CAPABILITY GAPS (a valid filter this
+ * dialect cannot express — decline rather than answer).
+ */
+export type WhereClauseFilterReasonCode = 'malformed_filter' | 'regex_invalid' | 'regex_options' | 'regex_too_complex';
+
 /** Error from a sub-filter that could not be compiled to SQL (has filter context). */
 export type WhereClauseFilterError = {
     kind: 'filter';
+    reasonCode: WhereClauseFilterReasonCode;
     sub_filter: WhereFilterDefinition;
     root_filter: WhereFilterDefinition;
     message: string;

@@ -232,3 +232,17 @@ export const StructuralArraySchema = z.object({
     objMatrix: z.array(z.array(z.object({ a: z.number(), b: z.number() }).strict())).optional(),
 }).strict();
 export type StructuralArray = z.infer<typeof StructuralArraySchema>;
+
+/**
+ * An array of records whose scalar member is both nullable and optional — so an element can present the
+ * member key holding a JSON null, present it holding a string, or omit it entirely. The member's PRESENCE,
+ * not its value, is load-bearing: it separates a present-but-null member (the key exists) from an absent
+ * member and from an empty outer array (no element to carry the key). This is the shape where a
+ * `hasOwnProperty` presence test and a text-projecting SQL accessor disagree — a JSON null projected as text
+ * collapses to SQL NULL and reads as absent — unless the SQL engine probes the element with `jsonb_typeof`.
+ */
+export const NullableMemberArraySchema = z.object({
+    id: z.string(),
+    items: z.array(z.object({ value: z.string().nullable().optional() }).strict()),
+}).strict();
+export type NullableMemberArray = z.infer<typeof NullableMemberArraySchema>;

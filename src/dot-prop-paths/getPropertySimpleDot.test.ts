@@ -45,6 +45,21 @@ describe('getPropertySpreadingArrays test', () => {
 
     })
 
+    test('a present-but-falsy member under an array is surfaced, distinct from an absent one', () => {
+        // A leaf that exists but holds null / 0 / '' / false is a PRESENT value — it must be returned with that
+        // value, not dropped. Dropping it (a truthiness test) would make it indistinguishable from an absent
+        // member, so a downstream `$exists` on the array-descended path would wrongly answer false.
+        expect(getPropertySpreadingArrays({ items: [{ value: null }] }, 'items.value')).toEqual([{ path: 'items[0].value', value: null }]);
+        expect(getPropertySpreadingArrays({ items: [{ value: 0 }] }, 'items.value')).toEqual([{ path: 'items[0].value', value: 0 }]);
+        expect(getPropertySpreadingArrays({ items: [{ value: '' }] }, 'items.value')).toEqual([{ path: 'items[0].value', value: '' }]);
+        expect(getPropertySpreadingArrays({ items: [{ value: false }] }, 'items.value')).toEqual([{ path: 'items[0].value', value: false }]);
+
+        // An absent member — and an empty outer array with no element to carry the member — find nothing, so
+        // they yield the single not-found entry (`value: undefined`), matching `getProperty`.
+        expect(getPropertySpreadingArrays({ items: [{}] }, 'items.value')).toEqual([{ path: '', value: undefined }]);
+        expect(getPropertySpreadingArrays({ items: [] }, 'items.value')).toEqual([{ path: '', value: undefined }]);
+    })
+
     test('large array spread resolves in linear time (no O(N^2) accumulator)', () => {
         const N = 50_000;
         const src = { items: Array.from({ length: N }, (_, i) => ({ id: `v${i}` })) };

@@ -90,8 +90,10 @@ export function getPropertySpreadingArraysFlat<T extends Record<string, any> | R
  *
  * @param object the value to read.
  * @param dotPath the dot-prop path, where `\.` is a literal dot inside a key rather than a separator.
- * @returns one entry per value found. A path that finds nothing yields a single entry whose `value` is
- *   `undefined`, matching `getProperty`.
+ * @returns one entry per value found — a present leaf surfaces its value even when that value is `null` (or
+ *   otherwise falsy, e.g. `0` / `''` / `false`), so a present-but-null member is distinguishable from an
+ *   absent one. A path that finds nothing yields a single entry whose `value` is `undefined`, matching
+ *   `getProperty`.
  *
  * @example
  * getPropertySpreadingArrays({ log: [{ id: 1 }, { id: 2 }] }, 'log.id');
@@ -157,7 +159,12 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
             // Recurse into it
             results = [...results, ..._getPropertySpreadingArrays(object, remaining, traversalPath)];
         } else if( pathLength===count ) {
-            if( object ) {
+            // The whole path resolved to a leaf. Surface it whenever the final key held a value — including a
+            // falsy one (`null` / `0` / `''` / `false`). A truthiness test here would drop a present-but-null
+            // (or otherwise falsy) leaf and misreport it as missing, so `$exists` on an array-descended member
+            // (`items.value` over `items: [{ value: null }]`) would wrongly answer false. Only `undefined` —
+            // the key was absent — counts as no leaf, matching `getProperty`.
+            if( object !== undefined ) {
                 results.push({path: traversalPath, value: object}); // Leaf
             }
         }

@@ -1,4 +1,4 @@
-import { NestedScalarArraySchema, SpreadNestedSchema, type NestedScalarArray, type SpreadNested } from "./fixtures.ts";
+import { NestedScalarArraySchema, SpreadNestedSchema, NullableMemberArraySchema, type NestedScalarArray, type SpreadNested, type NullableMemberArray } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
@@ -436,6 +436,43 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 expect(await noLeafArray({ id: 'x', groups: [{ tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(false);
                 // The first leaf array holds none of them, so it satisfies $nin — pooling both leaves would wrongly see 'x'.
                 expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+            });
+        });
+
+        // ── An array-descended $exists tests member PRESENCE, not the member's value ────────────────
+        //
+        // `items.value` reaches the `value` of each `items` element. A member that is present but holds a
+        // JSON null still EXISTS — presence is `hasOwnProperty`, not "holds a non-null value". An element that
+        // omits the member, and an empty outer array (no element to carry it), are both missing. A SQL engine
+        // that projects the leaf as text collapses a JSON null to SQL NULL and would misread the present-null
+        // member as missing; probing each spread element with `jsonb_typeof` keeps present-null distinct from
+        // absent, so every engine agrees the present-null member exists while the absent member does not.
+        describe('an array-descended $exists tests member presence, counting a present-but-null member', () => {
+            const onItems = (row: NullableMemberArray, filter: unknown) =>
+                matchJavascriptObject(row, filter as WhereFilterDefinition<NullableMemberArray>, NullableMemberArraySchema);
+
+            const nullMember: NullableMemberArray = { id: 'x', items: [{ value: null }] };
+            const stringMember: NullableMemberArray = { id: 'x', items: [{ value: 'v' }] };
+            const absentMember: NullableMemberArray = { id: 'x', items: [{}] };
+            const noElements: NullableMemberArray = { id: 'x', items: [] };
+
+            test('$exists:true matches a present-but-null member', async () => {
+                expect(await onItems(nullMember, { 'items.value': { $exists: true } })).toBe(true);
+            });
+            test('$exists:true matches a present string member', async () => {
+                expect(await onItems(stringMember, { 'items.value': { $exists: true } })).toBe(true);
+            });
+            test('$exists:true does not match when every element omits the member key', async () => {
+                expect(await onItems(absentMember, { 'items.value': { $exists: true } })).toBe(false);
+            });
+            test('$exists:true does not match when there is no element to carry the member', async () => {
+                expect(await onItems(noElements, { 'items.value': { $exists: true } })).toBe(false);
+            });
+            test('$exists:false is the exact negation — true only when the member is absent, never for present-null', async () => {
+                expect(await onItems(nullMember, { 'items.value': { $exists: false } })).toBe(false);
+                expect(await onItems(stringMember, { 'items.value': { $exists: false } })).toBe(false);
+                expect(await onItems(absentMember, { 'items.value': { $exists: false } })).toBe(true);
+                expect(await onItems(noElements, { 'items.value': { $exists: false } })).toBe(true);
             });
         });
 

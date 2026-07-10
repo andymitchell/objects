@@ -20,8 +20,8 @@
 /** Why a walked value cannot losslessly round-trip JSON. Shared by the write-payload value-gate and the `where`-operand gate. */
 export type NonJsonValueReason = "non_finite" | "malformed";
 
-/** One non-serialisable value found by {@link findNonJsonValues}, located by its dot-path beneath the walk root (omitted at the root). */
-export type NonJsonValueIssue = { reason: NonJsonValueReason; path?: string };
+/** One non-serialisable value found by {@link findNonJsonValues}, located by its dot-path beneath the walk root (`undefined` at the root). */
+export type NonJsonValueIssue = { reason: NonJsonValueReason; path?: string | undefined };
 
 /**
  * Collect EVERY value under `value` that cannot losslessly round-trip JSON — the `SerialisableJsonSubset` walk.

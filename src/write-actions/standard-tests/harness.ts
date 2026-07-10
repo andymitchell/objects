@@ -21,7 +21,7 @@ export type WriteTestAdapter<T extends Record<string, any>> = {
         writeActions: WriteAction<T>[],
         schema: z.ZodType<T, any, any>,
         ddl: DDL<T>,
-        options?: { atomic?: boolean, attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update' },
+        options?: { atomic?: boolean, attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update' } | undefined,
     }) => Promise<WriteTestAdapterResult<T>>
 }
 

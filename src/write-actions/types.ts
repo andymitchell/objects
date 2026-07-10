@@ -149,12 +149,12 @@ export type WriteAction<
  * if (error.type === 'schema') console.log(error.issues);
  */
 export type WriteError =
-  | { type: "custom"; message?: string }
+  | { type: "custom"; message?: string | undefined }
   | {
       type: "schema";
       issues: ZodIssue[];
       /** The (Zod) schema that is a jsonified `TreeNode`. `TreeNode` was replaced by JsonValueCapped because consumers (like ICollection) need the errors to be fully serialisable, and TreeNode had a) a Zod schema on it, b) a potentially-cyclical parent */
-      serialised_schema?: JsonValueCapped;
+      serialised_schema?: JsonValueCapped | undefined;
     }
   | {
       type: "missing_key";
@@ -189,7 +189,7 @@ export type WriteError =
        */
       type: "invalid_filter";
       /** The offending dot-prop path within the `where`, when one field can be singled out. */
-      where_path?: string;
+      where_path?: string | undefined;
       /** Why the `where` was rejected. */
       reason: "unknown_field" | "type_mismatch" | "non_finite" | "malformed";
     }
@@ -204,7 +204,7 @@ export type WriteError =
        */
       type: "invalid_data_value";
       /** The dot-prop path to the offending value within the payload's data, when one can be singled out. */
-      data_path?: string;
+      data_path?: string | undefined;
       /** Why the value cannot be persisted as JSON. */
       reason: "non_finite" | "malformed";
     }
@@ -283,11 +283,11 @@ export type WriteOutcomeFailedCore<
   /** The action's errors; always at least one. A blocked action carries a single `blocked` error. */
   errors: [WriteErrorContext, ...WriteErrorContext[]];
   /** True if the action can never succeed (e.g. schema violation, permission denied). */
-  unrecoverable?: boolean;
+  unrecoverable?: boolean | undefined;
   /** Don't retry until this timestamp. */
-  back_off_until_ts?: number;
+  back_off_until_ts?: number | undefined;
   /** An earlier action failed, blocking this one. */
-  blocked_by_action_uuid?: string;
+  blocked_by_action_uuid?: string | undefined;
 };
 
 /**
@@ -315,7 +315,7 @@ export type WriteOutcomeOk<
   T extends Record<string, any> = Record<string, any>,
   W extends Record<string, any> = T,
   WF extends Record<string, any> = T,
-> = WriteOutcomeOkCore<T, W, WF> & { affected_items?: WriteAffectedItem<T>[] };
+> = WriteOutcomeOkCore<T, W, WF> & { affected_items?: WriteAffectedItem<T>[] | undefined };
 
 /**
  * A write action that failed. `errors` is always present with at least one entry.
@@ -328,13 +328,13 @@ export type WriteOutcomeFailed<
   W extends Record<string, any> = T,
   WF extends Record<string, any> = T,
 > = WriteOutcomeFailedCore<T, W, WF> & {
-  affected_items?: WriteAffectedItem<T>[];
+  affected_items?: WriteAffectedItem<T>[] | undefined;
   /**
    * The resolved post-merge item that violated the schema — an in-process diagnostic for logging.
    * Holds the offending value as-is (which may be non-JSON), so it never crosses a serialisation
    * boundary: the `*Core` projection drops it, and a logger redacts it when recording.
    */
-  tested_item?: T;
+  tested_item?: T | undefined;
 };
 
 /**
@@ -371,5 +371,5 @@ export type WriteResult<
   /** All action outcomes in execution order. */
   actions: WriteOutcome<T, W, WF>[];
   /** Lightweight summary; only present when `ok` is false. */
-  error?: { message: string };
+  error?: { message: string } | undefined;
 };

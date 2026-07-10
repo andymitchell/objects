@@ -37,7 +37,7 @@ type EmitContext = {
     /** The expression holding the value under comparison, when it is an array element rather than the field. */
     readonly customSqlIdentifier?: string;
     /** A spread element's raw `value`/`type` columns, so a mixed-scalar element compares type-faithfully. */
-    readonly customSpread?: { valueExpr: string, typeExpr: string };
+    readonly customSpread?: { valueExpr: string, typeExpr: string } | undefined;
     /** The path crosses an array but ends at a scalar or object, which is read from every spread element. */
     readonly spreadLeafBelowArray?: boolean;
 };

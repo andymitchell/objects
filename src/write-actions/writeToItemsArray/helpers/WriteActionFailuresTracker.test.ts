@@ -41,7 +41,7 @@ const RichSchema = z
 type RichItem = z.infer<typeof RichSchema>;
 const invalidRich: RichItem = { id: "r1", tags: [""], score: null, flag: false };
 
-type LazyItem = { id: string; child?: LazyItem };
+type LazyItem = { id: string; child?: LazyItem | undefined };
 const LazySchema: z.ZodType<LazyItem> = z.lazy(() =>
   z.object({ id: z.string().min(3), child: LazySchema.optional() }),
 );

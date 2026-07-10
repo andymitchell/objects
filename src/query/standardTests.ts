@@ -41,11 +41,11 @@ type StandardTestConfig<T extends Record<string, any> = StandardTestItem> = {
      * for per-test gating: tests whose sort keys aren't in the allowlist register as
      * `it.skip` rather than running.
      *
-     * Omit to use `STANDARD_TEST_DDL` (= arbitrary — every test runs). Provide a DDL
+     * Omit (or pass `undefined`) to use `STANDARD_TEST_DDL` (= arbitrary — every test runs). Provide a DDL
      * with restricted `sortable_keys` to declare a limited set; e.g. Gmail bridge
      * passes `sortable_keys: []` so all sort tests skip statically.
      */
-    ddl?: DDL<T>;
+    ddl?: DDL<T> | undefined;
     /**
      * Optional `describe` override. Defaults to vitest's `describe`. Useful for
      * meta-tests that want to inspect what `standardTests` registers without

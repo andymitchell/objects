@@ -26,13 +26,15 @@ export type TreeNode = {
     dotprop_path: string,
     kind: ZodKind,
     children: TreeNode[],
-    schema?: AnyZodSchema,
-    nameless_array_element?: boolean,
-    parent?: TreeNode,
-    descended_from_array?: boolean,
-    optional_or_nullable?: boolean,
+    // The optionals allow an explicit `undefined` to match what the colocated Zod schema's `.optional()` infers
+    // (and how the builder assigns them from possibly-absent sources).
+    schema?: AnyZodSchema | undefined,
+    nameless_array_element?: boolean | undefined,
+    parent?: TreeNode | undefined,
+    descended_from_array?: boolean | undefined,
+    optional_or_nullable?: boolean | undefined,
     /** True when this node is one variant of a union parent. */
-    union_variant?: boolean
+    union_variant?: boolean | undefined
 }
 export const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
   z.object({

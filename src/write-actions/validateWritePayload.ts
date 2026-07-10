@@ -86,8 +86,8 @@ export type WriteSchemaIssueReason =
 export type WritePayloadSchemaIssue = {
   kind: "unsupported" | "indeterminate";
   reason: WriteSchemaIssueReason;
-  path?: string;
-  declaredType?: string;
+  path?: string | undefined;
+  declaredType?: string | undefined;
   message: string;
 };
 

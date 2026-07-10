@@ -45,6 +45,31 @@ to include `undefined` implicitly. Sites where the stricter equality changes an 
 investigated individually rather than suppressed — each such site is a real question about whether the
 property means "absent" or "present and undefined".
 
+**Outcome (implemented)**: Enabling the flag induced 44 type errors, all resolved without suppression and
+with no runtime behaviour change (the full suite stays green).
+
+- *The `isTypeEqual<z.infer<Schema>, HandWrittenType>` assertions that broke (`WriteError`,
+  `WriteOutcomeOk`/`WriteOutcomeFailed`/`WriteOutcome`, `WriteResult`) were NOT real bugs.* Under the flag a
+  Zod `.optional()` infers `key?: T | undefined`, but the hand-written twin declared `key?: T`. The schema is
+  the source of truth (`z.infer`), so each hand-written optional was widened to `| undefined` to re-align —
+  a type-honesty change, not a behaviour change. Fields touched: `WriteError.message`/`serialised_schema`/
+  `where_path`/`data_path`; `WriteOutcome*.affected_items`/`tested_item`/`unrecoverable`/`back_off_until_ts`/
+  `blocked_by_action_uuid`; `WriteResult.error`.
+- *The remaining errors were mechanical `| undefined` widenings* on issue and config types
+  (`NonJsonValueIssue`, `WhereFilterValidationIssue`, `WritePayloadSchemaIssue`, both SQL `EmitContext`s,
+  `TreeNode`, `WriteToItemsArrayOptions`, the query `StandardTestConfig.ddl`, the write-adapter `options`),
+  each of which is legitimately present-and-undefined at a construction site, plus two test fixtures that
+  passed an explicit `undefined` (dropped).
+- *`constrainDeltaToFilter` was fixed at the construction site, not by widening the type.* Widening
+  `ObjectsDeltaApplicable`'s optionals would break its `Required<ObjectsDeltaApplicable> extends ObjectsDelta`
+  alignment assertion, so instead `created_at` is copied only when present and the `upsert` read is hoisted to
+  a narrowed const — behaviour-identical (`isObjectsDeltaFast` classification is unaffected).
+- *The present-undefined type gap partly closed.* `{ $gt: undefined }` and `{ $or: undefined }` are now
+  compile errors, matching the runtime gate. A residual gap remains: a present-undefined operator *beside* a
+  defined one (`{ $gte: 18, $ne: undefined }`) still compiles, because the payload matches the union member
+  its defined operator satisfies and the extra key is not excess-checked away. The runtime gate still rejects
+  it (§25).
+
 ---
 
 ## 3. Operand types exclude `bigint` and `symbol` only
@@ -62,6 +87,12 @@ representation at all. A recursive mapping would close the remaining hole, but c
 already-large filter unions carry a real risk of degrading editor responsiveness, and a `Date`-typed field
 would collapse its operand to `never` — a worse developer experience than a runtime error with a clear
 message.
+
+**Outcome (implemented)**: `Exclude<T, bigint | symbol>` is applied at the bare-value position
+(`ValueComparisonFlexi`) and to `$all` elements (`ArrayValueComparisonAll`). The equality-family operands
+(`$eq`/`$ne`/`$in`/`$nin`) already collapse `bigint`/`symbol` to `never` through their own conditional
+narrowing, so they needed no change. Compile pins (`types.test.ts`) fix a bare `bigint` and a `bigint` `$all`
+element as errors, and pin that a bare `Date` still compiles — the shallow exclusion by design.
 
 **Future work**: Measure a full `JsonCompatible<T>` under `tsc --extendedDiagnostics` and
 `--generateTrace`, on representative deep schemas, before adopting. Until then, the `Date` /

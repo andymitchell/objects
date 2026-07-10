@@ -1,9 +1,14 @@
 import { ContactSchema } from "./fixtures.ts";
 import type { SectionCtx } from "./harness.ts";
+import type { WhereFilterDefinition } from "../types.ts";
 
 /** §5. Edge cases. */
 export function registerEdgeCases(ctx: SectionCtx): void {
     const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+
+    // A field explicitly set to `undefined` is a deliberately-malformed filter value the compile-time type now
+    // rejects (see types.test.ts); this states it verbatim to keep the runtime "never matches" behaviour tested.
+    const bad = (f: unknown): WhereFilterDefinition => f as WhereFilterDefinition;
 
     describe('5. Edge cases', () => {
 
@@ -32,11 +37,11 @@ export function registerEdgeCases(ctx: SectionCtx): void {
                         emailAddress: 'andy@andy.com'
                     }
                 },
-                {
+                bad({
                     $or: [
                         { 'contact.name': undefined }
                     ]
-                },
+                }),
                 ContactSchema
             );
 

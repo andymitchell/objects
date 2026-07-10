@@ -280,14 +280,13 @@ export function registerFilterForms(ctx: SectionCtx): void {
                         threadIDG2: string,
                         threadIDG3: string
                     },
-                    softDeletedAtTs?: number
+                    softDeletedAtTs?: number | undefined
                 }>(
                     {
                         "emailCvID": {
                             "threadIDG2": "18d7e59910a07184",
                             "threadIDG3": "thread-a:r-8214939282543103627",
-                        },
-                        "softDeletedAtTs": undefined
+                        }
                     },
                     {
                         "$and": [

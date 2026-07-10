@@ -1114,14 +1114,24 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
         });
     });
 
-    describe('present-undefined operator values compile but are rejected at runtime (§25)', () => {
-        // These COMPILE because exactOptionalPropertyTypes is off (an optional `$gt?: number` admits `undefined`).
-        // The type will NOT be tightened by this work; §25 rejects them at the runtime gate instead. Plain
-        // compiling assignments document the direction of the gap (type accepts, runtime rejects).
-        it('gap: a lone present-undefined operator compiles', () => {
-            const a: WhereFilterDefinition<NumberDoc> = { age: { $gt: undefined } };
+    describe('present-undefined operator values are rejected by the type (exactOptionalPropertyTypes)', () => {
+        // With exactOptionalPropertyTypes ON, an optional operator (`$gt?: number`) no longer admits a present
+        // `undefined`, so a lone present-undefined operator is a compile error — the type now agrees with the
+        // runtime gate (§25), which also rejects it.
+        it('a lone present-undefined operator is a type error', () => {
+            const a: WhereFilterDefinition<NumberDoc> = {
+                // @ts-expect-error present-undefined $gt is rejected under exactOptionalPropertyTypes
+                age: { $gt: undefined }
+            };
         });
-        it('gap: a present-undefined operator beside a defined one compiles', () => {
+        it('a present-undefined logic operator is a type error', () => {
+            // @ts-expect-error present-undefined $or is rejected under exactOptionalPropertyTypes (error is at the assignment, not the property)
+            const a: WhereFilterDefinition<NumberDoc> = { $or: undefined };
+        });
+        // RESIDUAL GAP: a present-undefined operator BESIDE a defined one still compiles — the payload matches the
+        // union member its defined operator satisfies, and the extra present-undefined key is not excess-checked
+        // away. §25 rejects it at the runtime gate.
+        it('gap: a present-undefined operator beside a defined one still compiles', () => {
             const a: WhereFilterDefinition<NumberDoc> = { age: { $gte: 18, $ne: undefined } };
         });
         it('control: a cross-CATEGORY mix ($in + $size) on a scalar path stays a type error', () => {
@@ -1129,6 +1139,28 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
                 // @ts-expect-error $size is an array operator; it is not valid on a scalar (number) field alongside $in
                 age: { $in: [1], $size: 2 }
             };
+        });
+    });
+
+    describe('non-JSON bare operands are shallow-excluded (bigint | symbol)', () => {
+        // The runtime gate rejects bigint/symbol operands (they cannot round-trip JSON — MONGO-DIVERGENCES.md #9);
+        // the type now rejects a top-level one too. The exclusion is SHALLOW: a Date (or a bigint nested inside an
+        // object operand) still compiles — a documented residual hole (DECISIONS.md; a full JsonCompatible is deferred).
+        // `satisfies` checks assignability without declaring a variable, so these pins add no unused-local noise.
+        type JsonHoleDoc = { big: bigint; when: Date; bigs: bigint[] };
+
+        it('a bare bigint value is a type error', () => {
+            // @ts-expect-error bigint is excluded from the bare-value domain
+            ({ big: 1n }) satisfies WhereFilterDefinition<JsonHoleDoc>;
+        });
+        it('a bigint $all element is a type error', () => {
+            ({
+                // @ts-expect-error bigint is excluded from the $all operand domain
+                bigs: { $all: [1n] }
+            }) satisfies WhereFilterDefinition<JsonHoleDoc>;
+        });
+        it('residual hole: a bare Date value still compiles (shallow exclusion does not reach it)', () => {
+            ({ when: new Date() }) satisfies WhereFilterDefinition<JsonHoleDoc>;
         });
     });
 });

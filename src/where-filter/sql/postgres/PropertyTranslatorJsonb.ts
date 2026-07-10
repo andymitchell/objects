@@ -36,7 +36,7 @@ type EmitContext = {
     /** The expression holding the value under comparison, when it is an array element rather than the field. */
     readonly customSqlIdentifier?: string;
     /** A spread element's raw jsonb column, so a mixed-scalar element compares type-faithfully (JSON `7` ≠ `"7"`). */
-    readonly customRawJsonb?: string;
+    readonly customRawJsonb?: string | undefined;
     /** The path crosses an array but ends at a scalar or object, which is read from every spread element. */
     readonly spreadLeafBelowArray?: boolean;
 };

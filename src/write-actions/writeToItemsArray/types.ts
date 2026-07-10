@@ -20,7 +20,7 @@ export type WriteToItemsArrayOptions = {
      *   `{id:'1', text:'hello'}` — it doesn't contradict anything.
      * - `'always-update'` — convert the duplicate create into an update and continue.
      */
-    attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update',
+    attempt_recover_duplicate_create?: 'never' | 'if-convergent' | 'always-update' | undefined,
 
     /**
      * Either all actions occur, or none (i.e. if 1 fails, they all fail).
@@ -29,7 +29,7 @@ export type WriteToItemsArrayOptions = {
      *
      * @default false
      */
-    atomic?: boolean
+    atomic?: boolean | undefined
 
     /**
      * Mutate in-place instead of cloning the array/objects when they update.

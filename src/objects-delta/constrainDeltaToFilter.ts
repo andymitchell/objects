@@ -86,17 +86,19 @@ export function constrainDeltaToFilter<T extends Record<string, any>, D extends 
         
         const deletedKeys = new Set<PrimaryKeyValue>([...(delta.remove_keys ?? []), ...deletedMap.keys()]);
 
-        // Type as ObjectsDeltaApplicable as it is conveniently a partial, which helps us construct it piece by piece 
-        const replacedDelta:ObjectsDeltaApplicable<T> = {
-            created_at: delta.created_at, // Preserve, as we're not changing any of the objects, we're just potentially narrowing them. 
-        }
+        // Type as ObjectsDeltaApplicable as it is conveniently a partial, which helps us construct it piece by piece
+        const replacedDelta:ObjectsDeltaApplicable<T> = {};
+        // Preserve created_at, as we're not changing any of the objects, we're just potentially narrowing them.
+        // An applicable delta may legitimately carry none, so it is copied only when present.
+        if( delta.created_at !== undefined ) replacedDelta.created_at = delta.created_at;
 
         // Only bring over the properties it previously had (same format)
         // If no changes for a property, retain the old array (for referential comparison)
         if( delta.insert ) replacedDelta.insert = addChanges? updatedObjectArrays.insert : delta.insert;
         if( delta.update ) replacedDelta.update = updateChanges? updatedObjectArrays.update : delta.update;
         if( delta.remove_keys || deletedKeys.size>0 ) replacedDelta.remove_keys = [...deletedKeys];
-        if( (delta as ObjectsDeltaApplicable<T>).upsert ) replacedDelta.upsert = upsertChanges? updatedObjectArrays.upsert : (delta as ObjectsDeltaApplicable<T>).upsert;
+        const existingUpsert = (delta as ObjectsDeltaApplicable<T>).upsert;
+        if( existingUpsert ) replacedDelta.upsert = upsertChanges? updatedObjectArrays.upsert : existingUpsert;
 
         return replacedDelta as D;
     } else {

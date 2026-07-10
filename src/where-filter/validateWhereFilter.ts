@@ -84,7 +84,7 @@ import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonV
 
 /** One reason a filter is invalid, with the offending field path (absent for whole-filter `malformed`). */
 export type WhereFilterValidationIssue = {
-    path?: string;
+    path?: string | undefined;
     reason: "unknown_field" | "type_mismatch" | "non_finite" | "malformed";
     message: string;
 };

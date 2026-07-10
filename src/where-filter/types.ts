@@ -50,13 +50,24 @@ export type ValueComparisonFlexi<T = any> =
     | ValueComparisonNot<T>
     | ValueComparisonExists
     | ValueComparisonType
-    | T;
+    // Bare value. `bigint`/`symbol` are excluded because they cannot round-trip JSON — the runtime gate
+    // rejects them (MONGO-DIVERGENCES.md #9), and this makes a bare `bigint` operand a compile error too. The
+    // exclusion is shallow (top-level only) and does not reach `Date`/`Map`/class instances nested in an object
+    // operand — see DECISIONS.md (a full `JsonCompatible` recursion is deferred for its type-check cost).
+    | Exclude<T, bigint | symbol>;
 /** Internal: carries index-sig depth through recursive WhereFilterDefinition references. */
 type WhereFilterCore<T extends Record<string, any>, ISD extends number> =
     PartialObjectFilter<T, ISD> | LogicFilter<T, ISD>;
 
 export type ArrayValueComparisonElemMatch<T = any, ISD extends number = 2>  = {$elemMatch: T extends Record<string, any>? WhereFilterCore<T, ISD> : ValueComparisonFlexi<T>};
-export type ArrayValueComparisonAll<T = any> = { $all: T[] };
+// `$all` operands are DATA, and share the bare value's JSON-serialisable domain: `bigint`/`symbol` elements
+// are excluded (shallow — see {@link ValueComparisonFlexi} and DECISIONS.md).
+export type ArrayValueComparisonAll<T = any> = { $all: Exclude<T, bigint | symbol>[] };
+/**
+ * `$size` matches an array of exactly `n` elements. The type is a plain `number`, but the runtime gate
+ * enforces a non-negative integer — a float or negative `$size` is rejected as malformed (§25), a constraint
+ * TypeScript cannot express in the type.
+ */
 export type ArrayValueComparisonSize = { $size: number };
 export type ArrayValueComparison<T = any, ISD extends number = 2> = ArrayValueComparisonElemMatch<T, ISD> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
 

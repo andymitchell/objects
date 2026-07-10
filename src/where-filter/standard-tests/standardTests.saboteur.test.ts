@@ -10,8 +10,7 @@ import { DEFAULT_FUZZ_SEED, NESTED_ARRAY_PATH } from "./fuzz-internals.ts";
  * TEETH for §24. This dev-only harness proves the fuzz section actually catches misbehaving matchers
  * rather than passing everything. It runs ONLY `runFuzzSection` (the full battery accrues expected-fail
  * reds, so it is the wrong yardstick) against:
- *   - the HONEST reference matcher → it must pass every property whose law its semantics satisfy, and fail
- *     exactly {@link REFERENCE_VIOLATED_PROPERTIES};
+ *   - the HONEST reference matcher → every property must pass;
  *   - a saboteur per deliberate defect → at least one property must catch it, including the specific
  *     properties we claim guard that behaviour.
  *
@@ -160,9 +159,9 @@ const GROUP_A: Saboteur[] = [
     { name: 'S8 emptyOrMatchesAll', matcher: emptyOrMatchesAll, trips: [8] },
     { name: 'S9 swallowsInvalidFilter', matcher: swallowsInvalidFilter, trips: [9] },
     { name: 'S10 firstOpWins', matcher: rewriteMatcher(firstOpWins), trips: [10] },
-    // S11 and S12 re-impose a defect the reference itself has, so the differential (WF-P1), whose oracle IS the
-    // reference, cannot see them: only the law that reaches inside the payload does. Their teeth are latent while
-    // that property is in REFERENCE_VIOLATED_PROPERTIES, and become live the moment it leaves.
+    // S11 and S12 truncate a payload the differential (WF-P1) can barely see, because its oracle compares whole
+    // filters and the truncated shapes are a small slice of the generated corpus. The law that reaches inside the
+    // payload is what reliably catches them.
     { name: 'S11 notInnerFirstOpWins', matcher: rewriteMatcher(notInnerFirstOpWins), trips: [11] },
     { name: 'S12 elemMatchInnerFirstOpWins', matcher: rewriteMatcher(elemMatchInnerFirstOpWins), trips: [12] },
     { name: 'S13 crossLeafScope', matcher: rewriteMatcher(crossLeafScope), trips: [13] },
@@ -222,22 +221,11 @@ async function collectFuzzResults(matcher: MatchJavascriptObjectInTesting): Prom
 const failingIndices = (results: Collected[]): Set<number> =>
     new Set(results.filter(r => !r.passed).map(r => Number(r.name.split(' ')[0]!.split('.')[1])));
 
-/**
- * The properties the reference matcher itself violates. It keeps only the first operator of a multi-operator
- * payload nested inside `$not` (WF-P11) or inside a scalar `$elemMatch` (WF-P12), and short-circuits `$not` on
- * a missing field. Asserting the EXACT set is the inverted tooth: it proves each law bites the real defect
- * rather than passing vacuously, and it fails loudly the moment the defect is fixed.
- */
-// TODO Remove once the shared predicate tree evaluates nested payloads as conjunctions — the set becomes empty.
-const REFERENCE_VIOLATED_PROPERTIES = [11, 12];
-
 describe('§24 fuzz saboteur harness (teeth)', () => {
 
-    test('the honest reference matcher passes every fuzz property but the multi-operator laws it violates', async () => {
+    test('the honest reference matcher passes every fuzz property', async () => {
         const results = await collectFuzzResults(honestMatcher);
-        const failing = [...failingIndices(results)].sort((a, b) => a - b);
-        const detail = results.filter(r => !r.passed).map(r => `${r.name}: ${r.error}`).join('\n');
-        expect(failing, detail).toEqual(REFERENCE_VIOLATED_PROPERTIES);
+        expect(results.filter(r => !r.passed).map(r => `${r.name}: ${r.error}`)).toEqual([]);
     });
 
     for (const sab of GROUP_A) {

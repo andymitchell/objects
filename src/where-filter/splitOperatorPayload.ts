@@ -12,10 +12,11 @@ const isRangeOperator = (k: string): boolean => (ValueComparisonRangeOperators a
  * not an operator payload (a bare scalar, an exact-array operand, or a compound sub-document), so those paths
  * keep their existing single-value handling.
  *
- * Every where-filter engine — the in-memory JS matcher and both SQL emitters — evaluates one group at a time
- * and ANDs the outcomes. Sharing THIS function is what guarantees they split a payload identically, so the
- * AND law (`match(row, {p:{opA,…,opN}}) === match(row, {$and:[{p:{opA}},…]})`) holds ACROSS engines by
- * construction, rather than relying on three separate copies agreeing by luck.
+ * Used by the SQL emitters at the top of a field condition only. It sees a payload's outermost operators and
+ * nothing else, so a payload nested inside `$not` or inside a scalar `$elemMatch` never reaches it — those the
+ * emitters still dispatch by hand, and only the first operator of such a payload survives. The predicate tree
+ * (`ast/parseFieldPredicate.ts`), which the in-memory matcher uses, groups a payload at every depth instead;
+ * this function exists until the emitters read that tree too.
  *
  * Two operators are deliberately NOT split apart: `$regex` keeps its `$options` (options tunes the pattern,
  * it is not a predicate of its own), and the range operators (`$gt`/`$gte`/`$lt`/`$lte`) stay one group so a

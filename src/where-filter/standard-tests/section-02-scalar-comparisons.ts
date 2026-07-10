@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §2 (part A) Scalar value comparisons — deep object equality, range ops, $regex, $ne, $eq. */
 export function registerScalarComparisonsA(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, errorsAsValues, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
         describe('Deep object equality', () => {
 
@@ -215,21 +215,15 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                 });
 
                 test('range type mismatch (number range on string value): does not match', async () => {
-                    // Spec: "Range comparison throws if filter type differs from value type"
-                    // JS throws; SQL implementations may silently return false.
-                    let result: boolean | undefined = false;
-                    try {
-                        result = await matchJavascriptObject(
-                            { contact: { name: 'Andy' } },
-                            // @ts-ignore — intentional type mismatch
-                            { 'contact.name': { $gt: 10 } },
-                            ContactSchema
-                        );
-                    } catch (e) {
-                        // JS implementation throws on type mismatch — that's valid
-                    }
-                    if (errorsAsValues) expect(result).toBe(undefined); // schema-contradicting filter → acknowledged-unsupported (invalid_filter), never a silent false
-                    else expect(result).toBe(false);
+                    // A comparison operator type-brackets: a value of another type is not comparable, so the row
+                    // is not in the answer. No engine errors, and none silently matches.
+                    const result = await matchJavascriptObject(
+                        { contact: { name: 'Andy' } },
+                        // @ts-expect-error — a number bound against a string field is the point of the test
+                        { 'contact.name': { $gt: 10 } },
+                        ContactSchema
+                    );
+                    expect(result).toBe(false);
                 });
             })
 

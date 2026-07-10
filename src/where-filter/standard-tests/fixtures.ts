@@ -181,10 +181,13 @@ export type ArrayOperand = z.infer<typeof ArrayOperandSchema>;
  * A scalar array nested inside an object array — the leaf-scope contract. A compound filter on
  * `groups.tags` must be satisfied within ONE `groups` entry's `tags`, never by pooling elements
  * from several entries.
+ *
+ * `groups` is optional so that a row can hold no leaf array at all: an outer array that is absent —
+ * or present but empty — leaves `groups.tags` naming nothing, which is what a missing field means.
  */
 export const NestedScalarArraySchema = z.object({
     id: z.string(),
-    groups: z.array(z.object({ tags: z.array(z.string()) }).strict()),
+    groups: z.array(z.object({ tags: z.array(z.string()) }).strict()).optional(),
 }).strict();
 export type NestedScalarArray = z.infer<typeof NestedScalarArraySchema>;
 

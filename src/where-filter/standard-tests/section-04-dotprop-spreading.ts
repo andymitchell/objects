@@ -398,5 +398,73 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
             });
         });
 
+        // ── No leaf array at all is a missing field ────────────────────────────────────────────────
+        //
+        // `groups.tags` is answered by asking each `groups` entry for its `tags`. When there are no entries —
+        // the outer array is absent, or present but empty — there is no `tags` array anywhere, and the path
+        // names nothing. That is exactly a missing field, so the condition's own verdict on a missing field
+        // decides the row. An implementation that only asks "did some leaf array satisfy this?" answers false
+        // instead, dropping every row an operator like `$nin` or `$exists: false` must return.
+        describe('a nested-array path keeps the missing-field verdict when no leaf array exists', () => {
+            const absent: NestedScalarArray = { id: 'x' };
+            const empty: NestedScalarArray = { id: 'x', groups: [] };
+            const noLeafArray = (row: NestedScalarArray, filter: unknown) =>
+                matchJavascriptObject(row, filter as WhereFilterDefinition<NestedScalarArray>, NestedScalarArraySchema);
+
+            test('$nin matches, because a missing field holds none of the forbidden values', async () => {
+                expect(await noLeafArray(absent, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+                expect(await noLeafArray(empty, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+            });
+            test('$exists:false matches, because the path names nothing', async () => {
+                expect(await noLeafArray(absent, { 'groups.tags': { $exists: false } })).toBe(true);
+                expect(await noLeafArray(empty, { 'groups.tags': { $exists: false } })).toBe(true);
+            });
+            test('$not $size matches, because the $size it negates does not match a missing field', async () => {
+                expect(await noLeafArray(absent, { 'groups.tags': { $not: { $size: 1 } } })).toBe(true);
+                expect(await noLeafArray(empty, { 'groups.tags': { $not: { $size: 1 } } })).toBe(true);
+            });
+            test('$size does not match, because a missing field has no length', async () => {
+                expect(await noLeafArray(absent, { 'groups.tags': { $size: 1 } })).toBe(false);
+                expect(await noLeafArray(empty, { 'groups.tags': { $size: 1 } })).toBe(false);
+            });
+            test('$exists:true does not match, because the path names nothing', async () => {
+                expect(await noLeafArray(absent, { 'groups.tags': { $exists: true } })).toBe(false);
+                expect(await noLeafArray(empty, { 'groups.tags': { $exists: true } })).toBe(false);
+            });
+        });
+
+        // ── An exact-array operand compares the leaf array, not the element holding it ─────────────
+        //
+        // `children.grandchildren` names one `grandchildren` array per `children` entry. An exact-array operand
+        // is compared against those leaf arrays — never against the `children` element that carries one, which
+        // is an object and can never equal an array. The row matches when ANY single leaf array equals it.
+        describe('an exact array on a nested-array path compares against one leaf array', () => {
+            const oneChildEquals: SpreadNested = {
+                parent_name: 'p',
+                children: [
+                    { child_name: 'Sue', grandchildren: [{ grandchild_name: 'Rita' }] },
+                    { child_name: 'Alice', grandchildren: [{ grandchild_name: 'Bob' }, { grandchild_name: 'Sue' }] },
+                ],
+            };
+            const noChildEquals: SpreadNested = {
+                parent_name: 'p',
+                children: [
+                    { child_name: 'Sue', grandchildren: [{ grandchild_name: 'Bob' }] },
+                    // Holds Rita, but alongside another grandchild, so this leaf array is not the operand.
+                    { child_name: 'Alice', grandchildren: [{ grandchild_name: 'Rita' }, { grandchild_name: 'Bob' }] },
+                ],
+            };
+            const exactArrayFilter = { 'children.grandchildren': [{ grandchild_name: 'Rita' }] };
+            const exactLeafArray = (row: SpreadNested) =>
+                matchJavascriptObject(row, exactArrayFilter as WhereFilterDefinition<SpreadNested>, SpreadNestedSchema);
+
+            test('a leaf array equal to the operand matches, even under an outer array', async () => {
+                expect(await exactLeafArray(oneChildEquals)).toBe(true);
+            });
+            test('a leaf array merely containing the operand’s element does not match', async () => {
+                expect(await exactLeafArray(noChildEquals)).toBe(false);
+            });
+        });
+
     });
 }

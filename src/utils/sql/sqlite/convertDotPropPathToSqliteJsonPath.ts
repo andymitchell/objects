@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree, resolveRecordValueNode } from "../../../dot-prop-paths/schema-tree.ts";
+import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree, resolveRecordValueNode, parseDotPropPathSegments } from "../../../dot-prop-paths/schema-tree.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
 import type { DotPropPathConversionResult } from "../types.ts";
 
@@ -33,14 +33,17 @@ export function convertDotPropPathToSqliteJsonPath<T extends Record<string, any>
         nodeMap = result.map;
     }
 
-    if (!dotPropPath || dotPropPath.split('.').some(s => !s)) {
+    // Split honouring the dot-prop escape: `a\.b` is one literal key, `a.b` is nested — matching the JS matcher.
+    const segments = parseDotPropPathSegments(dotPropPath);
+    if (!dotPropPath || segments.some(s => !s)) {
         return { success: false, error: { type: 'invalid_path', dotPropPath, message: `Invalid dotPropPath. ${SQLITE_UNSAFE_WARNING}` } };
     }
 
-    // A record (z.record) key is a dynamic string absent from the node map; resolve it against the record's
-    // value type so any key is a valid, typed accessor. SQLite's json_extract needs no cast, so only the
-    // value kind (for the errorIfNotAsExpected check) is used.
-    const nodeMapForPath = nodeMap[dotPropPath] ?? resolveRecordValueNode(dotPropPath, nodeMap);
+    // The node map joins keys with '.', so a literal-dot field and a nested path share a key; normalise the
+    // escape for the lookup, and let the accessor below distinguish them. A record (z.record) key is a dynamic
+    // string absent from the node map and resolves against the record's value type (SQLite needs only the kind).
+    const lookupPath = segments.join('.');
+    const nodeMapForPath = nodeMap[lookupPath] ?? resolveRecordValueNode(lookupPath, nodeMap);
     if (!nodeMapForPath) {
         return { success: false, error: { type: 'unknown_path', dotPropPath, message: `Unknown dotPropPath. ${SQLITE_UNSAFE_WARNING}` } };
     }
@@ -50,7 +53,8 @@ export function convertDotPropPathToSqliteJsonPath<T extends Record<string, any>
         return { success: false, error: { type: 'unexpected_kind', dotPropPath, message: `ZodKind was not as expected: ${zodKind}. Expected: ${errorIfNotAsExpected}. ${SQLITE_UNSAFE_WARNING}` } };
     }
 
-    const jsonPath = '$.' + dotPropPath.split('.').join('.');
+    // Quote a segment carrying a literal dot so SQLite reads it as one key (`$."a.b"`), not a nested `$.a.b`.
+    const jsonPath = '$' + segments.map(s => s.includes('.') ? `."${s}"` : `.${s}`).join('');
 
     return { success: true, expression: `json_extract(${columnName}, '${jsonPath}')` };
 }

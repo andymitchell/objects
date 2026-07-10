@@ -234,6 +234,27 @@ function _convertSchemaToDotPropPathTree(
 
 
 /**
+ * Split a dot-prop path into its key segments, honouring the dot-prop escape convention where `\.` is a
+ * literal dot inside a key rather than a path separator — matching how the JS matcher's `getProperty` resolves
+ * keys. So `a\.b` → `['a.b']` (one literal key) while `a.b` → `['a', 'b']` (nested). A leading/trailing/doubled
+ * unescaped dot yields an empty segment, which callers treat as an invalid path.
+ *
+ * @example parseDotPropPathSegments('a\\.b') // ['a.b']
+ * @example parseDotPropPathSegments('a.b')   // ['a', 'b']
+ */
+export function parseDotPropPathSegments(path: string): string[] {
+    const segments: string[] = [];
+    let current = '';
+    for (let i = 0; i < path.length; i++) {
+        if (path[i] === '\\' && path[i + 1] === '.') { current += '.'; i++; continue; } // escaped dot → literal
+        if (path[i] === '.') { segments.push(current); current = ''; continue; }
+        current += path[i];
+    }
+    segments.push(current);
+    return segments;
+}
+
+/**
  * Resolve a dot-prop path that has no enumerated node but descends as a single dynamic key from a record
  * (`z.record`) ancestor, returning the record's value type so a converter can build a typed accessor for it.
  *

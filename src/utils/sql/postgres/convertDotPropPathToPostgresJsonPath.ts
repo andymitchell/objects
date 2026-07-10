@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree, resolveRecordValueNode } from "../../../dot-prop-paths/schema-tree.ts";
+import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree, resolveRecordValueNode, parseDotPropPathSegments } from "../../../dot-prop-paths/schema-tree.ts";
 import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
 import type { DotPropPathConversionResult } from "../types.ts";
@@ -35,15 +35,17 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
         nodeMap = result.map;
     }
 
-    // A record (z.record) key is a dynamic string absent from the node map; resolve it against the record's
-    // value type so any key becomes a valid accessor cast by that value's kind (e.g. a string-valued record
-    // casts to ::text). A genuinely unknown path (no record ancestor) still rejects.
-    const nodeMapForPath = nodeMap[dotPropPath] ?? resolveRecordValueNode(dotPropPath, nodeMap);
+    // Split honouring the dot-prop escape: `a\.b` is one literal key, `a.b` is nested — matching the JS matcher.
+    // The node map joins keys with '.', so the escape is normalised for the lookup and only the accessor below
+    // distinguishes a literal-dot field from a nested path. A record (z.record) key is a dynamic string absent
+    // from the node map and resolves against the record's value type (cast by that value's kind, e.g. ::text).
+    const jsonbParts = parseDotPropPathSegments(dotPropPath);
+    const lookupPath = jsonbParts.join('.');
+    const nodeMapForPath = nodeMap[lookupPath] ?? resolveRecordValueNode(lookupPath, nodeMap);
     if( !nodeMapForPath ) {
         return { success: false, error: { type: 'unknown_path', dotPropPath, message: `Unknown dotPropPath. ${UNSAFE_WARNING}` } };
     }
 
-    const jsonbParts = dotPropPath.split(".");
     const castingMap:Partial<Record<ZodKind, string>> = {
         'string': '::text',
         'number': '::numeric',

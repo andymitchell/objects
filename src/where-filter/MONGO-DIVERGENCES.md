@@ -2,7 +2,7 @@
 
 WhereFilterDefinition is a **subset** of MongoDB's query language. Every valid filter is also valid MongoDB syntax — with the exceptions listed below, where our semantics intentionally differ from MongoDB's.
 
-Two kinds of entry appear below. Entries **#1–#8** are **silent semantic divergences**: the same syntax runs but yields a different result than MongoDB. Entry **#9** is a **loud-rejection subset gap**: an operand type MongoDB/BSON accepts is rejected outright at the validity gate (rather than silently mis-evaluated), so every engine stays uniform across the JSON storage boundary.
+Three kinds of entry appear below. Entries **#1–#8** are **silent semantic divergences**: the same syntax runs but yields a different result than MongoDB. Entry **#9** is a **loud-rejection subset gap**: an operand type MongoDB/BSON accepts is rejected outright at the validity gate (rather than silently mis-evaluated), so every engine stays uniform across the JSON storage boundary. Entry **#10** is a **single-engine storage limit**: Postgres cannot persist one byte-value the other engines round-trip.
 
 ---
 
@@ -133,3 +133,17 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 **Rationale**: a filter must survive `JSON.stringify` → parse to a SQL backend losslessly and evaluate identically across JS, SQLite, and Postgres. BSON's richer types have no portable JSON representation, and silent coercion is a cross-engine divergence class in its own right — the JS matcher deep-equals a `Date` object, while SQL's `JSON.stringify` morphs it to an ISO string (and throws outright on a `bigint`). Rejecting the whole class at the gate keeps every engine uniform. Non-finite numbers are the one accepted exception — valid as operands (see #7) but lossy through SQL storage.
 
 **Tests**: "25. Operator-payload strictness, operand domains & multi-operator AND" in `standardTests.ts`; the numeric/carrier rows in the §16/§19 sub-blocks.
+
+---
+
+## 10. A U+0000 (null byte) in stored data cannot round-trip through Postgres
+
+**MongoDB / BSON**: BSON strings are length-prefixed byte sequences, so an embedded U+0000 (`'a\u0000b'`) stores and queries like any other character.
+
+**WhereFilterDefinition (JS + SQLite)**: bind and compare the null byte faithfully — JS holds it in memory; SQLite stores it in JSON TEXT and matches it. Both conform.
+
+**WhereFilterDefinition (Postgres)**: Postgres `text`/`jsonb` cannot represent U+0000 — it rejects the `\u0000` JSON escape at insert time (`unsupported Unicode escape sequence`). A value carrying a null byte therefore cannot be stored, so a filter targeting it can never match. This is a hard platform restriction, not a builder choice.
+
+**Rationale**: the same family as #7 — the storage boundary loses a value the in-memory matcher keeps. Postgres's inability to store U+0000 is a documented platform limit (`text` disallows the byte entirely) with no portable workaround short of a lossy re-encoding plus a breaking storage-format change. Consumers should reject U+0000 at input (cf. #7's `z.number().finite()` guidance for non-finite numbers), rather than expecting the Postgres impl to preserve it.
+
+**Test**: `19.19 a null byte in the value binds and matches` — JS and SQLite assert strict `true`; Postgres is acknowledged against this entry (its store fails, so the value never matches).

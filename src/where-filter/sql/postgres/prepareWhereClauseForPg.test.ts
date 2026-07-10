@@ -26,7 +26,20 @@ describe('postgres where clause builder', () => {
 
         const pm = new PropertyTranslatorPgJsonbSchema(schema, 'recordColumn');
 
-        await client.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [json]);
+        try {
+            await client.query(`INSERT INTO ${table} (recordColumn) VALUES($1::jsonb)`, [json]);
+        } catch (e) {
+            // Postgres text/jsonb cannot store a U+0000 byte — it rejects the \u0000 escape at insert
+            // ("unsupported Unicode escape sequence"). This is a hard platform limit the user chose to document,
+            // not work around (MONGO-DIVERGENCES.md #10): a value carrying a null byte can never round-trip, so a
+            // filter targeting it never matches. Acknowledge as a DIVERGENCE (a definite `false`, paired with the
+            // D-helper at test 19.19) — NOT a silent `undefined` skip — while JS and SQLite still bind and match it.
+            // Any OTHER insert error is a real fault and rethrows.
+            if (e instanceof Error && /unsupported Unicode escape/i.test(e.message)) {
+                return false;
+            }
+            throw e;
+        }
 
         let clause:PreparedWhereClauseResult | undefined;
         try {

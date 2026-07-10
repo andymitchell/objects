@@ -113,9 +113,10 @@ export function registerExoticValues(ctx: SectionCtx): void {
         });
 
         test('19.19 a null byte in the value binds and matches', async () => {
-            // PG text rejects U+0000 → expected RED there; JS binds it fine.
+            // JS and SQLite bind and match U+0000 (strict true); Postgres text/jsonb cannot store it, so its store
+            // fails and the value never matches — a documented single-engine storage limit (MONGO-DIVERGENCES.md #10).
             const result = await matchJavascriptObject({ id: 'u', s: NULL_BYTE }, { s: NULL_BYTE }, UnicodeSchema);
-            expectOrAcknowledgeUnsupported(result, true);
+            expectOrAcknowledgeDivergence(result, true, '#10 Postgres cannot store a U+0000 (null byte)');
         });
 
         test('19.20 a Date operand is rejected', async () => {

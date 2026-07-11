@@ -1140,12 +1140,15 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
         });
     });
 
-    describe('non-JSON bare operands are shallow-excluded (bigint | symbol)', () => {
-        // The runtime gate rejects bigint/symbol operands (they cannot round-trip JSON — MONGO-DIVERGENCES.md #9);
-        // the type now rejects a top-level one too. The exclusion is SHALLOW: a Date (or a bigint nested inside an
-        // object operand) still compiles — a documented residual hole (DECISIONS.md; a full JsonCompatible is deferred).
+    describe('non-JSON operands are rejected (JsonCompatible narrows to the JSON-serialisable subset)', () => {
+        // The runtime gate rejects every non-JSON carrier (bigint/symbol/Date/Map/Set/function — they cannot
+        // round-trip JSON, MONGO-DIVERGENCES.md #9); the operand types mirror that at compile time via a RECURSIVE
+        // JsonCompatible mapping. A carrier collapses to `never` at the bare-value and $all positions, even when
+        // nested inside an object operand. The one residual hole is a structurally-plain class instance, which is
+        // indistinguishable from a plain object in the type system and is caught only at runtime.
         // `satisfies` checks assignability without declaring a variable, so these pins add no unused-local noise.
         type JsonHoleDoc = { big: bigint; when: Date; bigs: bigint[] };
+        type NestedCarrierDoc = { meta: { created: Date; name: string } };
 
         it('a bare bigint value is a type error', () => {
             // @ts-expect-error bigint is excluded from the bare-value domain
@@ -1157,8 +1160,18 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
                 bigs: { $all: [1n] }
             }) satisfies WhereFilterDefinition<JsonHoleDoc>;
         });
-        it('residual hole: a bare Date value still compiles (shallow exclusion does not reach it)', () => {
+        it('a bare Date value is a type error (recursive exclusion reaches it)', () => {
+            // @ts-expect-error Date is not JSON-serialisable, so JsonCompatible collapses the bare operand to never
             ({ when: new Date() }) satisfies WhereFilterDefinition<JsonHoleDoc>;
+        });
+        it('a Date field can still be probed with $exists (only the bare-value member collapsed)', () => {
+            ({ when: { $exists: true } }) satisfies WhereFilterDefinition<JsonHoleDoc>;
+        });
+        it('a Date nested inside an object operand is a type error (recursion reaches nested carriers)', () => {
+            ({
+                // @ts-expect-error nested Date collapses to never, making the object operand uninhabitable
+                meta: { created: new Date(), name: 'x' }
+            }) satisfies WhereFilterDefinition<NestedCarrierDoc>;
         });
     });
 });

@@ -18,6 +18,44 @@ export type ValueComparisonRangeNumeric = Partial<Record<ValueComparisonRangeOpe
 export type ValueComparisonRangeString = Partial<Record<ValueComparisonRangeOperatorsTyped, string>>;
 export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never);
 export type ValueComparisonRangeFlexi<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never) | T;
+
+/** True only when `T` is exactly `any` — short-circuits {@link JsonCompatible} so it doesn't distribute over every branch. */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** Decrement table for {@link JsonCompatible}'s recursion-depth cap: `Prev[6]` is `5` … `Prev[1]` is `0`. */
+type Prev = [never, 0, 1, 2, 3, 4, 5, 6];
+
+/**
+ * Narrows `T` to its JSON-serialisable subset, mapping any non-JSON carrier to `never`.
+ *
+ * Carriers with no portable JSON form — `bigint`, `symbol`, functions, `Date`, `RegExp`,
+ * `Map`/`Set`/`WeakMap`/`WeakSet`, `Promise` — collapse to `never`; plain objects and arrays recurse
+ * (preserving `readonly` and optional modifiers via a homomorphic mapped type); scalars pass through.
+ *
+ * @remarks
+ * Mirrors the runtime serialisable-subset gate at the type level, but is a strict subset of it: a
+ * structurally-plain class instance is indistinguishable from a plain object in the type system, so only the
+ * runtime gate catches those. Recursion is capped at `Depth` levels; beyond the cap `T` passes through unchanged
+ * (a residual hole for pathologically deep or self-referential schemas). `any` passes through unchanged. Tuples
+ * are treated as arrays — positional structure is flattened to the element union.
+ */
+export type JsonCompatible<T, Depth extends number = 6> =
+    IsAny<T> extends true
+        ? T
+        : Depth extends 0
+            ? T
+            : T extends bigint | symbol | Function
+                ? never
+                : T extends Date | RegExp | Map<any, any> | Set<any> | WeakMap<any, any> | WeakSet<any> | Promise<any>
+                    ? never
+                    : T extends readonly (infer U)[]
+                        ? T extends unknown[]
+                            ? JsonCompatible<U, Prev[Depth]>[]
+                            : readonly JsonCompatible<U, Prev[Depth]>[]
+                        : T extends object
+                            ? { [K in keyof T]: JsonCompatible<T[K], Prev[Depth]> }
+                            : T;
+
 export type ValueComparisonEq<T = any> = { $eq: T extends string ? string : T extends number ? number : T extends boolean ? boolean : never };
 export type ValueComparisonNe<T = any> = { $ne: T extends string ? string : T extends number ? number : never };
 export type ValueComparisonIn<T = any> = { $in: (T extends string ? string : T extends number ? number : T extends boolean ? boolean : never)[] };
@@ -50,19 +88,19 @@ export type ValueComparisonFlexi<T = any> =
     | ValueComparisonNot<T>
     | ValueComparisonExists
     | ValueComparisonType
-    // Bare value. `bigint`/`symbol` are excluded because they cannot round-trip JSON — the runtime gate
-    // rejects them (MONGO-DIVERGENCES.md #9), and this makes a bare `bigint` operand a compile error too. The
-    // exclusion is shallow (top-level only) and does not reach `Date`/`Map`/class instances nested in an object
-    // operand — see DECISIONS.md (a full `JsonCompatible` recursion is deferred for its type-check cost).
-    | Exclude<T, bigint | symbol>;
+    // Bare value, narrowed to its JSON-serialisable subset. Non-JSON carriers — `bigint`, `symbol`, `Date`,
+    // `Map`/`Set`, functions — cannot round-trip JSON, so the runtime gate rejects them (MONGO-DIVERGENCES.md #9)
+    // and `JsonCompatible` collapses them to `never` here too, recursively (a nested `Date` inside an object
+    // operand is rejected). Structurally-plain class instances remain a type-level hole caught only at runtime.
+    | JsonCompatible<T>;
 /** Internal: carries index-sig depth through recursive WhereFilterDefinition references. */
 type WhereFilterCore<T extends Record<string, any>, ISD extends number> =
     PartialObjectFilter<T, ISD> | LogicFilter<T, ISD>;
 
 export type ArrayValueComparisonElemMatch<T = any, ISD extends number = 2>  = {$elemMatch: T extends Record<string, any>? WhereFilterCore<T, ISD> : ValueComparisonFlexi<T>};
-// `$all` operands are DATA, and share the bare value's JSON-serialisable domain: `bigint`/`symbol` elements
-// are excluded (shallow — see {@link ValueComparisonFlexi} and DECISIONS.md).
-export type ArrayValueComparisonAll<T = any> = { $all: Exclude<T, bigint | symbol>[] };
+// `$all` operands are DATA, and share the bare value's JSON-serialisable domain: non-JSON carriers as elements
+// collapse to `never` via `JsonCompatible` (see {@link ValueComparisonFlexi} and DECISIONS.md).
+export type ArrayValueComparisonAll<T = any> = { $all: JsonCompatible<T>[] };
 /**
  * `$size` matches an array of exactly `n` elements. The type is a plain `number`, but the runtime gate
  * enforces a non-negative integer — a float or negative `$size` is rejected as malformed (§25), a constraint

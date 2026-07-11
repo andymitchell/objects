@@ -72,31 +72,41 @@ with no runtime behaviour change (the full suite stays green).
 
 ---
 
-## 3. Operand types exclude `bigint` and `symbol` only
+## 3. Data operand types are narrowed to the JSON-serialisable subset (`JsonCompatible<T>`)
 
 **Context**: Filter operands cross a JSON storage boundary. The runtime gate rejects every non-JSON
-carrier — `Date`, `Map`, `Set`, class instances, functions — but the *type* of a bare value or an
-equality-family operand (`$eq`/`$ne`/`$in`/`$nin`/`$all`) is derived from the schema, so a `Date` field
-yields a `Date`-typed operand that compiles and then fails at runtime.
+carrier — `Date`, `RegExp`, `Map`, `Set`, functions, `bigint`, `symbol`, class instances — but the *type* of a
+data operand is derived from the schema, so without a matching type-level narrowing a carrier-typed field yields
+an operand that compiles and then fails at runtime.
 
-**Decision**: Exclude `bigint | symbol` at those operand positions. Do not (yet) apply a recursive
-`JsonCompatible<T>` mapping.
+**Decision**: At the data operand positions — the bare value (`ValueComparisonFlexi`) and `$all` elements
+(`ArrayValueComparisonAll`) — narrow the operand type with a recursive `JsonCompatible<T>` mapping that collapses
+any non-JSON carrier to `never`, recursing into objects and arrays so a carrier nested inside an object operand is
+rejected too.
 
-**Why**: The shallow exclusion is free at type-check time and catches the two carriers that have no JSON
-representation at all. A recursive mapping would close the remaining hole, but conditional types over the
-already-large filter unions carry a real risk of degrading editor responsiveness, and a `Date`-typed field
-would collapse its operand to `never` — a worse developer experience than a runtime error with a clear
-message.
+**Why**: This mirrors the runtime serialisable-subset gate at compile time, turning a class of runtime failures
+into compile errors — including the nested case a shallow top-level exclusion cannot reach. The equality-family
+operands (`$eq`/`$ne`/`$in`/`$nin`) already collapse non-scalars to `never` through their own conditional
+narrowing, so they are left unchanged; `JsonCompatible` over their pre-narrowed scalar value would be a no-op.
 
-**Outcome (implemented)**: `Exclude<T, bigint | symbol>` is applied at the bare-value position
-(`ValueComparisonFlexi`) and to `$all` elements (`ArrayValueComparisonAll`). The equality-family operands
-(`$eq`/`$ne`/`$in`/`$nin`) already collapse `bigint`/`symbol` to `never` through their own conditional
-narrowing, so they needed no change. Compile pins (`types.test.ts`) fix a bare `bigint` and a `bigint` `$all`
-element as errors, and pin that a bare `Date` still compiles — the shallow exclusion by design.
+**Cost**: The recursive mapping is affordable. It touches only per-path *value* narrowing — where most leaves are
+scalars that short-circuit after a couple of conditionals — not the expensive dot-prop *path* enumeration, so it
+adds well under 1% of total type instantiations both repo-wide and on worst-case deep / wide / carrier-bearing
+schemas, and is not a hot type under `tsc --generateTrace`. `tsc --extendedDiagnostics` instantiation and type
+counts are input-deterministic, which makes this measurable to a fraction of a percent.
 
-**Future work**: Measure a full `JsonCompatible<T>` under `tsc --extendedDiagnostics` and
-`--generateTrace`, on representative deep schemas, before adopting. Until then, the `Date` /
-class-instance hole is a documented runtime rejection (see `MONGO-DIVERGENCES.md`, operand domain).
+**Limitations** (residual holes, all backstopped by the runtime gate):
+- A *structurally-plain* class instance is indistinguishable from a plain object in the type system, so only the
+  runtime gate rejects it. (A class instance carrying methods is caught, because a method property maps to `never`.)
+- Recursion is depth-capped; beyond the cap a carrier passes through unchanged. The cap keeps self-referential and
+  pathologically deep schemas from exceeding the instantiation-depth limit.
+- Tuples are treated as arrays — positional structure is flattened to the element union.
+
+**Outcome**: `JsonCompatible<T>` is applied at `ValueComparisonFlexi` (bare value) and `ArrayValueComparisonAll`
+(`$all`). Compile pins (`types.test.ts`) fix a bare `bigint`, a `bigint` `$all` element, a bare `Date`, and a `Date`
+nested inside an object operand as errors, and pin that a `Date`-typed field is still reachable via `$exists`. The
+one behavioural trade-off is that a `Date`-typed field's bare operand is a compile error rather than a
+compile-then-runtime failure — stricter, and no path-value consumer relies on the former leniency.
 
 ---
 

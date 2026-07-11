@@ -1,4 +1,5 @@
 import type { AnyZodSchema, ZodKind } from "../zod/introspection.ts";
+import type { TreeNode } from "./schema-tree.ts";
 
 /**
  * How a path's leaf was found in the schema.
@@ -29,17 +30,32 @@ type ResolvedPathCommon = {
 export type ResolvedPath =
     | (ResolvedPathCommon & {
         readonly known: true;
-        readonly origin: 'enumerated' | 'record_value';
+        readonly origin: 'enumerated';
         /** The leaf's Zod kind, with transparent wrappers (optional/nullable/default/catch/readonly) stepped through. */
         readonly leafKind: ZodKind;
         /** The leaf's Zod schema, absent when the path map was built without schema references. */
         readonly leafSchema: AnyZodSchema | undefined;
+        /**
+         * The path-map node the path resolves to. Its own ancestry spells exactly `segments`, so an accessor
+         * rebuilt from the node addresses the same field the segments do — the lossy `lookupPath` never has to
+         * be looked up again. Only an enumerated path has one.
+         */
+        readonly node: TreeNode;
+    })
+    | (ResolvedPathCommon & {
+        readonly known: true;
+        readonly origin: 'record_value';
+        readonly leafKind: ZodKind;
+        readonly leafSchema: AnyZodSchema | undefined;
+        /** A record's dynamic keys have no path-map node. */
+        readonly node: undefined;
     })
     | (ResolvedPathCommon & {
         readonly known: false;
         readonly origin: 'unknown';
         readonly leafKind: undefined;
         readonly leafSchema: undefined;
+        readonly node: undefined;
     });
 
 /** A path that cannot be resolved against any schema, because it is not a well-formed dot-prop path. */

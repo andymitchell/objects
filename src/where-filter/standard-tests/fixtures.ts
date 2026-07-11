@@ -155,6 +155,13 @@ export type DottedKey = z.infer<typeof DottedKeySchema>;
 export const DottedKeyInArraySchema = z.object({ id: z.string(), rows: z.array(z.object({ 'a.b': z.string() }).strict()) }).strict();
 export type DottedKeyInArray = z.infer<typeof DottedKeyInArraySchema>;
 
+/** A record beneath a literal-dot key — a raw dotted path collides with the record key; only the escape reaches it. */
+export const DottedRecordSchema = z.object({
+    id: z.string(),
+    'a.b': z.record(z.string(), z.object({ v: z.string(), tags: z.array(z.string()) }).strict()),
+}).strict();
+export type DottedRecord = z.infer<typeof DottedRecordSchema>;
+
 /** A field literally named `$or` — logic-operator-vs-data-key ambiguity. */
 export const DollarKeySchema = z.object({ id: z.string(), '$or': z.string() }).strict();
 export type DollarKey = z.infer<typeof DollarKeySchema>;

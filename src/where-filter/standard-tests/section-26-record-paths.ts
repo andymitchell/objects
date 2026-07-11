@@ -1,4 +1,4 @@
-import { RecordDeepSchema, type RecordDeep } from "./fixtures.ts";
+import { DottedRecordSchema, RecordDeepSchema, type DottedRecord, type RecordDeep } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
@@ -121,6 +121,39 @@ export function registerRecordPaths(ctx: SectionCtx): void {
             // for a row that plainly satisfies the filter. See DECISIONS.md, "Record-value arrays".
             const result = await rec(withData({ foo: { value: 'v', tags: ['t'] } }), { 'data.foo.tags': { $size: 1 } });
             expectOrAcknowledgeUnsupported(result, true, 'an array inside a record value is an acknowledged unsupported path');
+        });
+
+        describe('26.6 an inherited property name beneath a record value is not a field', () => {
+            // `data`'s value is an object, so `data.<key>.constructor` bracket-reads its shape. `constructor`
+            // and `__proto__` are inherited from Object.prototype, not declared fields; an untrusted path
+            // naming one must resolve as missing, not crash SQL compilation by reading a non-schema as a Zod
+            // schema. The JS matcher already denylists these names, so resolving unknown restores parity.
+            for (const inherited of ['constructor', '__proto__']) {
+                test(`\`data.foo.${inherited}\` resolves missing: $exists:false is true`, async () => {
+                    expect(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${inherited}`]: { $exists: false } })).toBe(true);
+                });
+                test(`\`data.foo.${inherited}\` resolves missing: $exists:true is false`, async () => {
+                    expect(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${inherited}`]: { $exists: true } })).toBe(false);
+                });
+            }
+        });
+
+        describe('26.7 a raw dotted path collides with neither a literal-dot record key nor its value', () => {
+            // `a.b` is a literal-dot record key on DottedRecordSchema. The raw path `a.b.k.v` reads as nested
+            // `a`→`b`→`k`→`v` (missing); only the escape `a\.b.k.v` reaches through the record. Pre-fix the raw
+            // path borrowed the record reading and answered from a field the row does not hold that way.
+            const row: DottedRecord = { id: 'x', 'a.b': { k: { v: 'w', tags: ['t'] } } };
+            const dottedRec = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<DottedRecord>, DottedRecordSchema);
+
+            test('$exists:false on the raw path is true (missing field)', async () => {
+                expect(await dottedRec({ 'a.b.k.tags': { $exists: false } })).toBe(true);
+            });
+            test('$exists:true on the raw path is false (missing field)', async () => {
+                expect(await dottedRec({ 'a.b.k.v': { $exists: true } })).toBe(false);
+            });
+            test('the escape reaches through the record to the leaf (control)', async () => {
+                expect(await dottedRec({ 'a\\.b.k.v': 'w' })).toBe(true);
+            });
         });
 
     });

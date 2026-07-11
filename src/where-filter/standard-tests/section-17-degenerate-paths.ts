@@ -69,5 +69,50 @@ export function registerDegeneratePaths(ctx: SectionCtx): void {
             expect(result).toBe(true);
         });
 
+        // ── 17.15 A raw dotted path never reaches a literal-dot ARRAY key ──────────────────────────
+        //
+        // `x.y` is a literal-dot array key on DottedKeySchema. The raw path `x.y` reads as nested `x`→`y`
+        // (missing), so every array operator sees a missing field; only the escape `x\.y` reaches the array.
+        // Pre-fix the raw path borrowed the array's node and answered from a field the row does not hold.
+        describe('17.15 a raw dotted path does not reach a literal-dot array key', () => {
+            const row = { id: 'x', 'a.b': 'v', 'x.y': ['t'] };
+            const dotted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition, DottedKeySchema);
+
+            test('$size on the raw path is false (missing field)', async () => {
+                expect(await dotted({ 'x.y': { $size: 1 } })).toBe(false);
+            });
+            test('$all on the raw path is false (missing field)', async () => {
+                expect(await dotted({ 'x.y': { $all: ['t'] } })).toBe(false);
+            });
+            test('$elemMatch on the raw path is false (missing field)', async () => {
+                expect(await dotted({ 'x.y': { $elemMatch: { $eq: 't' } } })).toBe(false);
+            });
+            test('a bare-scalar contains on the raw path is false (missing field)', async () => {
+                expect(await dotted({ 'x.y': 't' })).toBe(false);
+            });
+            test('the escape still reaches the literal-dot array (control)', async () => {
+                expect(await dotted({ 'x\\.y': { $all: ['t'] } })).toBe(true);
+            });
+        });
+
+        // ── 17.16 A raw dotted path never reaches a literal-dot key inside a spread array ───────────
+        //
+        // Raw twin of 17.14. `rows.a.b` reads as `rows`(array) → `a` → `b`; each element holds the literal
+        // key `a.b`, not a nested `a`→`b`, so the raw path is a missing field. Only `rows.a\.b` reaches it.
+        describe('17.16 a raw dotted path does not reach a literal-dot key inside a spread array', () => {
+            const row = { id: 'x', rows: [{ 'a.b': 'v' }] };
+            const dotted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition, DottedKeyInArraySchema);
+
+            test('a bare-scalar match on the raw path is false (missing field)', async () => {
+                expect(await dotted({ 'rows.a.b': 'v' })).toBe(false);
+            });
+            test('$exists:true on the raw path is false (missing field)', async () => {
+                expect(await dotted({ 'rows.a.b': { $exists: true } })).toBe(false);
+            });
+            test('$exists:false on the raw path is true (missing field)', async () => {
+                expect(await dotted({ 'rows.a.b': { $exists: false } })).toBe(true);
+            });
+        });
+
     });
 }

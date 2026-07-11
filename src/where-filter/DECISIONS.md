@@ -275,6 +275,14 @@ unchanged; the semantics of existing filters are not.
 - **A compound filter on a nested-array path must be satisfied within a single leaf array.**
   `{ 'groups.tags': { $all: ['a', 'b'] } }` no longer matches a row whose `'a'` and `'b'` live in
   different `groups` entries.
+- **A raw dotted filter key never borrows a literal-dot field of the same spelling.** `{ 'x.y': … }` reads as
+  nested `x`→`y`; a schema declaring the literal-dot key `"x.y"` no longer answers the raw path from that
+  field on the SQL engines — it resolves as a missing field, matching the JS matcher. Each reading of a
+  colliding path (raw `a.b` vs escaped `a\.b`) now resolves independently. As a consequence, `a.b.c` on a
+  schema with a record `a` and a literal-dot sibling `"a.b"` now resolves through the record.
+- **An untrusted filter path naming an inherited property no longer crashes SQL compilation.** A record path
+  such as `data.<key>.constructor` or `…__proto__` resolves as a missing field (as the JS matcher already
+  treats it) rather than reading a non-schema value as a schema and throwing during compilation.
 
 Each of these moves an engine *toward* MongoDB's semantics; none is a new divergence.
 

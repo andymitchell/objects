@@ -219,7 +219,7 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
             // fields are read from it directly. An exact-array operand still compares the whole array.
             context = { customSqlIdentifier: this.getSqlIdentifier(dotpropPath, undefined, this.sqlColumnName) };
         } else if (resolved.arrayDepth > 0) {
-            predicate = planSqlArrayTraversal(resolved, parsed, this.nodeMap);
+            predicate = planSqlArrayTraversal(resolved, parsed);
             // The path crosses an array yet does not end at one: its leaf is read from every spread element.
             if (predicate.kind !== 'traverseArray') context = { spreadLeafBelowArray: true };
         }
@@ -265,7 +265,9 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
      * @returns The strict comparison, or `undefined` when the field or the predicate is not one it answers.
      */
     private emitMultiScalarLeaf(resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], context: EmitContext): string | undefined {
-        const applies = this.multiScalarPaths.has(resolved.lookupPath)
+        // The set's keys are enumerated paths, so a hit counts only for a path that resolved to its node; a
+        // collision path resolves unknown (no node) and must not borrow the colliding field's multi-scalar reading.
+        const applies = resolved.node !== undefined && this.multiScalarPaths.has(resolved.lookupPath)
             && (context.customSqlIdentifier === undefined || context.customSpread !== undefined);
         if (!applies) return undefined;
 
@@ -461,8 +463,8 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
      * when SOME element's leaf satisfies it.
      */
     private emitSpreadLeafPredicate(dotpropPath: string, resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
-        const leafNode = this.nodeMap[resolved.lookupPath];
-        if (!leafNode) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+        const leafNode = resolved.node;
+        if (!leafNode) throw new Error(`dotpropPath (${dotpropPath}) resolved without a leaf node`);
         if (predicate.kind === 'exactArray') throw new Error("Cannot compare an array to a non-array");
 
         const path: TreeNode[] = [];

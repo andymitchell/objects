@@ -35,8 +35,9 @@ import { runFuzzSection } from "./fuzz.ts";
  *
  * Any implementation (the pure-JS matcher, the SQLite/Postgres SQL emitters, or a third party) supplies a
  * `matchJavascriptObject` seam; the battery then exercises every operator, filter form, and edge case
- * against it. A passing implementation is provably uniform with the reference semantics — see
- * `MONGO-DIVERGENCES.md` for the documented, intentional departures.
+ * against it. Passing the battery means an implementation agrees with the reference semantics on every
+ * pinned case, except where a capability manifest (`standard-tests/manifests/`) records an acknowledged
+ * seam for that engine and `MONGO-DIVERGENCES.md` documents the intentional departure.
  *
  * @param testConfig The caller's `test`/`expect` (so the suite registers under the caller's runner), the
  *                   `matchJavascriptObject` seam, and optional `implementationName`/`errorsAsValues`/`fuzz`.

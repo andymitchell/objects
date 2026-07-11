@@ -1,5 +1,5 @@
 import type { Predicate } from "../ast/index.ts";
-import type { TreeNode, TreeNodeMap } from "../../dot-prop-paths/schema-tree.ts";
+import type { TreeNode } from "../../dot-prop-paths/schema-tree.ts";
 import type { ResolvedPath } from "../../dot-prop-paths/resolvePath-types.ts";
 
 /**
@@ -37,26 +37,28 @@ export type SqlPredicate = Predicate | TraverseArrayPredicate;
 /**
  * Plan how a SQL emitter should reach the array a path ends at, so a condition on it binds to one leaf array.
  *
- * @param resolved The path, resolved against the schema.
+ * @param resolved The path, resolved against the schema. The leaf array's node travels on it, identity-verified.
  * @param predicate The whole field condition. It is wrapped as one unit — a conjunction stays inside the wrapper,
  *   which is what confines every operator of the conjunction to the same leaf array.
- * @param nodeMap The schema's flat path map, built with parent references.
  * @returns A `traverseArray` node when the path's leaf is an array; otherwise `predicate` unchanged, because
  *   a scalar or object leaf is read from each spread element rather than bound to an array of its own.
  *
  * @example
  * // `groups` is an array of `{subtags: string[]}`
- * planSqlArrayTraversal(resolve('groups.subtags'), pred, nodeMap);
+ * planSqlArrayTraversal(resolve('groups.subtags'), pred);
  * // → { kind: 'traverseArray', intermediates: [groups], leafSegments: ['subtags'], … }
  *
  * @remarks
  * `leafSegments` are node names in path order, so a key holding a literal dot stays one segment. `intermediates`
  * carries only named nodes: an array element has no name of its own and contributes nothing to a JSON path.
  */
-export function planSqlArrayTraversal(resolved: ResolvedPath, predicate: Predicate, nodeMap: TreeNodeMap): SqlPredicate {
+export function planSqlArrayTraversal(resolved: ResolvedPath, predicate: Predicate): SqlPredicate {
     if (resolved.arrayDepth === 0) return predicate;
 
-    const leafArrayNode = nodeMap[resolved.lookupPath];
+    // The leaf array's node arrives identity-verified on the resolution (its ancestry spells the segments), so
+    // an accessor rebuilt from it addresses the field the path names. A record_value path — or any path with no
+    // enumerated node — has none, and there is no schema-planned array to traverse, so the predicate passes through.
+    const leafArrayNode = resolved.node;
     if (!leafArrayNode || leafArrayNode.kind !== 'array') return predicate;
 
     const named = namedAncestry(leafArrayNode);

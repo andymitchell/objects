@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * fields. Dot-prop spreading reaches arbitrarily deep leaves.
  */
 export function registerArraySemantics(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     // Nested spreading-array fixtures (three and four array levels).
     const spread3 = (leaf: string) => ({ a: [{ b: [{ c: [{ leaf }] }] }] });
@@ -184,6 +184,17 @@ export function registerArraySemantics(ctx: SectionCtx): void {
         test('18.33 $all is order-independent', async () => {
             const result = await matchJavascriptObject({ id: 't', tags: ['a', 'b', 'c'], nums: [] }, { tags: { $all: ['c', 'a'] } }, TagsSchema);
             expectOrAcknowledgeUnsupported(result, true);
+        });
+
+        test('18.34 $elemMatch mixing $exists with a scalar predicate matches nothing (companion to 18.30/18.31)', async () => {
+            // MEASURED: false on every engine — see MONGO-DIVERGENCES.md #15. A field-level operator ($exists/$type)
+            // anywhere in a scalar $elemMatch body routes the WHOLE body to a per-element deep-equal, so it is compared
+            // as the literal object {$exists:true,$eq:'a'} against each element; no scalar element equals that object.
+            // MongoDB instead reads the body element-wise, where 'a' satisfies both, and matches. Strict toBe, not the
+            // acknowledge helper: every consumer returns a real boolean here (the $eq gives SQL a concrete predicate), so
+            // this is a required cross-engine law, and the divergence from MongoDB is a conservative under-match.
+            const result = await matchJavascriptObject({ id: 't', tags: ['a'], nums: [] }, { tags: { $elemMatch: { $exists: true, $eq: 'a' } } }, TagsSchema);
+            expect(result).toBe(false);
         });
 
     });

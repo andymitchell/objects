@@ -1,5 +1,5 @@
 import { z, type ZodSchema } from "zod";
-import type {  ArrayValueComparisonAll, ArrayValueComparisonElemMatch, ArrayValueComparisonSize, ValueComparisonEq, ValueComparisonExists, ValueComparisonIn, ValueComparisonNe, ValueComparisonNin, ValueComparisonNot, ValueComparisonRegex, ValueComparisonType, WhereFilterDefinition } from "./types.ts";
+import type { WhereFilterDefinition } from "./types.ts";
 import isPlainObject from "../utils/isPlainObject.js";
 import { WhereFilterLogicOperators } from "./consts.ts";
 
@@ -85,15 +85,9 @@ export const ValueOpsPayloadSchema: ZodSchema = z.lazy(() =>
     )
 );
 
-// `$all` accepts the widened JSON operand domain (booleans / null / non-finite numbers / plain objects were
-// wrongly rejected before). Kept as its own schema so the `isArrayValueComparisonAll` guard — which the JS
-// matcher dispatches on — widens in lock-step with the gate, with zero matcher edits.
-const ArrayValueComparisonAllSchema = z.object({ $all: z.array(FilterDataValueSchema) });
-
 // A `$elemMatch` body: a scalar operand, a value-operator payload, or a nested sub-filter (a field-path
 // object). Array-category operators inside `$elemMatch` were rejected before — preserved by excluding them.
 const ElemMatchBodySchema = z.union([ValueComparisonScalarSchema, ValueOpsPayloadSchema, z.lazy(() => WhereFilterSchema)]);
-const ArrayValueComparisonElemMatchSchema = z.object({ $elemMatch: ElemMatchBodySchema });
 
 // An ARRAY field condition: one plain object carrying one or more array operators (AND). `$in`/`$nin`/`$not`/
 // `$exists`/`$type` are SHARED with the value payload (meaningful on arrays too); `$elemMatch`/`$all`/`$size`
@@ -162,40 +156,4 @@ export function isWhereFilterDefinition(x: unknown):x is WhereFilterDefinition {
 }
 export function isWhereFilterArray(x:unknown): x is WhereFilterDefinition<any>[] {
     return !!x && Array.isArray(x) && x.every(x => isWhereFilterDefinition(x));
-}
-
-export function isValueComparisonEq(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonEq {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$eq" in (x as object);
-}
-
-export function isArrayValueComparisonElemMatch(x: unknown): x is ArrayValueComparisonElemMatch {
-    return ArrayValueComparisonElemMatchSchema.safeParse(x).success;
-}
-
-export function isValueComparisonNe(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonNe {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$ne" in (x as object);
-}
-export function isValueComparisonIn(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonIn {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$in" in (x as object);
-}
-export function isValueComparisonNin(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonNin {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$nin" in (x as object);
-}
-export function isValueComparisonNot(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonNot {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$not" in (x as object);
-}
-export function isValueComparisonExists(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonExists {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$exists" in (x as object);
-}
-export function isValueComparisonType(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonType {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$type" in (x as object);
-}
-export function isValueComparisonRegex(x: unknown, alreadyProvedIsPlainObject?: boolean): x is ValueComparisonRegex {
-    return (alreadyProvedIsPlainObject || isPlainObject(x)) && "$regex" in (x as object);
-}
-export function isArrayValueComparisonAll(x: unknown): x is ArrayValueComparisonAll {
-    return ArrayValueComparisonAllSchema.safeParse(x).success;
-}
-export function isArrayValueComparisonSize(x: unknown): x is ArrayValueComparisonSize {
-    return ArrayValueComparisonSizeSchema.safeParse(x).success;
 }

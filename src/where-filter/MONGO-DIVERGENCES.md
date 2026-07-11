@@ -2,7 +2,12 @@
 
 WhereFilterDefinition is a **subset** of MongoDB's query language. Every valid filter is also valid MongoDB syntax — with the exceptions listed below, where our semantics intentionally differ from MongoDB's.
 
-Three kinds of entry appear below. Entries **#1–#8** are **silent semantic divergences**: the same syntax runs but yields a different result than MongoDB. Entry **#9** is a **loud-rejection subset gap**: an operand type MongoDB/BSON accepts is rejected outright at the validity gate (rather than silently mis-evaluated), so every engine stays uniform across the JSON storage boundary. Entry **#10** is a **single-engine storage limit**: Postgres cannot persist one byte-value the other engines round-trip.
+The entries below are of three kinds, and each states which it is:
+- a **silent semantic divergence** — the same syntax runs but yields a different result than MongoDB;
+- a **loud-rejection subset gap** — an input MongoDB/BSON accepts is refused up front (at the validity gate, or as a typed compile-time refusal) rather than silently mis-evaluated, so every engine stays uniform across the JSON storage boundary;
+- a **single-engine storage limit** — a value one engine cannot persist that the others round-trip.
+
+Entries are numbered for stable reference: the capability manifests (`standard-tests/manifests/`) cite them by number, so a number is never reused or renumbered. A retired entry leaves its number as a gap (entry #6 was retired when a fix made the behaviour conformant).
 
 ---
 
@@ -70,17 +75,9 @@ Three kinds of entry appear below. Entries **#1–#8** are **silent semantic div
 
 ---
 
-## 6. `$size` on spread dot-prop paths (SQL)
+## 6. (retired)
 
-**MongoDB**: `$size` checks the length of the array at the resolved path.
-
-**WhereFilterDefinition (JS)**: When a dot-prop path crosses through multiple arrays (spreading), the JS engine correctly evaluates `$size` against each leaf array.
-
-**WhereFilterDefinition (SQL)**: SQL implementations use `CROSS JOIN` / `json_each` for array spreading, which may flatten intermediate arrays. `$size` might evaluate against the flattened result rather than individual leaf arrays.
-
-**Rationale**: Correctly composing `$size` with array spreading in SQL is complex. This is documented as a known divergence.
-
-**Test**: `$size on spread dot-prop path: passes when leaf array matches`
+`$size` on spread dot-prop paths once diverged on SQL. The leaf-scope fix made every engine evaluate `$size` against each individual leaf array, so this is no longer a divergence. The number is kept as a gap (see the note above) rather than reused.
 
 ---
 
@@ -122,11 +119,11 @@ Three kinds of entry appear below. Entries **#1–#8** are **silent semantic div
 
 ---
 
-## 9. Operand domain is the JSON-serialisable subset (non-JSON carriers are rejected)
+## 9. Operand domain is the portable (JSON) value subset (non-JSON carriers are rejected)
 
 **MongoDB / BSON**: BSON's operand and value domain is rich — `Date`, `BinData`, `ObjectId`, `Long`/`Decimal128`, regular expressions as first-class values, etc. `{ createdAt: { $gt: new Date('2020-01-01') } }` and a stored `{ tags: [new Date()] }` are all valid.
 
-**WhereFilterDefinition**: every data and operand position — a bare scalar, an `$eq`/range/`$in` operand, an exact-array element, an `$all` element — accepts only the JSON-serialisable subset: `string | number` (including `NaN`/`±Infinity`) `| boolean | null`, and plain objects/arrays composed of those. A non-JSON carrier — `Date`, `bigint`, `Symbol`, `Map`, `Set`, or an explicit `undefined` element — is **rejected at the validity gate** (`isWhereFilterDefinition`): the JS matcher throws ("filter was not well-defined") and the SQL builders rethrow a not-well-defined error. Unlike the silent divergences #1–#8, this subset gap **fails loudly**.
+**WhereFilterDefinition**: every data and operand position — a bare scalar, an `$eq`/range/`$in` operand, an exact-array element, an `$all` element — accepts only the portable value subset: `string | number | boolean | null` and plain objects/arrays composed of those, plus non-finite numbers (`NaN`/`±Infinity`) as the one documented exception. A non-JSON carrier — `Date`, `bigint`, `Symbol`, `Map`, `Set`, or an explicit `undefined` element — is **rejected at the validity gate** (`isWhereFilterDefinition`): the JS matcher throws ("filter was not well-defined") and the SQL builders rethrow a not-well-defined error. Unlike the silent semantic divergences above, this subset gap **fails loudly**.
 
 Related structural rejections at the same gate: an explicitly-`undefined` *operator* or *logic* value is malformed (`{ age: { $gt: undefined } }`, `{ $or: undefined }`, `{ name: { $regex: 'a', $options: undefined } }`), and an unknown operator riding a known one (`{ age: { $eq: 5, $mod: 3 } }`) is rejected rather than silently ignored. A bare `{ field: undefined }` field value stays valid (it matches nothing — see the Edge Cases table in `WhereFilterDefinition`).
 
@@ -147,3 +144,76 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 **Rationale**: the same family as #7 — the storage boundary loses a value the in-memory matcher keeps. Postgres's inability to store U+0000 is a documented platform limit (`text` disallows the byte entirely) with no portable workaround short of a lossy re-encoding plus a breaking storage-format change. Consumers should reject U+0000 at input (cf. #7's `z.number().finite()` guidance for non-finite numbers), rather than expecting the Postgres impl to preserve it.
 
 **Test**: `19.19 a null byte in the value binds and matches` — JS and SQLite assert strict `true`; Postgres is acknowledged against this entry (its store fails, so the value never matches).
+
+---
+
+## 11. A value-normalizing schema is refused by the schema-driven engines
+
+**MongoDB**: has no schema — it compares stored values as-is.
+
+**WhereFilterDefinition**: a field whose declared Zod schema *normalizes* the value on parse — a `z.coerce.*` flag, or a `transform` / `pipe` / `preprocess` node — makes the value-driven JS matcher and the schema-driven SQL emitters read different values. The matcher compares the raw stored value with strict `===`, while the SQL emitter casts per the declared type: `z.coerce.number()` accepts a stored string `'1'` that a `::numeric` cast equates with `1`, but the matcher's `===` rejects it.
+
+**Resolution**: `findNormalizingPaths` (exported) detects these paths. The SQL translators reject a normalizing path at construction — a typed refusal, never a silent mismatch — and `matchJavascriptObject` under `universalSchemaConformance` throws on one too, so a consumer opting into universal conformance is held to the same lowest-common-denominator boundary rather than getting engine-dependent results. `.refine()`, `.default()`, `.catch()` and other transparent wrappers are **not** normalizations — they validate or supply a fallback without rewriting a present, conforming value — and are descended through.
+
+**Rationale**: a schema-driven backend cannot reproduce an arbitrary JS parse transform in SQL. This is the same value-driven-vs-schema-driven boundary as #8, one level deeper; refusing loudly keeps the engines uniform.
+
+**Enforced by**: `findNormalizingPaths` (SQL translator construction; `matchJavascriptObject`'s `universalSchemaConformance` check).
+
+---
+
+## 12. An array inside a record value is a typed unsupported path
+
+**MongoDB**: resolves any path against the runtime value, regardless of declared shape.
+
+**WhereFilterDefinition**: a path that crosses an array *inside* a `z.record(...)` value — e.g. `data.<key>.tags` where `data` is `Record<string, { tags: string[] }>` — cannot be emitted by the schema-driven SQL array-spreading builders, which key off schema-tree nodes that a dynamic record key does not have. Rather than crash or silently return no match, the builders return a typed unsupported-path error, surfaced to callers as a refusal to compile. Non-array leaves beneath a record resolve and compile normally.
+
+**Rationale / status**: a design decision, not a permanent limitation — see `DECISIONS.md` #6 ("Record-value arrays are an acknowledged unsupported path"), which records the loud-refusal contract and the future work to lift it.
+
+---
+
+## 13. Comparison operators on an array field are not element-wise
+
+**MongoDB**: an equality or comparison operator on an array field is applied to each element — `{ tags: { $eq: 'a' } }`, `{ tags: { $gt: 'm' } }`, `{ tags: { $regex: '^a' } }` all match an array that contains a qualifying element.
+
+**WhereFilterDefinition**: only a bare scalar (`{ tags: 'a' }`) and `$in` / `$nin` apply implicitly across an array's elements (containment). An explicit comparison operator — `$eq`, `$ne`, `$gt`/`$gte`/`$lt`/`$lte`, `$regex` — compares against the array value *as a whole*, so it does not match a scalar element: `{ tags: { $eq: 'a' } }` is **`false`** on `['a']`, even though the bare `{ tags: 'a' }` is `true`. To match elements, wrap the operator in `$elemMatch` — `{ tags: { $elemMatch: { $eq: 'a' } } }`.
+
+Both the JS matcher and the SQL emitters agree here (element-wise spreading for these operators is triggered only by `$elemMatch`), so this is a uniform divergence, not a cross-engine gap.
+
+**Rationale**: applying every operator element-wise by default would erase the array/scalar distinction and force each operator's SQL through the array-spreading path. Bare-scalar containment is kept because it is the common case; `$elemMatch` makes the element-wise intent explicit.
+
+**Tests**: element-wise matching via `$elemMatch` is covered in §3b ("Element-type branching") and §18; the whole-array behaviour of a bare comparison operator is its complement.
+
+---
+
+## 14. Escaped-dot path grammar diverges between the JS and SQL readers
+
+**MongoDB**: field names are opaque strings — there is no dot-escaping grammar to diverge.
+
+**WhereFilterDefinition**: a dot-prop path escapes a literal dot in a key as `\.`, so `rows.a\.b` names the two keys `rows` and `a.b`. The SQL path reader (`parseDotPropPathSegments`) recognises only `\.`; the JS matcher's reader (the `dot-prop` package) additionally decodes `\\`→`\`, `\[` and `\]`. So a path using one of those extra escapes — e.g. `rows.a\\.b` — is read differently by the two engines, and a data key that itself holds a backslash cannot be named by any path, escaped or not.
+
+Both readers agree on the common `\.` case; they diverge only on the backslash/bracket escapes the JS reader adds.
+
+**Rationale / status**: the divergence is narrow and the affected keys are pathological (a key literally containing `\`, `[` or `]`). Unifying the two readers is deferred — see `DECISIONS.md` #10 ("The escaped-dot path grammar is not unified …") for what it would require. Pinned at `dot-prop-paths/dotPropPathSegments.test.ts` ("a key holding a backslash cannot be named by any path, escaped or not").
+
+---
+
+## 15. `$exists` and `$type` in a scalar `$elemMatch` body describe no element, so the body matches nothing
+
+**MongoDB**: `$elemMatch` reads its body element-wise, and every operator inside it — including `$exists` and `$type` — applies to each element. `{ tags: { $elemMatch: { $exists: true } } }` matches any non-empty array, and `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` matches `['a']`.
+
+**WhereFilterDefinition**: `$exists` and `$type` are field-level operators with no per-element meaning, so a scalar `$elemMatch` body that mentions either is compared as a literal object against each element (a per-element deep-equal). No scalar element equals such an object, so the whole filter is **`false`**:
+- `{ tags: { $elemMatch: { $exists: true } } }` is `false` on `['a']` (§18.30).
+- `{ tags: { $elemMatch: { $type: 'string' } } }` is `false` on `['a']` (§18.31).
+- Mixing one with a scalar predicate does not rescue it: `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` is `false` on `['a']` (§18.34), even though the `$eq: 'a'` alone would match.
+
+This is the same field-vs-element split as divergence #1 (`$type` checks the field, not array elements), one level down inside `$elemMatch`. Both the JS matcher and the SQL emitters agree, so it is a uniform divergence, not a cross-engine gap. It is strictly conservative — it can only under-match relative to MongoDB, never match more.
+
+**Rationale / status**: element-level `$exists`/`$type` is low value, and making it MongoDB-conformant is a further cross-engine behaviour change, not a documentation pass — see `DECISIONS.md` #11 ("`$exists`/`$type` in a scalar `$elemMatch` body are not made element-wise") for exactly what it would require.
+
+**Tests**: §18.30, §18.31 (solo); §18.34 (mixed with `$eq`).
+
+---
+
+## Not divergences: conformance fixes
+
+Some past behaviours that *did* differ from MongoDB have been fixed toward it, so they are **not** listed above as divergences. In particular: multiple operators in one payload are now conjunctive everywhere (including inside `$not` and a scalar `$elemMatch`); `$not` negates its operand on a missing field; a range comparison against a wrong-typed stored value returns `false` rather than throwing; and a compound filter on a nested-array path must be satisfied within a single leaf array. Each moved an engine *toward* MongoDB's semantics — see the **Release notes** in `DECISIONS.md`.

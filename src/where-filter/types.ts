@@ -341,9 +341,10 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * ---
  * ## Operand domain & structural validity
  *
- * **Operand domain — the JSON-serialisable subset.** Data and operand positions (a bare scalar, an
- * `$eq`/range/`$in` operand, an exact-array element, an `$all` element) accept only `string | number`
- * (incl. `NaN`/`±Infinity`) `| boolean | null` and plain objects/arrays thereof. A non-JSON carrier —
+ * **Operand domain — the portable (JSON) value subset.** Data and operand positions (a bare scalar, an
+ * `$eq`/range/`$in` operand, an exact-array element, an `$all` element) accept `string | number | boolean
+ * | null` and plain objects/arrays thereof, plus non-finite numbers (`NaN`/`±Infinity`) as the one
+ * documented exception (accepted as operands, but lossy through SQL storage). A non-JSON carrier —
  * `Date`, `bigint`, `Symbol`, `Map`, `Set`, or an explicit `undefined` element — is **rejected at the
  * validity gate** (`isWhereFilterDefinition`), so the matcher throws rather than silently mis-evaluating
  * (the JS matcher deep-equals a `Date`; SQL's `JSON.stringify` morphs it to an ISO string or throws on a

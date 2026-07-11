@@ -55,10 +55,10 @@ const MAX_WRAPPER_STEPS = 100;
  * A path whose leaf sits behind a union is reported unknown: two variants may disagree on the leaf's type,
  * and guessing one would be worse than declining.
  *
- * `lookupPath` rejoins the decoded segments, so a literal-dot key (`a\.b`) and a nested path (`a.b`) look up
- * the same entry and report the same leaf. A schema declaring both is rejected when its path map is built, so
- * at most one of the two fields exists; whichever it is, an engine addresses the value by `segments`, and the
- * reading that does not exist finds nothing there.
+ * `lookupPath` rejoins the decoded segments, so a literal-dot key (`a\.b`) and a nested path (`a.b`) collide
+ * on one map entry. The entry found there is accepted only when the node's own ancestry spells the decoded
+ * segments, so each reading resolves independently: the one the schema declares is found, and the other
+ * reports unknown.
  */
 export function resolvePath(dotPropPath: string, nodeMap: TreeNodeMap): ResolvePathResult {
     const segments = parseDotPropPathSegments(dotPropPath);
@@ -67,11 +67,14 @@ export function resolvePath(dotPropPath: string, nodeMap: TreeNodeMap): ResolveP
     }
 
     const lookupPath = segments.join('.');
-    const unknown: ResolvedPath = { lookupPath, segments, arrayDepth: 0, known: false, origin: 'unknown', leafKind: undefined, leafSchema: undefined };
+    const unknown: ResolvedPath = { lookupPath, segments, arrayDepth: 0, known: false, origin: 'unknown', leafKind: undefined, leafSchema: undefined, node: undefined };
 
     // Own-property only: a plain object inherits `__proto__`, `constructor`, `toString`, … from
     // `Object.prototype`, and reading one as a declared node would report a path no schema holds as known.
-    const enumerated = Object.hasOwn(nodeMap, lookupPath) ? nodeMap[lookupPath] : undefined;
+    // Identity-checked: `lookupPath` rejoins the segments lossily, so a literal-dot key and a nested path can
+    // collide on one entry; the node counts only when its own ancestry spells the decoded segments.
+    const candidate = Object.hasOwn(nodeMap, lookupPath) ? nodeMap[lookupPath] : undefined;
+    const enumerated = candidate && nodeMatchesSegments(candidate, segments) ? candidate : undefined;
     if (enumerated) {
         return {
             success: true,
@@ -83,6 +86,7 @@ export function resolvePath(dotPropPath: string, nodeMap: TreeNodeMap): ResolveP
                 origin: 'enumerated',
                 leafKind: enumerated.kind,
                 leafSchema: enumerated.schema,
+                node: enumerated,
             },
         };
     }
@@ -105,6 +109,7 @@ export function resolvePath(dotPropPath: string, nodeMap: TreeNodeMap): ResolveP
             origin: 'record_value',
             leafKind: getZodKind(leaf.schema),
             leafSchema: leaf.schema,
+            node: undefined,
         },
     };
 }
@@ -130,6 +135,23 @@ export function isUnspreadableRecordPath(resolved: ResolvedPath): boolean {
     return resolved.origin === 'record_value' && resolved.arrayDepth > 0;
 }
 
+/**
+ * Whether a path-map node's own ancestry spells exactly these decoded segments.
+ *
+ * Map keys rejoin segments with `.`, so a literal-dot key (`a\.b`) and a nested path (`a.b`) collide on one
+ * key. The node stored there belongs to only one of those readings; this is the test for which — a node's
+ * named ancestors, root-first, must equal the segments one-for-one.
+ */
+function nodeMatchesSegments(node: TreeNode, segments: readonly string[]): boolean {
+    const names: string[] = [];
+    let target: TreeNode | undefined = node;
+    while (target) {
+        if (target.name) names.unshift(target.name);
+        target = target.parent;
+    }
+    return names.length === segments.length && names.every((name, index) => name === segments[index]);
+}
+
 /** Counts the arrays a node's path crosses, including the node itself when it is an array. */
 function countArraysInAncestry(node: TreeNode): number {
     let count = 0;
@@ -151,6 +173,9 @@ function findRecordAncestor(segments: readonly string[], nodeMap: TreeNodeMap): 
         const ancestorPath = segments.slice(0, depth).join('.');
         const ancestor = Object.hasOwn(nodeMap, ancestorPath) ? nodeMap[ancestorPath] : undefined;
         if (!ancestor) continue;
+        // A wrong-reading node (a literal-dot key colliding with this prefix) is not this path's ancestor;
+        // a shorter prefix may still hold the record the segments really descend through, so keep looking.
+        if (!nodeMatchesSegments(ancestor, segments.slice(0, depth))) continue;
         if (ancestor.kind === 'record' && ancestor.schema) return { node: ancestor, schema: ancestor.schema, depth };
         return undefined;
     }
@@ -168,7 +193,10 @@ function walkValueSchema(valueSchema: AnyZodSchema, segments: readonly string[])
         const kind = getZodKind(container.schema);
 
         if (kind === 'object') {
-            const field = getObjectShape(container.schema)[segment];
+            const shape = getObjectShape(container.schema);
+            // Own-property only: the shape inherits `constructor`, `toString`, … from Object.prototype, and an
+            // inherited member is not a declared field — nor even a Zod schema, so reading it as one would throw.
+            const field = Object.hasOwn(shape, segment) ? shape[segment] : undefined;
             if (!field) return undefined;
             current = field;
         } else if (kind === 'record') {

@@ -17,7 +17,7 @@ import type { WhereClauseError } from "../sql/types.ts";
  * This is the adapters' internal currency: they classify a compile/execute round-trip into a `ConformanceOutcome`
  * with {@link classifyWhereClauseErrors} / {@link classifyInsertError}, then collapse it to the boolean/undefined
  * the conformance battery's seam expects. Keeping the classification typed removes the message-substring cascades
- * the adapters used to carry.
+ * the adapters would otherwise carry.
  */
 export type ConformanceOutcome =
     | { readonly kind: 'matched'; readonly value: boolean }

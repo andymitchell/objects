@@ -105,6 +105,26 @@ describe('a path is resolved against the schema that describes it', () => {
             expect(resolved.origin).toBe('record_value');
             expect(resolved.leafKind).toBe('string');
         });
+
+        test('an inherited name beneath a record value is not a field, and does not crash the walk', () => {
+            // `data`'s value is an object, so `data.foo.<segment>` bracket-reads its shape. `constructor`,
+            // `__proto__` and `toString` are inherited from `Object.prototype`, not declared fields — and
+            // reading one as a Zod schema would throw. The walk must treat them as absent, not descend them.
+            for (const inherited of ['constructor', '__proto__', 'toString']) {
+                const resolved = resolve(RecordSchema, `data.foo.${inherited}`);
+                expect(resolved.known).toBe(false);
+                expect(resolved.origin).toBe('unknown');
+            }
+        });
+
+        test('a record value that genuinely declares an inherited-sounding field still resolves it', () => {
+            // The guard is own-property, not a denylist: a value type that really declares `constructor`
+            // resolves it as the field it is.
+            const schema = z.object({ data: z.record(z.string(), z.object({ constructor: z.string() }).strict()) }).strict();
+            const resolved = resolve(schema, 'data.foo.constructor');
+            expect(resolved.known).toBe(true);
+            expect(resolved.leafKind).toBe('string');
+        });
     });
 
     describe('a key containing a literal dot', () => {
@@ -118,12 +138,13 @@ describe('a path is resolved against the schema that describes it', () => {
             expect(resolve(Schema, 'contact.name').segments).toEqual(['contact', 'name']);
         });
 
-        test('the raw dots name two keys, whatever the leaf lookup reports', () => {
-            // Both readings of `a.b` share one entry in the schema's path map, so the leaf's type is
-            // borrowed from whichever field the schema declares — here, the literal-dot one. That cannot
-            // mislead: a schema declaring BOTH readings is rejected when its path map is built, so only
-            // one field can exist, and the decoded segments are what an engine reads the value with.
+        test('the raw dots name two keys, and resolve independently of the literal-dot field', () => {
+            // `a.b` decodes to two segments; the schema declares only the literal-dot key `a.b` (one
+            // segment). Both readings collide on one path-map key, but a map entry is accepted only when the
+            // node's own ancestry spells the decoded segments — so the raw reading, which the schema does not
+            // declare, resolves as unknown rather than borrowing the literal-dot field's type.
             expect(resolve(Schema, 'a.b').segments).toEqual(['a', 'b']);
+            expect(resolve(Schema, 'a.b').known).toBe(false);
 
             const bothReadings = z.object({ a: z.object({ b: z.string() }), 'a.b': z.string() });
             expect(() => convertSchemaToDotPropPathTree(bothReadings)).toThrow(/Duplicate dotprop_path/);
@@ -134,6 +155,55 @@ describe('a path is resolved against the schema that describes it', () => {
             expect(resolved.leafKind).toBe('string');
             expect(resolved.arrayDepth).toBe(1);
             expect(resolved.segments).toEqual(['rows', 'a.b']);
+        });
+
+        test('a literal-dot array key is reached only by the escape, never by the raw dots', () => {
+            const schema = z.object({ 'x.y': z.array(z.string()) });
+            const raw = resolve(schema, 'x.y');
+            expect(raw.known).toBe(false);
+            expect(raw.arrayDepth).toBe(0);
+
+            const escaped = resolve(schema, 'x\\.y');
+            expect(escaped.known).toBe(true);
+            expect(escaped.leafKind).toBe('array');
+            expect(escaped.arrayDepth).toBe(1);
+        });
+
+        test('the mirror collision: the raw dots find a nested field the escape cannot', () => {
+            const schema = z.object({ a: z.object({ b: z.string() }) });
+            expect(resolve(schema, 'a.b').known).toBe(true);
+            expect(resolve(schema, 'a\\.b').known).toBe(false);
+        });
+
+        test('a record under a literal-dot key: the raw dots are unknown, the escape reaches the record', () => {
+            const schema = z.object({
+                id: z.string(),
+                'a.b': z.record(z.string(), z.object({ v: z.string(), tags: z.array(z.string()) }).strict()),
+            }).strict();
+            expect(resolve(schema, 'a.b.k.v').known).toBe(false);
+
+            const escaped = resolve(schema, 'a\\.b.k.v');
+            expect(escaped.known).toBe(true);
+            expect(escaped.origin).toBe('record_value');
+        });
+
+        test('a literal-dot key does not mask a record sibling the raw dots resolve through', () => {
+            // `a` is a record and `a.b` a literal-dot string. `a.b.c` reads as `a`(record) → key `b` → `c`,
+            // so it resolves through the record; the literal-dot sibling must not shadow that reading.
+            const schema = z.object({
+                a: z.record(z.string(), z.object({ c: z.string() }).strict()),
+                'a.b': z.string(),
+            }).strict();
+            const resolved = resolve(schema, 'a.b.c');
+            expect(resolved.known).toBe(true);
+            expect(resolved.origin).toBe('record_value');
+            expect(resolved.leafKind).toBe('string');
+        });
+
+        test('the resolved node travels with an enumerated path, and is absent otherwise', () => {
+            expect(resolve(Schema, 'a\\.b').node).toBeDefined();
+            expect(resolve(RecordSchema, 'data.foo.value').node).toBeUndefined();
+            expect(resolve(Schema, 'contact.absent').node).toBeUndefined();
         });
     });
 

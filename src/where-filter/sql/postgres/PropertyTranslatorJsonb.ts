@@ -198,7 +198,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             // fields are read from it directly. An exact-array operand still compares the whole array.
             context = { customSqlIdentifier: this.getSqlIdentifier(dotpropPath, undefined, this.sqlColumnName) };
         } else if (resolved.arrayDepth > 0) {
-            predicate = planSqlArrayTraversal(resolved, parsed, this.nodeMap);
+            predicate = planSqlArrayTraversal(resolved, parsed);
             // The path crosses an array yet does not end at one: its leaf is read from every spread element.
             if (predicate.kind !== 'traverseArray') context = { spreadLeafBelowArray: true };
         }
@@ -250,7 +250,10 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         // against a string/number one. The raw-jsonb reading a multi-scalar union already uses does exactly that.
         const booleanMembership = (predicate.kind === 'in' || predicate.kind === 'nin')
             && predicate.operand.some(v => typeof v === 'boolean');
-        const applies = (this.multiScalarPaths.has(resolved.lookupPath) || booleanMembership)
+        // The set's keys are enumerated paths, so a hit counts only for a path that resolved to its node; a
+        // collision path resolves unknown (no node) and must not borrow the colliding field's multi-scalar
+        // reading. Boolean membership stays independent — it applies to any scalar leaf, including a record value.
+        const applies = ((resolved.node !== undefined && this.multiScalarPaths.has(resolved.lookupPath)) || booleanMembership)
             && (context.customSqlIdentifier === undefined || context.customRawJsonb !== undefined);
         if (!applies) return undefined;
 
@@ -475,8 +478,8 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      * when SOME element's leaf satisfies it.
      */
     private emitSpreadLeafPredicate(dotpropPath: string, resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>): string {
-        const leafNode = this.nodeMap[resolved.lookupPath];
-        if (!leafNode) throw new Error(`dotpropPath (${dotpropPath}) is not known in this.nodeMap`);
+        const leafNode = resolved.node;
+        if (!leafNode) throw new Error(`dotpropPath (${dotpropPath}) resolved without a leaf node`);
         if (predicate.kind === 'exactArray') throw new Error("Cannot compare an array to a non-array");
 
         const path: TreeNode[] = [];

@@ -11,7 +11,7 @@ const SIZE_TWO: Predicate = { kind: 'size', n: 2 };
 const plan = (path: string, nodeMap: TreeNodeMap, predicate: Predicate = SIZE_TWO): SqlPredicate => {
     const resolved = resolvePath(path, nodeMap);
     if (!resolved.success) throw new Error(`test path did not resolve: ${path}`);
-    return planSqlArrayTraversal(resolved.resolved, predicate, nodeMap);
+    return planSqlArrayTraversal(resolved.resolved, predicate);
 };
 
 const mapOf = (schema: z.ZodTypeAny): TreeNodeMap => convertSchemaToDotPropPathTree(schema as z.ZodSchema<any>).map;
@@ -30,6 +30,14 @@ describe('planning how a SQL emitter reaches the array a path ends at', () => {
 
         test('a scalar leaf beneath an array is unplanned, because it is read from each spread element', () => {
             expect(plan('children.child_name', nodeMap)).toEqual(SIZE_TWO);
+        });
+
+        test('a record path that crosses an array is left unplanned: it has no enumerated node to traverse', () => {
+            // A record-value array (`data.<key>.tags`) resolves with arrayDepth > 0 but no path-map node — a
+            // schema-planned traversal cannot address a dynamic key. The planner passes the predicate through;
+            // such a path is refused upstream, never reaching an emitter that would try to spread it.
+            const recordMap = mapOf(z.object({ data: z.record(z.string(), z.object({ tags: z.array(z.string()) })) }));
+            expect(plan('data.foo.tags', recordMap)).toEqual(SIZE_TWO);
         });
     });
 

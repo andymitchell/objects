@@ -216,6 +216,61 @@ engine deny a disallowed path with the same verdict, rather than one engine sile
 
 ---
 
+## 10. The escaped-dot path grammar is not unified across the JS and SQL readers
+
+**Context**: A dot-prop path escapes a literal dot in a key as `\.`. The SQL path reader
+(`parseDotPropPathSegments`) recognises only that escape; the JS matcher reads paths through the `dot-prop`
+package, which additionally decodes `\\`, `\[` and `\]`. The two readers therefore disagree on a path that
+uses those extra escapes, and a key that itself contains a backslash cannot be named at all (see
+`MONGO-DIVERGENCES.md`).
+
+**Decision**: Leave the two readers as they are; document the divergence rather than remove it.
+
+**Why**: The affected keys are pathological — a field name literally containing `\`, `[` or `]` — and the
+common `\.` escape already agrees across both readers. Unifying the grammar changes how the JS matcher reads
+every path, so it is a behaviour change that warrants its own red-first work, not a documentation pass.
+
+**Future work**: Route the JS matcher through the SQL reader instead of `dot-prop`: have `matchJavascriptObject`
+split paths with `parseDotPropPathSegments`, and evaluate a spread leaf's captured `value` directly
+(`evaluatePredicate(leaf.value, …)`) rather than re-parsing the emitted `path` string back through
+`getProperty`. That makes one grammar authoritative and removes a lossy parse→render→parse round trip; the
+`path` field on the spread result would then serve only `getArrayScopeItemAction`.
+
+---
+
+## 11. `$exists`/`$type` in a scalar `$elemMatch` body are not made element-wise
+
+**Context**: In a scalar `$elemMatch` body, `$exists` and `$type` are field-level operators — they describe a
+field's presence or runtime type, not any single element. `parseElemMatchScalarPredicate`
+(`ast/parseFieldPredicate.ts`) routes any body mentioning a field-level operator to a per-element deep-equal,
+so the whole body is compared as a literal object against each element. No scalar element equals such an
+object, so the filter matches nothing: `{ tags: { $elemMatch: { $exists: true } } }` and
+`{ tags: { $elemMatch: { $type: 'string' } } }` are both `false` on `['a']`, and mixing in a scalar predicate
+does not change that — `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` is `false` too, where a
+first-operator-wins reading would have returned `true`. MongoDB instead reads the body element-wise and
+matches. Every engine agrees on the current behaviour (see `MONGO-DIVERGENCES.md` #15).
+
+**Decision**: Keep the inert semantics and document them as a divergence. The behaviour is strictly
+conservative — it can only under-match relative to MongoDB, never match more.
+
+**Why**: An element-level `$exists`/`$type` is low value — `$exists` on an element is nearly always true (an
+enumerated element exists), and an element's `$type` is expressed more directly by matching the element
+itself. Making it conformant is another cross-engine behaviour change touching every engine, not warranted
+for an operator combination with so little practical use.
+
+**Alternative (Mongo-conformant, element-wise)**: applying `$exists`/`$type` per element on all engines would
+require defining the element semantics precisely — `$exists: true` matches any present element (so any
+element of a non-empty array), `$exists: false` matches no element, `$type: X` matches an element whose JSON
+type is `X`, and a mixed body ANDs the element predicates; dropping the `FIELD_LEVEL_OPERATORS` carve-out in
+`parseElemMatchScalarPredicate` so such a body is parsed as a per-element predicate rather than a deep-equal;
+teaching `evaluatePredicate`'s scalar-`$elemMatch` arm to evaluate those operators against each element; and
+mirroring the same in both SQL translators' leaf-array `$elemMatch` emission. It is a behaviour change, so it
+needs red-first tests — flipping §18.30/18.31 (false→true) and the §18.34 mixed pin, sabotage proofs, and a
+≥1000-iteration fuzz whose `$elemMatch` generator and `slowLeafScopeEval` cover `$exists`/`$type` bodies
+(guarding the missing-field/leaf-scope confound) — plus a consumer release note.
+
+---
+
 ## Release notes
 
 Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The exported types are
@@ -230,5 +285,19 @@ unchanged; the semantics of existing filters are not.
 - **A compound filter on a nested-array path must be satisfied within a single leaf array.**
   `{ 'groups.tags': { $all: ['a', 'b'] } }` no longer matches a row whose `'a'` and `'b'` live in
   different `groups` entries.
+- **A raw dotted filter key never borrows a literal-dot field of the same spelling.** `{ 'x.y': … }` reads as
+  nested `x`→`y`; a schema declaring the literal-dot key `"x.y"` no longer answers the raw path from that
+  field on the SQL engines — it resolves as a missing field, matching the JS matcher. Each reading of a
+  colliding path (raw `a.b` vs escaped `a\.b`) now resolves independently. As a consequence, `a.b.c` on a
+  schema with a record `a` and a literal-dot sibling `"a.b"` now resolves through the record.
+- **An untrusted filter path naming an inherited property no longer crashes SQL compilation.** A record path
+  such as `data.<key>.constructor` or `…__proto__` resolves as a missing field (as the JS matcher already
+  treats it) rather than reading a non-schema value as a schema and throwing during compilation.
 
 Each of these moves an engine *toward* MongoDB's semantics; none is a new divergence.
+
+Separately, a type-only tightening (no runtime or semantic change): with `exactOptionalPropertyTypes` enabled
+(decision 2), `{ field: { $gt: undefined } }` and `{ $or: undefined }` no longer type-check, and a bare
+`bigint`/`symbol` operand is now a compile error (decision 3) — each was previously accepted by the type and
+rejected only at the runtime gate. One gap remains: a present-`undefined` operator *beside* a defined one
+(`{ $gte: 18, $ne: undefined }`) still compiles, and the runtime gate still rejects it.

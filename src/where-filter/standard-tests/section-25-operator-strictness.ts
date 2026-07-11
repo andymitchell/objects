@@ -13,10 +13,10 @@ import type { SectionCtx } from "./harness.ts";
  *     same), or a present-but-`undefined` operator/logic value (`{age:{$lt:5,$gt:undefined}}`, `{$or:undefined}`)
  *     is MALFORMED — every engine must reject it, never silently drop the offending key.
  *
- *  2. OPERAND DOMAIN — `$all` (like an exact-array) accepts the full JSON-serialisable value subset,
- *     including non-finite numbers (`$all:[NaN]`), booleans (`$all:[true]`) and null (`$all:[null]`); the
- *     compile-time type always allowed these (the element type follows the array), but the gate historically
- *     rejected them. See MONGO-DIVERGENCES operand-domain entry.
+ *  2. OPERAND DOMAIN — `$all` (like an exact-array) accepts the full portable value subset: JSON values,
+ *     plus non-finite numbers as the documented exception (`$all:[NaN]`), booleans (`$all:[true]`) and null
+ *     (`$all:[null]`); the compile-time type always allowed these (the element type follows the array), but
+ *     the gate historically rejected them. See MONGO-DIVERGENCES operand-domain entry.
  *
  *  3. MULTI-OPERATOR AND — a payload carrying several known operators means their conjunction, exactly as
  *     Mongo defines it: `match(row, {p:{opA,…,opN}}) === match(row, {$and:[{p:{opA}},…,{p:{opN}}]})`. Each

@@ -197,6 +197,23 @@ Both readers agree on the common `\.` case; they diverge only on the backslash/b
 
 ---
 
+## 15. `$exists` and `$type` in a scalar `$elemMatch` body describe no element, so the body matches nothing
+
+**MongoDB**: `$elemMatch` reads its body element-wise, and every operator inside it — including `$exists` and `$type` — applies to each element. `{ tags: { $elemMatch: { $exists: true } } }` matches any non-empty array, and `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` matches `['a']`.
+
+**WhereFilterDefinition**: `$exists` and `$type` are field-level operators with no per-element meaning, so a scalar `$elemMatch` body that mentions either is compared as a literal object against each element (a per-element deep-equal). No scalar element equals such an object, so the whole filter is **`false`**:
+- `{ tags: { $elemMatch: { $exists: true } } }` is `false` on `['a']` (§18.30).
+- `{ tags: { $elemMatch: { $type: 'string' } } }` is `false` on `['a']` (§18.31).
+- Mixing one with a scalar predicate does not rescue it: `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` is `false` on `['a']` (§18.34), even though the `$eq: 'a'` alone would match.
+
+This is the same field-vs-element split as divergence #1 (`$type` checks the field, not array elements), one level down inside `$elemMatch`. Both the JS matcher and the SQL emitters agree, so it is a uniform divergence, not a cross-engine gap. It is strictly conservative — it can only under-match relative to MongoDB, never match more.
+
+**Rationale / status**: element-level `$exists`/`$type` is low value, and making it MongoDB-conformant is a further cross-engine behaviour change, not a documentation pass — see `DECISIONS.md` #11 ("`$exists`/`$type` in a scalar `$elemMatch` body are not made element-wise") for exactly what it would require.
+
+**Tests**: §18.30, §18.31 (solo); §18.34 (mixed with `$eq`).
+
+---
+
 ## Not divergences: conformance fixes
 
 Some past behaviours that *did* differ from MongoDB have been fixed toward it, so they are **not** listed above as divergences. In particular: multiple operators in one payload are now conjunctive everywhere (including inside `$not` and a scalar `$elemMatch`); `$not` negates its operand on a missing field; a range comparison against a wrong-typed stored value returns `false` rather than throwing; and a compound filter on a nested-array path must be satisfied within a single leaf array. Each moved an engine *toward* MongoDB's semantics — see the **Release notes** in `DECISIONS.md`.

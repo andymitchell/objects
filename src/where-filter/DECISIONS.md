@@ -228,6 +228,39 @@ split paths with `parseDotPropPathSegments`, and evaluate a spread leaf's captur
 
 ---
 
+## 11. `$exists`/`$type` in a scalar `$elemMatch` body are not made element-wise
+
+**Context**: In a scalar `$elemMatch` body, `$exists` and `$type` are field-level operators — they describe a
+field's presence or runtime type, not any single element. `parseElemMatchScalarPredicate`
+(`ast/parseFieldPredicate.ts`) routes any body mentioning a field-level operator to a per-element deep-equal,
+so the whole body is compared as a literal object against each element. No scalar element equals such an
+object, so the filter matches nothing: `{ tags: { $elemMatch: { $exists: true } } }` and
+`{ tags: { $elemMatch: { $type: 'string' } } }` are both `false` on `['a']`, and mixing in a scalar predicate
+does not change that — `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` is `false` too, where a
+first-operator-wins reading would have returned `true`. MongoDB instead reads the body element-wise and
+matches. Every engine agrees on the current behaviour (see `MONGO-DIVERGENCES.md` #15).
+
+**Decision**: Keep the inert semantics and document them as a divergence. The behaviour is strictly
+conservative — it can only under-match relative to MongoDB, never match more.
+
+**Why**: An element-level `$exists`/`$type` is low value — `$exists` on an element is nearly always true (an
+enumerated element exists), and an element's `$type` is expressed more directly by matching the element
+itself. Making it conformant is another cross-engine behaviour change touching every engine, not warranted
+for an operator combination with so little practical use.
+
+**Alternative (Mongo-conformant, element-wise)**: applying `$exists`/`$type` per element on all engines would
+require defining the element semantics precisely — `$exists: true` matches any present element (so any
+element of a non-empty array), `$exists: false` matches no element, `$type: X` matches an element whose JSON
+type is `X`, and a mixed body ANDs the element predicates; dropping the `FIELD_LEVEL_OPERATORS` carve-out in
+`parseElemMatchScalarPredicate` so such a body is parsed as a per-element predicate rather than a deep-equal;
+teaching `evaluatePredicate`'s scalar-`$elemMatch` arm to evaluate those operators against each element; and
+mirroring the same in both SQL translators' leaf-array `$elemMatch` emission. It is a behaviour change, so it
+needs red-first tests — flipping §18.30/18.31 (false→true) and the §18.34 mixed pin, sabotage proofs, and a
+≥1000-iteration fuzz whose `$elemMatch` generator and `slowLeafScopeEval` cover `$exists`/`$type` bodies
+(guarding the missing-field/leaf-scope confound) — plus a consumer release note.
+
+---
+
 ## Release notes
 
 Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The exported types are

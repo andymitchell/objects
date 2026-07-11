@@ -81,9 +81,11 @@ export function registerExoticValues(ctx: SectionCtx): void {
             expectOrAcknowledgeDivergence(result, true, '#5 $type bool on SQLite');
         });
 
-        test('19.13 $in [true] on a boolean field is rejected', async () => {
-            // SPEC-INTENT: strict rejection; current JS returns TRUE — expected RED until validation tightened.
-            await expectMalformedFilterRejected(() => matchJavascriptObject({ contact: { name: 'A', isVIP: true } }, { 'contact.isVIP': { $in: [true] } } as unknown as WhereFilterDefinition, BooleanContactSchema));
+        test('19.13 $in [true] matches a boolean field', async () => {
+            // A boolean is a first-class `$in` operand (as for `$eq`): membership over a boolean field compares
+            // type-faithfully, so `{$in:[true]}` matches the `isVIP: true` row.
+            const result = await matchJavascriptObject({ contact: { name: 'A', isVIP: true } }, { 'contact.isVIP': { $in: [true] } }, BooleanContactSchema);
+            expectOrAcknowledgeUnsupported(result, true);
         });
 
         test('19.14 unicode NFC equals NFC', async () => {

@@ -305,19 +305,17 @@ describe('WhereFilterDefinition types', () => {
                 };
             })
 
-            it('rejects $in (resolves to never[])', () => {
+            it('accepts $in with boolean members over a boolean field', () => {
                 const a: WhereFilterDefinition<TestObj> = {
                     active: {
-                        // @ts-expect-error $in resolves to never[] for boolean
                         $in: [true, false]
                     }
                 };
             })
 
-            it('rejects $nin (resolves to never[])', () => {
+            it('accepts $nin with a boolean member over a boolean field', () => {
                 const a: WhereFilterDefinition<TestObj> = {
                     active: {
-                        // @ts-expect-error $nin resolves to never[] for boolean
                         $nin: [true]
                     }
                 };

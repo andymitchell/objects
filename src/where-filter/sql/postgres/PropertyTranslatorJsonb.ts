@@ -244,7 +244,13 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      * @returns The strict comparison, or `undefined` when the field or the predicate is not one it answers.
      */
     private emitMultiScalarLeaf(resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], context: EmitContext): string | undefined {
-        const applies = this.multiScalarPaths.has(resolved.lookupPath)
+        // A boolean `$in`/`$nin` operand must compare type-faithfully even on a HOMOGENEOUS scalar leaf: the
+        // field's text/numeric cast has no `= boolean` operator (and `numeric = boolean` errors), and membership
+        // is type-strict (matchJavascriptObject's `===`), so a boolean matches a boolean field and is inert
+        // against a string/number one. The raw-jsonb reading a multi-scalar union already uses does exactly that.
+        const booleanMembership = (predicate.kind === 'in' || predicate.kind === 'nin')
+            && predicate.operand.some(v => typeof v === 'boolean');
+        const applies = (this.multiScalarPaths.has(resolved.lookupPath) || booleanMembership)
             && (context.customSqlIdentifier === undefined || context.customRawJsonb !== undefined);
         if (!applies) return undefined;
 
@@ -308,7 +314,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'in': {
                 if (predicate.operand.length === 0) return '1 = 0';
                 const alias = nextAlias();
-                if (multiScalarElement) {
+                // A boolean element compares as jsonb-of-its-own-type (like the `$all` case below), so a plain
+                // text `#>> '{}' = boolean` — which Postgres has no operator for — never arises.
+                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
@@ -318,7 +326,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'nin': {
                 if (predicate.operand.length === 0) return '1 = 1';
                 const alias = nextAlias();
-                if (multiScalarElement) {
+                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
@@ -499,7 +507,8 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         switch (predicate.kind) {
             case 'in': {
                 if (predicate.operand.length === 0) return '1 = 0';
-                if (multiScalarElement) {
+                // A boolean element compares as jsonb-of-its-own-type (as `$all` does), never a text `= boolean`.
+                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
                 }
@@ -508,7 +517,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             }
             case 'nin': {
                 if (predicate.operand.length === 0) return '1 = 1';
-                if (multiScalarElement) {
+                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
                 }

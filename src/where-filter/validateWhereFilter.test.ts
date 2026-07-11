@@ -593,8 +593,8 @@ describe("validateWhereFilter — leaf localisation is the gate's exported field
         // `WhereFilterSchema` is `.catchall(WhereFilterFieldConditionSchema)`, so a field condition passes the
         // exported union iff the whole one-field filter passes the gate — for any plain (non-`$`) field key.
         const conditions: unknown[] = [
-            { $eq: 5 }, { $gt: 5, $lt: 10 }, { $ne: 5 }, "plain", 5, null, // well-formed
-            { $eq: 5, $mod: 3 }, { $size: 2, $gt: 5 }, { $in: [true] }, { $in: [{}] }, // malformed
+            { $eq: 5 }, { $gt: 5, $lt: 10 }, { $ne: 5 }, "plain", 5, null, { $in: [true] }, // well-formed ($in accepts a boolean operand)
+            { $eq: 5, $mod: 3 }, { $size: 2, $gt: 5 }, { $in: [{}] }, // malformed (a non-scalar $in member is still rejected)
         ];
         for (const c of conditions) {
             expect(WhereFilterFieldConditionSchema.safeParse(c).success).toBe(isWhereFilterDefinition({ someField: c }));
@@ -605,7 +605,6 @@ describe("validateWhereFilter — leaf localisation is the gate's exported field
         ["an unknown operator riding a known one", { $eq: 5, $mod: 3 }],
         ["an unknown operator riding a range op", { $gt: 5, $mod: 3 }],
         ["mixed array + value operators (cross-category)", { $size: 2, $gt: 5 }],
-        ["a wrong-typed $in member", { $in: [true] }],
         ["a non-scalar $in member", { $in: [{}] }],
     ];
     it.each(malformedConditions)("localises `malformed` at the field when the union rejects: %s", (_label, condition) => {
@@ -618,6 +617,7 @@ describe("validateWhereFilter — leaf localisation is the gate's exported field
         ["a single positive operator", { $eq: 5 }],
         ["conjoined range bounds", { $gt: 5, $lt: 10 }],
         ["a lone broadening operator", { $ne: 5 }],
+        ["a boolean $in member", { $in: [true] }],
     ];
     it.each(wellFormedConditions)("never localises `malformed` when the union accepts: %s", (_label, condition) => {
         expect(WhereFilterFieldConditionSchema.safeParse(condition).success).toBe(true); // the union accepts it

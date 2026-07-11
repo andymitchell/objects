@@ -90,5 +90,18 @@ export function registerMultiScalarEnums(ctx: SectionCtx): void {
             expectOrAcknowledgeUnsupported(result, false);
         });
 
+        test('20.14 multi-scalar $in with a boolean operand matches a boolean value type-faithfully', async () => {
+            // A boolean is a first-class $in operand over a multi-scalar union: a `true` secret matches, and the
+            // heterogeneous list also matches its string member — each compared as its own JSON type.
+            const result = await matchJavascriptObject({ id: 'x', secret: true }, { secret: { $in: [false, true, 'z'] } } as unknown as WhereFilterDefinition, MultiScalarSchema);
+            expectOrAcknowledgeUnsupported(result, true);
+        });
+
+        test('20.15 multi-scalar $in with a boolean operand excludes a same-shaped number', async () => {
+            // Membership is type-strict (`1 !== true`), so `$in:[true]` does NOT admit a numeric secret of 1.
+            const result = await matchJavascriptObject({ id: 'x', secret: 1 }, { secret: { $in: [true] } } as unknown as WhereFilterDefinition, MultiScalarSchema);
+            expectOrAcknowledgeUnsupported(result, false);
+        });
+
     });
 }

@@ -184,6 +184,24 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
             });
         });
 
+        // ── 25.6bis $in / $nin with a boolean operand (widened operand domain) ─────────────────────
+        // A boolean is a first-class $in/$nin operand: over an array field, membership intersects the array,
+        // comparing each element type-faithfully (JSON `true` ≠ `1` ≠ `"true"`), matching the JS matcher.
+        describe('25.6bis $in / $nin over a boolean array', () => {
+            test('25.6bis-A $in:[true] matches a boolean array containing true', async () => {
+                const result = await matchJavascriptObject({ id: 'x', flags: [true, false], maybe: [], scores: [] }, { flags: { $in: [true] } }, ArrayOperandSchema);
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+            test('25.6bis-B $in:[true] does not match a boolean array without true', async () => {
+                const result = await matchJavascriptObject({ id: 'x', flags: [false], maybe: [], scores: [] }, { flags: { $in: [true] } }, ArrayOperandSchema);
+                expectOrAcknowledgeUnsupported(result, false);
+            });
+            test('25.6bis-C $nin:[true] matches a boolean array without true', async () => {
+                const result = await matchJavascriptObject({ id: 'x', flags: [false], maybe: [], scores: [] }, { flags: { $nin: [true] } }, ArrayOperandSchema);
+                expectOrAcknowledgeUnsupported(result, true);
+            });
+        });
+
         // ── 25.7 Multi-operator payloads evaluate as AND (the pair table above) ────────────────────
         describe('25.7 multi-operator payloads evaluate as AND', () => {
             test('25.7a {$exists:true,$gt:5} on a present value is true', async () => {

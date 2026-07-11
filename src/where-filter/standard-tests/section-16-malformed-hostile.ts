@@ -67,9 +67,12 @@ export function registerMalformedHostile(ctx: SectionCtx): void {
             await expectMalformedFilterRejected(() => matchJavascriptObject({ contact: { name: 'A' } }, { 'contact.name': { $in: 5 } } as unknown as WhereFilterDefinition, ContactSchema));
         });
 
-        test('16.12 $in with a boolean member is rejected', async () => {
-            // SPEC-INTENT: strict rejection; current JS returns false — expected RED until validation tightened.
-            await expectMalformedFilterRejected(() => matchJavascriptObject({ contact: { name: 'A' } }, { 'contact.name': { $in: [true] } } as unknown as WhereFilterDefinition, ContactSchema));
+        test('16.12 $in with a boolean member over a string field is a type-bracketed non-match', async () => {
+            // A boolean operand can never `===` a string value, so `$in` membership is a definite non-match, never
+            // a rejection — the same type-bracketing a cross-type `$eq`/range operand gets. `$in` is a valid
+            // filter whose boolean member simply cannot match the string field.
+            const result = await matchJavascriptObject({ contact: { name: 'A' } }, { 'contact.name': { $in: [true] } } as unknown as WhereFilterDefinition, ContactSchema);
+            expectOrAcknowledgeUnsupported(result, false);
         });
 
         test('16.13 $in with a null member is rejected', async () => {

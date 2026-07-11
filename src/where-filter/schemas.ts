@@ -39,7 +39,12 @@ const ValueComparisonScalarSchema = z.union([z.string(), FilterNumber, z.boolean
 // Per-operator operands (each optional in the combined payloads below).
 const EqOperand = z.union([z.string(), FilterNumber, z.boolean(), z.null()]);
 const ScalarOperand = z.union([z.string(), FilterNumber]);              // $ne
-const ScalarListOperand = z.array(z.union([z.string(), FilterNumber])); // $in / $nin (null stays excluded)
+// $in / $nin operands. Booleans are first-class equality operands (as for `$eq`/bare scalars), so a boolean
+// membership (`{active:{$in:[true]}}`, `{flags:{$in:[true]}}` over a boolean array) validates and compares
+// type-faithfully. `null` stays EXCLUDED: the matcher short-circuits a null stored value in `$in` to a
+// non-match (ast/evaluatePredicate.ts), so a `null` operand would neither match Mongo's null-or-missing rule
+// nor a present JSON null — admitting it would be a silent divergence, not a capability.
+const ScalarListOperand = z.array(z.union([z.string(), FilterNumber, z.boolean()]));
 const TypeOperand = z.enum(['string', 'number', 'bool', 'object', 'array', 'null']);
 
 // `$size`: an integer ≥ 0 — non-finite/float/negative IS malformed. `.strict()` so a piggybacked key

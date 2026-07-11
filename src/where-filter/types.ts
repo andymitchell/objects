@@ -20,8 +20,8 @@ export type ValueComparisonRange<T = any> = (T extends string? ValueComparisonRa
 export type ValueComparisonRangeFlexi<T = any> = (T extends string? ValueComparisonRangeString : T extends number? ValueComparisonRangeNumeric : never) | T;
 export type ValueComparisonEq<T = any> = { $eq: T extends string ? string : T extends number ? number : T extends boolean ? boolean : never };
 export type ValueComparisonNe<T = any> = { $ne: T extends string ? string : T extends number ? number : never };
-export type ValueComparisonIn<T = any> = { $in: (T extends string ? string : T extends number ? number : never)[] };
-export type ValueComparisonNin<T = any> = { $nin: (T extends string ? string : T extends number ? number : never)[] };
+export type ValueComparisonIn<T = any> = { $in: (T extends string ? string : T extends number ? number : T extends boolean ? boolean : never)[] };
+export type ValueComparisonNin<T = any> = { $nin: (T extends string ? string : T extends number ? number : T extends boolean ? boolean : never)[] };
 export type ValueComparisonExists = { $exists: boolean };
 export type ValueComparisonType = { $type: 'string' | 'number' | 'bool' | 'object' | 'array' | 'null' };
 export type ValueComparisonRegex = { $regex: string; $options?: string };

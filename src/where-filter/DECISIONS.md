@@ -206,6 +206,28 @@ engine deny a disallowed path with the same verdict, rather than one engine sile
 
 ---
 
+## 10. The escaped-dot path grammar is not unified across the JS and SQL readers
+
+**Context**: A dot-prop path escapes a literal dot in a key as `\.`. The SQL path reader
+(`parseDotPropPathSegments`) recognises only that escape; the JS matcher reads paths through the `dot-prop`
+package, which additionally decodes `\\`, `\[` and `\]`. The two readers therefore disagree on a path that
+uses those extra escapes, and a key that itself contains a backslash cannot be named at all (see
+`MONGO-DIVERGENCES.md`).
+
+**Decision**: Leave the two readers as they are; document the divergence rather than remove it.
+
+**Why**: The affected keys are pathological — a field name literally containing `\`, `[` or `]` — and the
+common `\.` escape already agrees across both readers. Unifying the grammar changes how the JS matcher reads
+every path, so it is a behaviour change that warrants its own red-first work, not a documentation pass.
+
+**Future work**: Route the JS matcher through the SQL reader instead of `dot-prop`: have `matchJavascriptObject`
+split paths with `parseDotPropPathSegments`, and evaluate a spread leaf's captured `value` directly
+(`evaluatePredicate(leaf.value, …)`) rather than re-parsing the emitted `path` string back through
+`getProperty`. That makes one grammar authoritative and removes a lossy parse→render→parse round trip; the
+`path` field on the spread result would then serve only `getArrayScopeItemAction`.
+
+---
+
 ## Release notes
 
 Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The exported types are
@@ -222,3 +244,9 @@ unchanged; the semantics of existing filters are not.
   different `groups` entries.
 
 Each of these moves an engine *toward* MongoDB's semantics; none is a new divergence.
+
+Separately, a type-only tightening (no runtime or semantic change): with `exactOptionalPropertyTypes` enabled
+(decision 2), `{ field: { $gt: undefined } }` and `{ $or: undefined }` no longer type-check, and a bare
+`bigint`/`symbol` operand is now a compile error (decision 3) — each was previously accepted by the type and
+rejected only at the runtime gate. One gap remains: a present-`undefined` operator *beside* a defined one
+(`{ $gte: 18, $ne: undefined }`) still compiles, and the runtime gate still rejects it.

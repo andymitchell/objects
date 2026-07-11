@@ -293,7 +293,7 @@ type LeafClass =
  * their conjunction (Mongo's implicit AND), so this collects EVERY positive, schema-checkable constraint at
  * once — `$eq` (non-null) and the range operators as direct operands, `$in` as a list — rather than picking a
  * single winning operator. A broadening operator ($ne/$nin/$not/$exists/$type, or `$eq:null`) sitting beside
- * them no longer short-circuits the whole leaf: under AND a zero-match positive still forces zero matches. A
+ * them does not short-circuit the whole leaf: under AND a zero-match positive still forces zero matches. A
  * leaf that carries ONLY broadening operators (or a bare `null`) is `broadening` (skipped); `$regex` alone is
  * a pattern (compile-checked, never schema-typed); an operator-free object is `opaque`.
  */

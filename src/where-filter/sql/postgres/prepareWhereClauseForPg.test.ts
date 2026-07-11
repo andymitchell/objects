@@ -15,8 +15,9 @@ import { acquireSchema, warmUp, disposeAllForTest, runQueryWithHeapGuard } from 
 
 describe('postgres where clause builder', () => {
 
-    // Shared PGlite + a fresh schema per match call (see testSchemaPartition.ts). warmUp pre-pays the
-    // one-time WASM init off the first test; disposeAllForTest drops each test's schemas afterwards.
+    // Shared PGlite + one reused table, TRUNCATE'd before each match call (see testSchemaPartition.ts).
+    // warmUp pre-pays the one-time WASM init + table creation off the first test; disposeAllForTest is a
+    // no-op (the table is cleared on the next acquire).
     beforeAll(warmUp);
     afterEach(disposeAllForTest);
 

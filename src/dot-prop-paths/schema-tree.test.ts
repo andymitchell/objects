@@ -494,3 +494,26 @@ describe('getZodSchemaAtSchemaDotPropPath { crossArrays: false }', () => {
         expect(getZodSchemaAtSchemaDotPropPath(s, 'nope', { crossArrays: false })).toBeUndefined();
     });
 });
+
+describe('getZodSchemaAtSchemaDotPropPath — inherited-name path segments resolve as absent, never crash', () => {
+    // A Zod shape is a plain object, so `constructor`, `toString`, … are reachable through its prototype
+    // chain. They are not declared fields — nor even Zod schemas, so reading one as a schema would throw.
+    const s = z.object({ id: z.string(), contact: z.object({ name: z.string() }) });
+
+    it('treats a top-level inherited name as an absent key', () => {
+        for (const key of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+            expect(getZodSchemaAtSchemaDotPropPath(s, key)).toBeUndefined();
+        }
+    });
+
+    it('treats an inherited name nested under a declared object as an absent key', () => {
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'contact.constructor')).toBeUndefined();
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'contact.toString')).toBeUndefined();
+    });
+
+    it('still resolves a field genuinely named after an inherited member (guard is own-property, not a denylist)', () => {
+        const declared = z.object({ constructor: z.string() });
+        const resolved = getZodSchemaAtSchemaDotPropPath(declared, 'constructor');
+        expect(resolved?.safeParse('x').success).toBe(true);
+    });
+});

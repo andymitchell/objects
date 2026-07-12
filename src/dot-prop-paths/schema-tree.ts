@@ -270,13 +270,16 @@ export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotP
         }
 
         if (getZodKind(currentSchema)==='object') {
-            currentSchema = getObjectShape(currentSchema)[key]!;
+            const shape = getObjectShape(currentSchema);
+            // Own-property only: the shape inherits `constructor`, `toString`, … from Object.prototype, and an
+            // inherited member is not a declared field — nor even a Zod schema, so reading it as one would throw.
+            const field = Object.hasOwn(shape, key) ? shape[key] : undefined;
+            if (!field) {
+                return undefined; // Path is not valid or schema does not define this path
+            }
+            currentSchema = field;
         } else {
             return undefined; // Path is not valid for the given schema
-        }
-
-        if (!currentSchema) {
-            return undefined; // Path is not valid or schema does not define this path
         }
     }
 

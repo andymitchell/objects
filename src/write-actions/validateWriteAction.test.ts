@@ -111,6 +111,27 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
         });
     });
 
+    // A scope is attacker-suppliable payload data, and an inherited name (`constructor`, `toString`, …) is
+    // reachable through a plain object's prototype chain rather than a declared field. The gate must treat it
+    // exactly like any other scope that doesn't resolve — errors as values, never a crash.
+    describe("a hostile array_scope.scope naming an inherited member never crashes the gate", () => {
+        const scopedAction = (scope: string) =>
+            wn({ type: "array_scope", scope, where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { cid: "c1" } } });
+
+        it("treats an inherited-name scope exactly like a genuinely absent scope", () => {
+            const absent = validateWriteAction(scopedAction("nonexistent"), NestedSchema, SUBSET);
+            for (const scope of ["constructor", "toString", "children.constructor"]) {
+                expect(() => validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).not.toThrow();
+                expect(validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).toEqual(absent);
+            }
+        });
+
+        it("still catches a non-JSON nested operand under a hostile scope — the subset fallback keeps running", () => {
+            const a = wn({ type: "array_scope", scope: "constructor", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { cid: { $ne: 5n } } } });
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "constructor.cid.$ne" }]);
+        });
+    });
+
     // A pull on a SCALAR array carries `items_where` as a plain value-list (the match targets applyPull removes by
     // deepEquals), NOT a where-filter — so the filter walk never inspects its members. Yet they ride the
     // JSON-roundtripped idempotency ledger like any operand, so a non-JSON member must be rejected up-front, tagged

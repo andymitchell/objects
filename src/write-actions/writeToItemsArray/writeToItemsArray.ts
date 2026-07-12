@@ -285,8 +285,17 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                     const schemaOk = failureTracker.testSchema(action, newItem);
                     if( schemaOk ) {
                         existingIds.add(pkValue);
-                        addedHash[pkValue] = newItem;
-                        if( deletedHash[pkValue] ) delete deletedHash[pkValue];
+                        // The change hashes report the batch's NET effect on the original items, so a primary key
+                        // belongs to at most one of them, and `addedHash` holds only keys ABSENT from those items.
+                        // Re-creating a key this batch already deleted therefore replaces a row that still exists
+                        // for the caller: it is a whole-row update, not an insert. Recording it as an insert would
+                        // leave the original row in place AND append the re-creation, duplicating the key.
+                        if( deletedHash[pkValue] ) {
+                            updatedHash[pkValue] = newItem;
+                            delete deletedHash[pkValue];
+                        } else {
+                            addedHash[pkValue] = newItem;
+                        }
                         successTracker.report(action, newItem);
                         //failureTracker.undoable()?.add(wipItems.length);
                         wipItems.push(newItem);
@@ -451,9 +460,16 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                     if( !failureTracker.shouldHalt() ) {
                         successTracker.report(action, item);
                         if (deleted) {
-                            deletedHash[pkValue] = item;
-                            if( addedHash[pkValue] ) delete addedHash[pkValue];
-                            if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                            // `deletedHash` holds only keys PRESENT in the original items. Deleting a key this batch
+                            // created nets to nothing for the caller — drop the pending insert and record no removal,
+                            // otherwise `remove_keys` names a key that never existed. Any other delete removes a
+                            // pre-existing row, superseding an in-batch update of it.
+                            if( addedHash[pkValue] ) {
+                                delete addedHash[pkValue];
+                            } else {
+                                deletedHash[pkValue] = item;
+                                if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                            }
                             wipItems.splice(i, 1);
                             i--;
                         } else if( mutableUpdatedItem ) {

@@ -1,5 +1,5 @@
 import { FlatSchema, flatDdl, type Flat } from "./fixtures.ts";
-import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
+import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
 
 /**
  * §13: world integrity & immutability.
@@ -10,11 +10,10 @@ import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type Sec
  * row is caught, not just the targeted row.
  */
 export function registerWorldIntegrity(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, expectedFailToday } = ctx;
+    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
 
-    // T-13.11 drives a NON-ATOMIC multi-action batch. An impl that cannot express one acknowledges-unsupported,
-    // which would VACUOUSLY pass the body and invert the test.fails ratchet — so it registers as a visible skip instead.
-    const efNonAtomicMulti = resolveCapability(ctx.capabilities, 'nonAtomicMultiAction') ? expectedFailToday : ctx.test.skip;
+    // T-13.11 drives a NON-ATOMIC multi-action batch, so it only runs for an impl that can express one.
+    const itNonAtomicMulti = itIfSupported('nonAtomicMultiAction');
 
     const world = (): Flat[] => [
         { id: '1', text: 'one', count: 1, tags: ['a'] },
@@ -210,12 +209,10 @@ export function registerWorldIntegrity(ctx: SectionCtx): void {
                 }, implName);
             });
 
-            // T-13.11 [EF] — DISCOVERED ENGINE DEFECT: delete→recreate→update of the same PK in one batch
-            // reports ok:true but leaves the deleted original in final_items, yielding a DUPLICATE primary key
-            // (`{id:'1',text:'orig',...}` survives alongside the recreated `{id:'1',text:'new',count:5}`).
-            // The ideal is a single clean row; registered expected-fail-today until the change-set
-            // reconciliation for same-batch delete+recreate is fixed.
-            efNonAtomicMulti('delete then recreate then mutate the same PK leaves no stale fields', async () => {
+            // T-13.11 — a key deleted and re-created within one batch resolves to a SINGLE row holding only the
+            // re-created data. The world carries one row per primary key, so no field of the deleted original
+            // may survive and the key may not appear twice.
+            itNonAtomicMulti('delete then recreate then mutate the same PK leaves no stale fields', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', text: 'orig', count: 9, tags: ['old'] }],

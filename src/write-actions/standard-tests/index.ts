@@ -40,7 +40,7 @@ export function standardTests(config: StandardTestConfig): void {
         createAdapter: config.createAdapter,
         implName: config.implementationName ?? 'unknown',
         itIfSupported: makeItIfSupported(config.test, config.capabilities),
-        expectedFailToday: makeExpectedFailToday(config.test),
+        expectedFailToday: makeExpectedFailToday(config.test, config.pinReferenceDefects),
         capabilities: config.capabilities,
         fuzz: config.fuzz,
     };

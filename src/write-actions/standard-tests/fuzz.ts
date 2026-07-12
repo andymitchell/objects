@@ -208,5 +208,31 @@ export function runFuzzSection(ctx: SectionCtx): void {
             invariant(r.result.ok === false, () => repro('P10', seed, 10, iter, world, [action], 'invalid action reported ok'));
             invariant(fuzzDeepEqual(sortByPk(r.finalItems), sortByPk(frozen)), () => repro('P10', seed, 10, iter, world, [action], 'invalid action mutated state'));
         });
+
+        // P11 — a world holds one row per primary key, whatever the batch did to it. The reference engine is
+        // checked directly as well as the adapter: where the adapter IS the reference, a differential property
+        // can never see a defect they share, but this one can.
+        property(11, 'unique keys: final_items never holds a primary key twice', async (rng, iter) => {
+            const world = genWorld(rng);
+            const batch = genBatch(rng, world);
+            const r = await runAdapter(world, batch, { atomic: rng.bool(0.3) });
+            if (r === undefined) return;
+
+            const firstDuplicate = (items: FuzzItem[]): string | undefined => {
+                const seen = new Set<string>();
+                for (const item of items) {
+                    const key = String(item.id);
+                    if (seen.has(key)) return key;
+                    seen.add(key);
+                }
+                return undefined;
+            };
+
+            const adapterDup = firstDuplicate(r.finalItems);
+            invariant(adapterDup === undefined, () => repro('P11', seed, 11, iter, world, batch, `adapter final_items holds primary key ${adapterDup} twice`));
+
+            const referenceDup = firstDuplicate(reference(world, batch).changes.final_items);
+            invariant(referenceDup === undefined, () => repro('P11', seed, 11, iter, world, batch, `reference final_items holds primary key ${referenceDup} twice`));
+        });
     });
 }

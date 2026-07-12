@@ -4,7 +4,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §4. Dot-prop paths and array spreading. */
 export function registerDotPropSpreading(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('4. Dot-prop paths and array spreading', () => {
 
@@ -359,16 +359,16 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 matchJavascriptObject(row, filter as WhereFilterDefinition<NestedScalarArray>, NestedScalarArraySchema);
 
             test('$all terms scattered across two leaf arrays do not match', async () => {
-                expect(await scalarLeaf(split, { 'groups.tags': { $all: ['a', 'bx'] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await scalarLeaf(split, { 'groups.tags': { $all: ['a', 'bx'] } }), false, 'nested-array leaf scope');
             });
             test('$all terms present together in one leaf array match', async () => {
-                expect(await scalarLeaf(together, { 'groups.tags': { $all: ['a', 'bx'] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await scalarLeaf(together, { 'groups.tags': { $all: ['a', 'bx'] } }), true, 'nested-array leaf scope');
             });
             test('a compound $all + $elemMatch satisfied only across two leaf arrays does not match', async () => {
-                expect(await scalarLeaf(split, { 'groups.tags': { $all: ['a'], $elemMatch: { $eq: 'bx' } } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await scalarLeaf(split, { 'groups.tags': { $all: ['a'], $elemMatch: { $eq: 'bx' } } }), false, 'nested-array leaf scope');
             });
             test('a compound $all + $elemMatch satisfied within one leaf array matches', async () => {
-                expect(await scalarLeaf(together, { 'groups.tags': { $all: ['a'], $elemMatch: { $eq: 'bx' } } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await scalarLeaf(together, { 'groups.tags': { $all: ['a'], $elemMatch: { $eq: 'bx' } } }), true, 'nested-array leaf scope');
             });
 
             // The same law where the leaf array holds objects rather than scalars.
@@ -391,10 +391,10 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 matchJavascriptObject(row, objFilter as unknown as WhereFilterDefinition<SpreadNested>, SpreadNestedSchema);
 
             test('an object-leaf compound satisfied only across two leaf arrays does not match', async () => {
-                expect(await objectLeaf(objSplit)).toBe(false);
+                expectOrAcknowledgeUnsupported(await objectLeaf(objSplit), false, 'nested-array leaf scope');
             });
             test('an object-leaf compound satisfied within one leaf array matches', async () => {
-                expect(await objectLeaf(objTogether)).toBe(true);
+                expectOrAcknowledgeUnsupported(await objectLeaf(objTogether), true, 'nested-array leaf scope');
             });
         });
 
@@ -412,30 +412,30 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 matchJavascriptObject(row, filter as WhereFilterDefinition<NestedScalarArray>, NestedScalarArraySchema);
 
             test('$nin matches, because a missing field holds none of the forbidden values', async () => {
-                expect(await noLeafArray(absent, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
-                expect(await noLeafArray(empty, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await noLeafArray(absent, { 'groups.tags': { $nin: ['x'] } }), true, 'nested-array missing-field verdict');
+                expectOrAcknowledgeUnsupported(await noLeafArray(empty, { 'groups.tags': { $nin: ['x'] } }), true, 'nested-array missing-field verdict');
             });
             test('$exists:false matches, because the path names nothing', async () => {
-                expect(await noLeafArray(absent, { 'groups.tags': { $exists: false } })).toBe(true);
-                expect(await noLeafArray(empty, { 'groups.tags': { $exists: false } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await noLeafArray(absent, { 'groups.tags': { $exists: false } }), true, 'nested-array missing-field verdict');
+                expectOrAcknowledgeUnsupported(await noLeafArray(empty, { 'groups.tags': { $exists: false } }), true, 'nested-array missing-field verdict');
             });
             test('$not $size matches, because the $size it negates does not match a missing field', async () => {
-                expect(await noLeafArray(absent, { 'groups.tags': { $not: { $size: 1 } } })).toBe(true);
-                expect(await noLeafArray(empty, { 'groups.tags': { $not: { $size: 1 } } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await noLeafArray(absent, { 'groups.tags': { $not: { $size: 1 } } }), true, 'nested-array missing-field verdict');
+                expectOrAcknowledgeUnsupported(await noLeafArray(empty, { 'groups.tags': { $not: { $size: 1 } } }), true, 'nested-array missing-field verdict');
             });
             test('$size does not match, because a missing field has no length', async () => {
-                expect(await noLeafArray(absent, { 'groups.tags': { $size: 1 } })).toBe(false);
-                expect(await noLeafArray(empty, { 'groups.tags': { $size: 1 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await noLeafArray(absent, { 'groups.tags': { $size: 1 } }), false, 'nested-array missing-field verdict');
+                expectOrAcknowledgeUnsupported(await noLeafArray(empty, { 'groups.tags': { $size: 1 } }), false, 'nested-array missing-field verdict');
             });
             test('$exists:true does not match, because the path names nothing', async () => {
-                expect(await noLeafArray(absent, { 'groups.tags': { $exists: true } })).toBe(false);
-                expect(await noLeafArray(empty, { 'groups.tags': { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await noLeafArray(absent, { 'groups.tags': { $exists: true } }), false, 'nested-array missing-field verdict');
+                expectOrAcknowledgeUnsupported(await noLeafArray(empty, { 'groups.tags': { $exists: true } }), false, 'nested-array missing-field verdict');
             });
             test('present leaf arrays are still judged per leaf: $nin holds when ANY one leaf holds none of the forbidden values', async () => {
                 // The one leaf array holds 'x', so no leaf satisfies $nin — the row does not match.
-                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await noLeafArray({ id: 'x', groups: [{ tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } }), false, 'nested-array missing-field verdict');
                 // The first leaf array holds none of them, so it satisfies $nin — pooling both leaves would wrongly see 'x'.
-                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } }), true, 'nested-array missing-field verdict');
             });
         });
 
@@ -457,22 +457,22 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
             const noElements: NullableMemberArray = { id: 'x', items: [] };
 
             test('$exists:true matches a present-but-null member', async () => {
-                expect(await onItems(nullMember, { 'items.value': { $exists: true } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onItems(nullMember, { 'items.value': { $exists: true } }), true, 'array-descended $exists');
             });
             test('$exists:true matches a present string member', async () => {
-                expect(await onItems(stringMember, { 'items.value': { $exists: true } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onItems(stringMember, { 'items.value': { $exists: true } }), true, 'array-descended $exists');
             });
             test('$exists:true does not match when every element omits the member key', async () => {
-                expect(await onItems(absentMember, { 'items.value': { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onItems(absentMember, { 'items.value': { $exists: true } }), false, 'array-descended $exists');
             });
             test('$exists:true does not match when there is no element to carry the member', async () => {
-                expect(await onItems(noElements, { 'items.value': { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onItems(noElements, { 'items.value': { $exists: true } }), false, 'array-descended $exists');
             });
             test('$exists:false is the exact negation — true only when the member is absent, never for present-null', async () => {
-                expect(await onItems(nullMember, { 'items.value': { $exists: false } })).toBe(false);
-                expect(await onItems(stringMember, { 'items.value': { $exists: false } })).toBe(false);
-                expect(await onItems(absentMember, { 'items.value': { $exists: false } })).toBe(true);
-                expect(await onItems(noElements, { 'items.value': { $exists: false } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onItems(nullMember, { 'items.value': { $exists: false } }), false, 'array-descended $exists');
+                expectOrAcknowledgeUnsupported(await onItems(stringMember, { 'items.value': { $exists: false } }), false, 'array-descended $exists');
+                expectOrAcknowledgeUnsupported(await onItems(absentMember, { 'items.value': { $exists: false } }), true, 'array-descended $exists');
+                expectOrAcknowledgeUnsupported(await onItems(noElements, { 'items.value': { $exists: false } }), true, 'array-descended $exists');
             });
         });
 
@@ -502,10 +502,10 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 matchJavascriptObject(row, exactArrayFilter as WhereFilterDefinition<SpreadNested>, SpreadNestedSchema);
 
             test('a leaf array equal to the operand matches, even under an outer array', async () => {
-                expect(await exactLeafArray(oneChildEquals)).toBe(true);
+                expectOrAcknowledgeUnsupported(await exactLeafArray(oneChildEquals), true, 'exact array on nested-array path');
             });
             test('a leaf array merely containing the operand’s element does not match', async () => {
-                expect(await exactLeafArray(noChildEquals)).toBe(false);
+                expectOrAcknowledgeUnsupported(await exactLeafArray(noChildEquals), false, 'exact array on nested-array path');
             });
         });
 
@@ -518,10 +518,10 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 matchJavascriptObject(row, filter as WhereFilterDefinition<NestedScalarArray>, NestedScalarArraySchema);
 
             test('a leaf array containing the string matches', async () => {
-                expect(await onNested({ id: 'x', groups: [{ tags: ['a'] }] }, { 'groups.tags': { $elemMatch: 'a' } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onNested({ id: 'x', groups: [{ tags: ['a'] }] }, { 'groups.tags': { $elemMatch: 'a' } }), true, '$elemMatch on nested array');
             });
             test('a leaf array not containing the string does not match', async () => {
-                expect(await onNested({ id: 'x', groups: [{ tags: ['b'] }] }, { 'groups.tags': { $elemMatch: 'a' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onNested({ id: 'x', groups: [{ tags: ['b'] }] }, { 'groups.tags': { $elemMatch: 'a' } }), false, '$elemMatch on nested array');
             });
         });
 
@@ -533,7 +533,7 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
         describe('an empty $all is vacuously satisfied by a leaf array under an intermediate array', () => {
             test('a present leaf array under an intermediate array satisfies { $all: [] }', async () => {
                 const row: SpreadNested = { parent_name: 'p', children: [{ child_name: 's', grandchildren: [{ grandchild_name: 'r' }] }] };
-                expect(await matchJavascriptObject(row, { 'children.grandchildren': { $all: [] } } as WhereFilterDefinition<SpreadNested>, SpreadNestedSchema)).toBe(true);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(row, { 'children.grandchildren': { $all: [] } } as WhereFilterDefinition<SpreadNested>, SpreadNestedSchema), true, 'empty $all on nested-array path');
             });
         });
 

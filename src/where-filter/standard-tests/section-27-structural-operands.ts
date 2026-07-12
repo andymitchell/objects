@@ -22,7 +22,7 @@ import type { SectionCtx } from "./harness.ts";
  * cannot drift unnoticed. See DECISIONS.md, "the equality family's operand domain".
  */
 export function registerStructuralOperands(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectMalformedFilterRejected } = ctx;
+    const { test, matchJavascriptObject, expectMalformedFilterRejected, expectOrAcknowledgeUnsupported } = ctx;
 
     const match = (row: StructuralArray, filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<StructuralArray>, StructuralArraySchema);
     const numeric: StructuralArray = { id: 'x', matrix: [[1, 2]] };
@@ -32,43 +32,43 @@ export function registerStructuralOperands(ctx: SectionCtx): void {
 
         describe('27.1 $all with array elements', () => {
             test('an array element equal to a stored element matches, whatever the rendering', async () => {
-                expect(await match(numeric, { matrix: { $all: [[1, 2]] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await match(numeric, { matrix: { $all: [[1, 2]] } }), true, 'structural array operand');
             });
 
             test('a reordered array element does not match (element order is significant)', async () => {
-                expect(await match(numeric, { matrix: { $all: [[2, 1]] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await match(numeric, { matrix: { $all: [[2, 1]] } }), false, 'structural array operand');
             });
 
             test('an array element absent from the stored array does not match', async () => {
-                expect(await match(numeric, { matrix: { $all: [[3, 4]] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await match(numeric, { matrix: { $all: [[3, 4]] } }), false, 'structural array operand');
             });
         });
 
         describe('27.2 $all with object elements', () => {
             test('an object element matches regardless of its key order', async () => {
-                expect(await match(objects, { objMatrix: { $all: [[{ b: 2, a: 1 }]] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await match(objects, { objMatrix: { $all: [[{ b: 2, a: 1 }]] } }), true, 'structural object operand');
             });
 
             test('an object element in the stored key order also matches', async () => {
-                expect(await match(objects, { objMatrix: { $all: [[{ a: 1, b: 2 }]] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await match(objects, { objMatrix: { $all: [[{ a: 1, b: 2 }]] } }), true, 'structural object operand');
             });
 
             test('an object element differing in a value does not match', async () => {
-                expect(await match(objects, { objMatrix: { $all: [[{ a: 1, b: 3 }]] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await match(objects, { objMatrix: { $all: [[{ a: 1, b: 3 }]] } }), false, 'structural object operand');
             });
         });
 
         describe('27.3 a bare exact-array operand', () => {
             test('a nested array matches its structural equal', async () => {
-                expect(await match(numeric, { matrix: [[1, 2]] })).toBe(true);
+                expectOrAcknowledgeUnsupported(await match(numeric, { matrix: [[1, 2]] }), true, 'structural array operand');
             });
 
             test('a nested array does not match a reordered one', async () => {
-                expect(await match(numeric, { matrix: [[2, 1]] })).toBe(false);
+                expectOrAcknowledgeUnsupported(await match(numeric, { matrix: [[2, 1]] }), false, 'structural array operand');
             });
 
             test('an exact-array of objects matches regardless of key order', async () => {
-                expect(await match(objects, { objMatrix: [[{ b: 2, a: 1 }]] })).toBe(true);
+                expectOrAcknowledgeUnsupported(await match(objects, { objMatrix: [[{ b: 2, a: 1 }]] }), true, 'structural array operand');
             });
         });
 

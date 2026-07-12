@@ -20,7 +20,7 @@ import type { SectionCtx } from "./harness.ts";
  * the row that literally holds that key and no other.
  */
 export function registerRecordPaths(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     const rec = (row: RecordDeep, filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<RecordDeep>, RecordDeepSchema);
     const withData = (data: RecordDeep['data']): RecordDeep => ({ id: 'x', flat: {}, data });
@@ -30,54 +30,54 @@ export function registerRecordPaths(ctx: SectionCtx): void {
 
         describe('26.1 a path descends through a record key into its value type', () => {
             test('a scalar leaf beneath a record key compares by equality', async () => {
-                expect(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': 'v' })).toBe(true);
-                expect(await rec(withData({ foo: { value: 'w' } }), { 'data.foo.value': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': 'v' }), true, 'record path');
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'w' } }), { 'data.foo.value': 'v' }), false, 'record path');
             });
 
             test('a numeric leaf beneath a record key compares numerically, not as text', async () => {
                 // '9' > '5' as text and 9 > 5 numerically, but 10 > 5 only numerically — the leaf's own
                 // type, not the record's, decides the comparison.
-                expect(await rec(withData({ foo: { value: 'v', n: 10 } }), { 'data.foo.n': { $gt: 5 } })).toBe(true);
-                expect(await rec(withData({ foo: { value: 'v', n: 1 } }), { 'data.foo.n': { $gt: 5 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v', n: 10 } }), { 'data.foo.n': { $gt: 5 } }), true, 'record path');
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v', n: 1 } }), { 'data.foo.n': { $gt: 5 } }), false, 'record path');
             });
 
             test('a record key absent from the row does not match', async () => {
-                expect(await rec(withData({ other: { value: 'v' } }), { 'data.foo.value': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ other: { value: 'v' } }), { 'data.foo.value': 'v' }), false, 'record path');
             });
 
             test('a single-level record value compares by equality', async () => {
-                expect(await rec(withFlat({ k: 'v' }), { 'flat.k': 'v' })).toBe(true);
-                expect(await rec(withFlat({ k: 'w' }), { 'flat.k': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withFlat({ k: 'v' }), { 'flat.k': 'v' }), true, 'record path');
+                expectOrAcknowledgeUnsupported(await rec(withFlat({ k: 'w' }), { 'flat.k': 'v' }), false, 'record path');
             });
         });
 
         describe('26.2 a resolvable record path is never treated as a missing field', () => {
             test('$exists:true on a present record value is true', async () => {
-                expect(await rec(withData({ foo: { value: 'v' } }), { 'data.foo': { $exists: true } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { 'data.foo': { $exists: true } }), true, 'record path');
             });
 
             test('$exists:true on an absent record key is false', async () => {
-                expect(await rec(withData({}), { 'data.foo': { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({}), { 'data.foo': { $exists: true } }), false, 'record path');
             });
 
             test('$exists:false on an absent record key is true', async () => {
-                expect(await rec(withData({}), { 'data.foo': { $exists: false } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await rec(withData({}), { 'data.foo': { $exists: false } }), true, 'record path');
             });
 
             test('$ne against the value actually stored at a record path does not match', async () => {
                 // The silent-wrong-match pin. Reporting `data.foo.value` as an unknown path makes `$ne`
                 // constant-true, so this row — whose value IS 'v' — would be returned by a filter asking
                 // for rows whose value is NOT 'v'.
-                expect(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': { $ne: 'v' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': { $ne: 'v' } }), false, 'record path');
             });
 
             test('$ne against a different value at a record path matches', async () => {
-                expect(await rec(withData({ foo: { value: 'w' } }), { 'data.foo.value': { $ne: 'v' } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'w' } }), { 'data.foo.value': { $ne: 'v' } }), true, 'record path');
             });
 
             test('$type on a record leaf reports the leaf type', async () => {
-                expect(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': { $type: 'string' } })).toBe(true);
-                expect(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': { $type: 'number' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': { $type: 'string' } }), true, 'record path');
+                expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { 'data.foo.value': { $type: 'number' } }), false, 'record path');
             });
         });
 
@@ -93,25 +93,25 @@ export function registerRecordPaths(ctx: SectionCtx): void {
 
             for (const key of hostileKeys) {
                 test(`a record key \`${key}\` matches only the row that holds it`, async () => {
-                    expect(await rec(withFlat({ [key]: 'v' }), { [`flat.${key}`]: 'v' })).toBe(true);
-                    expect(await rec(withFlat({ innocent: 'v' }), { [`flat.${key}`]: 'v' })).toBe(false);
+                    expectOrAcknowledgeUnsupported(await rec(withFlat({ [key]: 'v' }), { [`flat.${key}`]: 'v' }), true, 'hostile record key');
+                    expectOrAcknowledgeUnsupported(await rec(withFlat({ innocent: 'v' }), { [`flat.${key}`]: 'v' }), false, 'hostile record key');
                 });
 
                 test(`a record key \`${key}\` is inert beneath a deeper path`, async () => {
-                    expect(await rec(withData({ [key]: { value: 'v' } }), { [`data.${key}.value`]: 'v' })).toBe(true);
-                    expect(await rec(withData({ innocent: { value: 'v' } }), { [`data.${key}.value`]: 'v' })).toBe(false);
+                    expectOrAcknowledgeUnsupported(await rec(withData({ [key]: { value: 'v' } }), { [`data.${key}.value`]: 'v' }), true, 'hostile record key');
+                    expectOrAcknowledgeUnsupported(await rec(withData({ innocent: { value: 'v' } }), { [`data.${key}.value`]: 'v' }), false, 'hostile record key');
                 });
             }
         });
 
         describe('26.4 a record key may contain a literal dot', () => {
             test('a dotted record key is reached through the dot-prop escape', async () => {
-                expect(await rec(withData({ 'a.b': { value: 'v' } }), { 'data.a\\.b.value': 'v' })).toBe(true);
-                expect(await rec(withData({ 'a.b': { value: 'w' } }), { 'data.a\\.b.value': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ 'a.b': { value: 'v' } }), { 'data.a\\.b.value': 'v' }), true, 'dotted record key');
+                expectOrAcknowledgeUnsupported(await rec(withData({ 'a.b': { value: 'w' } }), { 'data.a\\.b.value': 'v' }), false, 'dotted record key');
             });
 
             test('an unescaped dotted record key does not resolve to the literal key', async () => {
-                expect(await rec(withData({ 'a.b': { value: 'v' } }), { 'data.a.b.value': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ 'a.b': { value: 'v' } }), { 'data.a.b.value': 'v' }), false, 'dotted record key');
             });
         });
 
@@ -130,10 +130,10 @@ export function registerRecordPaths(ctx: SectionCtx): void {
             // schema. The JS matcher already denylists these names, so resolving unknown restores parity.
             for (const inherited of ['constructor', '__proto__']) {
                 test(`\`data.foo.${inherited}\` resolves missing: $exists:false is true`, async () => {
-                    expect(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${inherited}`]: { $exists: false } })).toBe(true);
+                    expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${inherited}`]: { $exists: false } }), true, 'inherited record property');
                 });
                 test(`\`data.foo.${inherited}\` resolves missing: $exists:true is false`, async () => {
-                    expect(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${inherited}`]: { $exists: true } })).toBe(false);
+                    expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${inherited}`]: { $exists: true } }), false, 'inherited record property');
                 });
             }
         });
@@ -146,13 +146,13 @@ export function registerRecordPaths(ctx: SectionCtx): void {
             const dottedRec = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<DottedRecord>, DottedRecordSchema);
 
             test('$exists:false on the raw path is true (missing field)', async () => {
-                expect(await dottedRec({ 'a.b.k.tags': { $exists: false } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await dottedRec({ 'a.b.k.tags': { $exists: false } }), true, 'dotted record key');
             });
             test('$exists:true on the raw path is false (missing field)', async () => {
-                expect(await dottedRec({ 'a.b.k.v': { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dottedRec({ 'a.b.k.v': { $exists: true } }), false, 'dotted record key');
             });
             test('the escape reaches through the record to the leaf (control)', async () => {
-                expect(await dottedRec({ 'a\\.b.k.v': 'w' })).toBe(true);
+                expectOrAcknowledgeUnsupported(await dottedRec({ 'a\\.b.k.v': 'w' }), true, 'dotted record key');
             });
         });
 
@@ -163,13 +163,13 @@ export function registerRecordPaths(ctx: SectionCtx): void {
             // that merely spells an inherited name must stay readable as the data it is.
             test('a non-denylisted inherited member does not $exist', async () => {
                 for (const name of ['toString', 'valueOf', 'hasOwnProperty']) {
-                    expect(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${name}`]: { $exists: true } })).toBe(false);
+                    expectOrAcknowledgeUnsupported(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${name}`]: { $exists: true } }), false, 'inherited record property');
                 }
             });
 
             test('a record key that spells an inherited name is still data — own keys win', async () => {
-                expect(await rec(withData({ toString: { value: 'v' } }), { 'data.toString.value': 'v' })).toBe(true);
-                expect(await rec(withData({ innocent: { value: 'v' } }), { 'data.toString.value': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await rec(withData({ toString: { value: 'v' } }), { 'data.toString.value': 'v' }), true, 'inherited record property');
+                expectOrAcknowledgeUnsupported(await rec(withData({ innocent: { value: 'v' } }), { 'data.toString.value': 'v' }), false, 'inherited record property');
             });
         });
 

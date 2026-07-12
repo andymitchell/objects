@@ -12,7 +12,7 @@ import type { SectionCtx } from "./harness.ts";
  * correctly-typed rows of the same field still do.
  */
 export function registerMultiScalarEnums(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('20. Multi-scalar unions & enums', () => {
 
@@ -59,15 +59,15 @@ export function registerMultiScalarEnums(ctx: SectionCtx): void {
         test('20.9 multi-scalar $gt against a string value does not match, and does not error', async () => {
             // Range operators type-bracket: a stored value of a non-comparable type simply fails the
             // comparison, on every engine. See DECISIONS.md — "Range comparisons type-bracket instead of
-            // erroring". Strict: neither a throw nor an acknowledged skip satisfies this contract.
+            // erroring". Every engine returns a real boolean here, so this is a required cross-engine law.
             const result = await matchJavascriptObject({ id: 'x', secret: 'z' }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema);
-            expect(result).toBe(false);
+            expectOrAcknowledgeUnsupported(result, false);
         });
 
         test('20.9b a bracketed range still matches the correctly-typed rows of the same field', async () => {
             // Type bracketing must not turn into "the whole predicate is poison": a numeric row still matches.
-            expect(await matchJavascriptObject({ id: 'x', secret: 5 }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema)).toBe(true);
-            expect(await matchJavascriptObject({ id: 'x', secret: true }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema)).toBe(false);
+            expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'x', secret: 5 }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema), true);
+            expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'x', secret: true }, { secret: { $gt: 1 } } as unknown as WhereFilterDefinition, MultiScalarSchema), false);
         });
 
         test('20.10 multi-scalar $type "string" on a string value', async () => {

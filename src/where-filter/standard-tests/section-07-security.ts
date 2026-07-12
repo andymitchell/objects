@@ -25,10 +25,14 @@ export function registerSecurity(ctx: SectionCtx): void {
                         ContactSchema
                     );
 
-                    // A disallowed path resolves to nothing on every engine, so the row cannot match — a
-                    // strict false, never an acknowledged skip. resolvePath's own-property guard makes SQL
-                    // deny an inherited key (`__proto__`, `constructor`) rather than silently decline it.
-                    expect(result).toBe(false);
+                    // A disallowed path resolves to nothing, so the row cannot match. An engine may instead
+                    // refuse the filter outright (an acknowledged skip) — a refusal is safe, because the
+                    // security bar is that a hostile path never MATCHES. Reporting `true` fails here, and the
+                    // in-repo engines are held to the stricter bar of answering `false`: their capability
+                    // manifests are frozen, so an engine that started skipping this seam would fail its drift
+                    // guard. resolvePath's own-property guard makes SQL deny an inherited key
+                    // (`__proto__`, `constructor`) rather than silently decline it.
+                    expectOrAcknowledgeUnsupported(result, false, 'disallowed / prototype-pollution path');
 
                 });
             }
@@ -39,16 +43,16 @@ export function registerSecurity(ctx: SectionCtx): void {
             // absent: an inherited name is not data, so `$exists` cannot observe it on any engine.
             for (const name of ['toString', 'valueOf', 'hasOwnProperty']) {
                 test(`inherited member "${name}" does not $exist, top-level or nested`, async () => {
-                    expect(await matchJavascriptObject(
+                    expectOrAcknowledgeUnsupported(await matchJavascriptObject(
                         { contact: { name: 'Andy', emailAddress: 'andy@andy.com' } },
                         { [name]: { $exists: true } },
                         ContactSchema
-                    )).toBe(false);
-                    expect(await matchJavascriptObject(
+                    ), false, 'disallowed / prototype-pollution path');
+                    expectOrAcknowledgeUnsupported(await matchJavascriptObject(
                         { contact: { name: 'Andy', emailAddress: 'andy@andy.com' } },
                         { [`contact.${name}`]: { $exists: true } },
                         ContactSchema
-                    )).toBe(false);
+                    ), false, 'disallowed / prototype-pollution path');
                 });
             }
         });

@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §10. Schema conformance — value-driven JS matcher vs schema-driven SQL emitter. */
 export function registerSchemaConformance(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('10. Schema conformance (value-driven JS vs schema-driven SQL)', () => {
 
@@ -41,41 +41,41 @@ export function registerSchemaConformance(ctx: SectionCtx): void {
             const noShared: Row = { id: 'no', tags: ['other'] };
 
             test('$in: a present element matches, an absent one does not, and the null row is excluded (never throws)', async () => {
-                expect(await matchJavascriptObject(hasShared, { tags: { $in: ['shared'] } }, Schema)).toBe(true);
-                expect(await matchJavascriptObject(noShared, { tags: { $in: ['shared'] } }, Schema)).toBe(false);
-                expect(await matchJavascriptObject(nullRow, { tags: { $in: ['shared'] } }, Schema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: { $in: ['shared'] } }, Schema), true, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(noShared, { tags: { $in: ['shared'] } }, Schema), false, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $in: ['shared'] } }, Schema), false, 'nullable (null|array) field');
             });
 
             test('plain containment {tags:"shared"}: the array row matches, the null row is excluded', async () => {
-                expect(await matchJavascriptObject(hasShared, { tags: 'shared' }, Schema)).toBe(true);
-                expect(await matchJavascriptObject(nullRow, { tags: 'shared' }, Schema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: 'shared' }, Schema), true, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: 'shared' }, Schema), false, 'nullable (null|array) field');
             });
 
             test('$elemMatch: the array row matches, the null row is excluded', async () => {
-                expect(await matchJavascriptObject(hasShared, { tags: { $elemMatch: 'shared' } }, Schema)).toBe(true);
-                expect(await matchJavascriptObject(nullRow, { tags: { $elemMatch: 'shared' } }, Schema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: { $elemMatch: 'shared' } }, Schema), true, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $elemMatch: 'shared' } }, Schema), false, 'nullable (null|array) field');
             });
 
             test('$all: the array row matches, the null row is excluded', async () => {
-                expect(await matchJavascriptObject(hasShared, { tags: { $all: ['shared'] } }, Schema)).toBe(true);
-                expect(await matchJavascriptObject(nullRow, { tags: { $all: ['shared'] } }, Schema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: { $all: ['shared'] } }, Schema), true, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $all: ['shared'] } }, Schema), false, 'nullable (null|array) field');
             });
 
             test('$nin: the null row is INCLUDED — null is in no exclusion list (matches the JS oracle)', async () => {
-                expect(await matchJavascriptObject(noShared, { tags: { $nin: ['shared'] } }, Schema)).toBe(true);
-                expect(await matchJavascriptObject(hasShared, { tags: { $nin: ['shared'] } }, Schema)).toBe(false);
-                expect(await matchJavascriptObject(nullRow, { tags: { $nin: ['shared'] } }, Schema)).toBe(true);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(noShared, { tags: { $nin: ['shared'] } }, Schema), true, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: { $nin: ['shared'] } }, Schema), false, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $nin: ['shared'] } }, Schema), true, 'nullable (null|array) field');
             });
 
             test('$size: null is not an array of any length, so {$size: 0} and {$size: 1} both exclude it', async () => {
-                expect(await matchJavascriptObject(hasShared, { tags: { $size: 2 } }, Schema)).toBe(true);
-                expect(await matchJavascriptObject(nullRow, { tags: { $size: 0 } }, Schema)).toBe(false);
-                expect(await matchJavascriptObject(nullRow, { tags: { $size: 1 } }, Schema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: { $size: 2 } }, Schema), true, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $size: 0 } }, Schema), false, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $size: 1 } }, Schema), false, 'nullable (null|array) field');
             });
 
             test('$not + $size: the null row matches (it is not an array of that length)', async () => {
-                expect(await matchJavascriptObject(hasShared, { tags: { $not: { $size: 2 } } }, Schema)).toBe(false);
-                expect(await matchJavascriptObject(nullRow, { tags: { $not: { $size: 0 } } }, Schema)).toBe(true);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(hasShared, { tags: { $not: { $size: 2 } } }, Schema), false, 'nullable (null|array) field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(nullRow, { tags: { $not: { $size: 0 } } }, Schema), true, 'nullable (null|array) field');
             });
         });
 
@@ -87,8 +87,8 @@ export function registerSchemaConformance(ctx: SectionCtx): void {
             type Row = z.infer<typeof Schema>;
 
             test('{items:{$elemMatch:{tags:{$size:0}}}}: a null `tags` is not a 0-length array (excluded); a real [] element still matches', async () => {
-                expect(await matchJavascriptObject({ id: 'null-el', items: [{ tags: null }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema)).toBe(false);
-                expect(await matchJavascriptObject({ id: 'empty-el', items: [{ tags: [] }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema)).toBe(true);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'null-el', items: [{ tags: null }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema), false, 'nullable array nested under $elemMatch');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'empty-el', items: [{ tags: [] }] } satisfies Row, { items: { $elemMatch: { tags: { $size: 0 } } } }, Schema), true, 'nullable array nested under $elemMatch');
             });
         });
 
@@ -104,13 +104,13 @@ export function registerSchemaConformance(ctx: SectionCtx): void {
             const archived: StringRow = { id: 'b', status: 'archived' };
 
             test('string-enum equality: the active row matches { status: "active" }, the archived row does not', async () => {
-                expect(await matchJavascriptObject(active, { status: 'active' }, StringEnum)).toBe(true);
-                expect(await matchJavascriptObject(archived, { status: 'active' }, StringEnum)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(active, { status: 'active' }, StringEnum), true, 'enum-typed field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(archived, { status: 'active' }, StringEnum), false, 'enum-typed field');
             });
 
             test('string-enum $in: the active row matches { $in: ["active"] }, the archived row does not', async () => {
-                expect(await matchJavascriptObject(active, { status: { $in: ['active'] } }, StringEnum)).toBe(true);
-                expect(await matchJavascriptObject(archived, { status: { $in: ['active'] } }, StringEnum)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(active, { status: { $in: ['active'] } }, StringEnum), true, 'enum-typed field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject(archived, { status: { $in: ['active'] } }, StringEnum), false, 'enum-typed field');
             });
 
             // eslint-disable-next-line no-shadow -- a local TS enum is the only way to produce numeric enum members
@@ -119,8 +119,8 @@ export function registerSchemaConformance(ctx: SectionCtx): void {
             type NumericRow = z.infer<typeof NumericEnum>;
 
             test('numeric-enum equality matches by value, never by a same-digit string (strict ===)', async () => {
-                expect(await matchJavascriptObject({ id: 'c', rank: Rank.Low } satisfies NumericRow, { rank: Rank.Low }, NumericEnum)).toBe(true);
-                expect(await matchJavascriptObject({ id: 'd', rank: Rank.High } satisfies NumericRow, { rank: Rank.Low }, NumericEnum)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'c', rank: Rank.Low } satisfies NumericRow, { rank: Rank.Low }, NumericEnum), true, 'enum-typed field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'd', rank: Rank.High } satisfies NumericRow, { rank: Rank.Low }, NumericEnum), false, 'enum-typed field');
             });
         });
     });

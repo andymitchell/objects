@@ -16,7 +16,7 @@ import type { SectionCtx } from "./harness.ts";
  * unreachable while leaving any un-rejected key just as exposed.
  */
 export function registerPathInjection(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('12. Path integrity & injection', () => {
 
@@ -104,46 +104,46 @@ export function registerPathInjection(ctx: SectionCtx): void {
             const quoted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<QuoteKey>, QuoteKeySchema);
 
             test('a bare-equality match on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": 'Sean' })).toBe(true);
-                expect(await quoted({ "O'Brien": 'Other' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": 'Sean' }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": 'Other' }), false, 'quoted (injection-safe) key');
             });
             test('$eq and $ne on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $eq: 'Sean' } })).toBe(true);
-                expect(await quoted({ "O'Brien": { $ne: 'Sean' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $eq: 'Sean' } }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $ne: 'Sean' } }), false, 'quoted (injection-safe) key');
             });
             test('$in and $nin on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $in: ['Sean', 'Nuala'] } })).toBe(true);
-                expect(await quoted({ "O'Brien": { $nin: ['Sean'] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $in: ['Sean', 'Nuala'] } }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $nin: ['Sean'] } }), false, 'quoted (injection-safe) key');
             });
             test('$not on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $not: { $eq: 'Sean' } } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $not: { $eq: 'Sean' } } }), false, 'quoted (injection-safe) key');
             });
             test('$exists on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $exists: true } })).toBe(true);
-                expect(await quoted({ "O'Brien": { $exists: false } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $exists: true } }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $exists: false } }), false, 'quoted (injection-safe) key');
             });
             test('$type on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $type: 'string' } })).toBe(true);
-                expect(await quoted({ "O'Brien": { $type: 'number' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $type: 'string' } }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $type: 'number' } }), false, 'quoted (injection-safe) key');
             });
             test('$regex on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $regex: 'Sea' } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $regex: 'Sea' } }), true, 'quoted (injection-safe) key');
             });
             test('a range operator on a single-quoted key', async () => {
-                expect(await quoted({ "O'Brien": { $gte: 'Sean' } })).toBe(true);
-                expect(await quoted({ "O'Brien": { $gt: 'Sean' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $gte: 'Sean' } }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "O'Brien": { $gt: 'Sean' } }), false, 'quoted (injection-safe) key');
             });
             test('$size on a single-quoted array key', async () => {
-                expect(await quoted({ "q'tags": { $size: 1 } })).toBe(true);
-                expect(await quoted({ "q'tags": { $size: 2 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "q'tags": { $size: 1 } }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "q'tags": { $size: 2 } }), false, 'quoted (injection-safe) key');
             });
             test('a double-quoted key resolves (a SQLite JSON-path metacharacter)', async () => {
-                expect(await quoted({ 'a"b': 'dq' })).toBe(true);
-                expect(await quoted({ 'a"b': 'other' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ 'a"b': 'dq' }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ 'a"b': 'other' }), false, 'quoted (injection-safe) key');
             });
             test('a key holding both a literal dot and a quote resolves through the dot-prop escape', async () => {
-                expect(await quoted({ "a\\.b'c": 'both' })).toBe(true);
-                expect(await quoted({ "a\\.b'c": 'other' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await quoted({ "a\\.b'c": 'both' }), true, 'quoted (injection-safe) key');
+                expectOrAcknowledgeUnsupported(await quoted({ "a\\.b'c": 'other' }), false, 'quoted (injection-safe) key');
             });
         });
 

@@ -5,7 +5,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §9. Logical equivalences (property tests) — De Morgan, double negation. */
 export function registerLogicalEquivalences(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject } = ctx;
+    const { test, matchJavascriptObject, expectEquivalentOrAcknowledge } = ctx;
 
     describe('9. Logical equivalences (property tests)', () => {
 
@@ -24,8 +24,7 @@ export function registerLogicalEquivalences(ctx: SectionCtx): void {
             for (const item of dataset) {
                 const ra = await matchJavascriptObject(item, a, ContactSchema);
                 const rb = await matchJavascriptObject(item, b, ContactSchema);
-                if (ra === undefined || rb === undefined) continue;
-                expect(ra).toBe(rb);
+                expectEquivalentOrAcknowledge(ra, rb, 'metamorphic equivalence');
             }
         }
 
@@ -77,8 +76,7 @@ export function registerLogicalEquivalences(ctx: SectionCtx): void {
                 for (const item of presentFieldData) {
                     const ra = await matchJavascriptObject(item, lhs, ContactSchema);
                     const rb = await matchJavascriptObject(item, rhs, ContactSchema);
-                    if (ra === undefined || rb === undefined) continue;
-                    expect(ra).toBe(rb);
+                    expectEquivalentOrAcknowledge(ra, rb, 'metamorphic equivalence');
                 }
             });
 

@@ -1,7 +1,7 @@
 import type { AcknowledgementCollector } from "../outcomes.ts";
 
 /** The slice of vitest's `expect` the drift-guard needs — kept minimal so a manifest file pulls in no test runtime. */
-type ExpectLike = (actual: unknown) => { toEqual(expected: unknown): void };
+export type ExpectLike = (actual: unknown) => { toEqual(expected: unknown): void };
 
 /**
  * Fail if the acknowledged seams an engine reported this run differ from its frozen capability manifest, in

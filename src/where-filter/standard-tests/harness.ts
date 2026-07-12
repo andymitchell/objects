@@ -26,8 +26,12 @@ export type StandardTestConfig = {
      * Seeded differential + metamorphic fuzz knobs. Omit to use the section's defaults. `seed` makes a run
      * reproducible; `iterations` scales coverage against the harness's wall-clock budget (SQL back-ends run
      * fewer than the pure-JS oracle).
+     *
+     * `secondaryOracle` adds an independent MongoDB implementation to the run, checking the reference matcher
+     * against the query language it claims to implement rather than against itself. Only the pure-JS reference
+     * consumer sets it: the check is engine-independent, so running it per back-end would repeat identical work.
      */
-    fuzz?: { iterations?: number, seed?: number },
+    fuzz?: { iterations?: number, seed?: number, secondaryOracle?: 'mingo' },
     /**
      * Optional sink for acknowledged seams (a filter the engine skipped as unsupported, or answered against
      * spec as a documented divergence). When supplied, the assertion helpers record every acknowledgement here

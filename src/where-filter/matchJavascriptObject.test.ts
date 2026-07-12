@@ -22,7 +22,7 @@ describe('testMatchJavascriptObject', () => {
         expect,
         matchJavascriptObject,
         implementationName: 'javascript',
-        fuzz: { iterations: 300 },
+        fuzz: { iterations: 300, secondaryOracle: 'mingo' },
         acknowledgements,
     })
 

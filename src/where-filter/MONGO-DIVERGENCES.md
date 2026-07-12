@@ -51,13 +51,13 @@ Entries are numbered for stable reference: the capability manifests (`standard-t
 
 ## 4. `$type 'null'` on missing fields
 
-**MongoDB**: `{ field: { $type: 'null' } }` matches documents where the field is explicitly `null`, and also matches missing fields (since MongoDB treats missing as equivalent to null for `$type: 'null'`).
+**MongoDB**: `{ field: { $type: 'null' } }` matches **only** documents where the field is present and holds `null`. A missing field does **not** match. This is the one place `$type: 'null'` parts company with plain equality: `{ field: null }` matches both a stored null and a missing field, while `{ field: { $type: 'null' } }` matches only the stored null. (MongoDB manual, *Query for Null or Missing Fields* — "The `{ item : { $type: 10 } }` query matches only documents that contain the `item` field whose value is `null`"; confirmed against `mongod` 8.2.6.)
 
-**WhereFilterDefinition (JS)**: Missing optional fields are `undefined`, which our implementation treats the same as `null` for `$type: 'null'` — so the JS engine matches, consistent with MongoDB.
+**WhereFilterDefinition (JS)**: A missing optional field is `undefined`, which the JS matcher treats the same as `null` for `$type: 'null'` — so it **matches, and diverges from MongoDB**.
 
-**WhereFilterDefinition (SQL)**: A missing JSON path returns SQL `NULL` from `jsonb_typeof` / `json_type`, which is not the string `'null'`. SQL implementations may return `false` for missing fields with `{ $type: 'null' }`.
+**WhereFilterDefinition (SQL)**: A missing JSON path yields SQL `NULL` from `jsonb_typeof` / `json_type`, which is not the string `'null'`, so the SQL engines answer `false` — **which is what MongoDB answers**.
 
-**Rationale**: SQL `NULL` semantics differ fundamentally from JSON null. There is no efficient portable SQL workaround.
+**Rationale**: The engines disagree with each other, and the JS engine is the one that departs from MongoDB. Reconciling them means changing the JS matcher, not the SQL emitters; that change is outstanding and is tracked as `BUG-A` in DECISIONS.md §7, together with the evidence. Until it lands, the cross-engine disagreement is acknowledged here so the conformance battery has a single documented home for it.
 
 **Test**: `$type "null" on missing optional field`
 

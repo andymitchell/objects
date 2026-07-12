@@ -7,6 +7,7 @@ import {
     genRow, genFilter, genComboPair, genElemMatchCombo, genLeafScopeOps,
     leafScopeFilterPayload, slowLeafScopeEval, REJECTING_FILTERS, invariant, repro,
 } from "./fuzz-internals.ts";
+import { registerSecondaryOracleProperty } from "./mingo/index.ts";
 
 /**
  * §24: seeded differential + metamorphic fuzz.
@@ -70,6 +71,10 @@ export function runFuzzSection(ctx: SectionCtx): void {
             invariant(got === exp, () => repro('WF-P1', seed, 1, iter, row, f, `adapter=${got} reference=${exp}`));
             return 'ok';
         });
+
+        // WF-P14 — the reference itself against MongoDB. Every property above compares an engine to the
+        // reference, so none of them can see a mistake the reference makes about Mongo; this one can.
+        if (ctx.fuzz?.secondaryOracle === 'mingo') registerSecondaryOracleProperty(ctx, { seed });
 
         // WF-P2 — De Morgan: ¬(A∧B) ≡ (¬A)∨(¬B)
         property(2, 'De Morgan', async (rng, iter) => {

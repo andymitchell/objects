@@ -174,6 +174,44 @@ more do, produce the report and stop for a human decision rather than encoding a
 **Why**: A secondary oracle is only worth its maintenance cost if its residual disagreement set is small
 enough to be understood entry by entry. A large ignore list is indistinguishable from no oracle at all.
 
+**Outcome (implemented)**: Adopted. `mingo` runs as `WF-P14` in the JS reference consumer only
+(`standard-tests/mingo/`), comparing the reference matcher against an independent MongoDB implementation over
+25,000 generated filters. It needs its own generator: the main fuzz profile is confined to operators all three
+engines agree on, which excludes precisely the constructs where this package parts company with MongoDB, so
+reusing it would have produced a green that proved nothing. Disagreements are shrunk to a minimal reproducer
+before being grouped by shape — a logic node disagrees because one arm does, and reporting the whole tree both
+buries the cause and lets an accepted divergence claim a bug riding along in a sibling arm.
+
+The residual set after triage is four shapes, under the threshold above:
+
+- **Accepted divergences, already documented** — `#2` (empty `$all`), `#13` (comparison operators on an array
+  field), `#15` (`$exists`/`$type` in a scalar `$elemMatch` body). The oracle reproduces all three, which is
+  what calibrates it: a run that surfaced none of them would mean the generator never reached the interesting
+  language, not that we conform.
+- **`BUG-A` — `$type: 'null'` matches a MISSING field.** MongoDB matches only a field that exists and holds
+  null. Confirmed against `mongod` 8.2.6 and stated outright by the manual. **The JS matcher is wrong and the
+  SQL engines are right**, which inverts MONGO-DIVERGENCES.md #4 (it had asserted the JS engine conformed).
+  Not fixed here: the reference matcher is the oracle every other fuzz property is measured against, so
+  changing it re-greens the whole battery and belongs in its own change.
+- **`BUG-B` — `$ne`/`$nin` on a path descending through an array** means "some element differs" here, where
+  MongoDB means "no element matches". `{'items.k': {$ne:'b'}}` does not match `{items:[{k:'a'},{k:'b'}]}` in
+  MongoDB; it does here. Confirmed against `mongod` 8.2.6. Not fixed here, for the same reason.
+
+Both bugs are recorded in `standard-tests/mingo/knownDivergences.ts` as `PENDING_BUGS`, kept deliberately apart
+from the accepted divergences — a divergence is a decision, a bug is a debt — and pinned by tests describing
+the wrong answer, so a fix arrives with a test to invert. Deleting a `PENDING_BUGS` entry is its regression test.
+
+**`mingo` is not itself a faithful oracle, and the blind spots are recorded** (`MINGO_QUIRKS`). It does not
+traverse arrays for `$type`, so it shares divergence #1 and cannot witness it. More dangerously, it
+mis-evaluates a path crossing two arrays: for `groups.subtags` it answers `false` where `mongod` 8.2.6 answers
+`true` — **this package agrees with MongoDB and mingo is the outlier**. Such paths are excluded from the
+oracle's generator rather than filtered from its output, because an oracle that cannot evaluate a construct
+must not be asked about it; filtering afterwards would be an ignore-list concealing the oracle's own defect.
+The cost is a real, unwitnessed divergence: MongoDB reads a multi-value `$all` on such a path as an `$and` of
+independent matches, so `{'groups.subtags': {$all: ['d','a']}}` matches when `d` and `a` sit in *different*
+groups, where this package requires one leaf array to hold both. That needs an example-based test, not a fuzz
+property.
+
 ---
 
 ## 8. The equality family's operand domain is narrower than `$all`'s

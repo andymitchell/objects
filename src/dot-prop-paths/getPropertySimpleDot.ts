@@ -1,12 +1,30 @@
 import { getProperty as ldGetProperty } from "dot-prop";
 import isPlainObject from "../utils/isPlainObject.js";
 import { escapeDotPropPathSegment, parseDotPropPathSegments } from "./dotPropPathSegments.ts";
+import { getPropertyOwn } from "./getPropertyOwn.ts";
 
 
-
+/**
+ * Resolve a dot-prop path against a runtime value, reading only OWN properties at each step.
+ *
+ * Speaks dot-prop's full path grammar (`a.b`, `a[0].b`, `a\.b` escapes) but, unlike dot-prop's own
+ * `getProperty`, treats a segment naming an inherited member (`toString`, `valueOf`, …) as an absent
+ * key. Data cannot reach `Object.prototype` members through a path, while an object genuinely holding
+ * an own key spelled like one still resolves it. This is the reader the value-driven matcher shares
+ * with sorting and write-actions, and own-only reads keep it in agreement with the schema-driven SQL
+ * engines' path resolution.
+ *
+ * @param object the value to resolve against.
+ * @param dotPath the dot-prop path. Denylisted segments ({@link DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED}) resolve `undefined`.
+ * @param alreadyProvedIsPlainObject unused; retained for callers that pass it.
+ * @returns the resolved own value, or `undefined` when any segment is not an own property of its container.
+ */
 export function getProperty<T extends Record<string, any> = Record<string, any>>(object: T, dotPath:string, alreadyProvedIsPlainObject?:boolean):ReturnType<typeof ldGetProperty> {
 
-    return ldGetProperty(object, dotPath);
+    // Cast: getPropertyOwn returns `unknown`, while this signature keeps dot-prop's declared return type
+    // so existing callers' inference is unchanged. The runtime value is exactly what dot-prop would
+    // return for any own-reachable path.
+    return getPropertyOwn(object, dotPath) as ReturnType<typeof ldGetProperty>;
 
 }
 
@@ -151,7 +169,10 @@ function _getPropertySpreadingArrays<T extends Record<string, any> | Record<stri
             if( traversalPath ) traversalPath += '.';
             traversalPath += escapeDotPropPathSegment(key);
 
-            object = object[key];
+            // Own-property only: an inherited member (`toString`, `valueOf`, …) is not data; it must
+            // resolve as absent exactly like `getProperty`, or the matcher's array-spreading fallback
+            // would resolve it and rebuild the same filter as an $or, recursing without end.
+            object = Object.hasOwn(object, key) ? object[key] : undefined;
             if( !object ) break;
             if( Array.isArray(object) ) break;
         }

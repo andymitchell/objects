@@ -125,6 +125,26 @@ describe('testMatchJavascriptObject', () => {
 
 })
 
+describe('inherited-name paths never match, at both the primary read and the array-spreading fallback', () => {
+    // Both readers must agree an inherited member is absent: if only the primary read treated it as
+    // missing, the array-spreading fallback would resolve the Object.prototype member and rebuild the
+    // same filter as an $or, recursing without end.
+    const match = (row: Record<string, any>, filter: unknown) =>
+        matchJavascriptObjectReal(row, filter as WhereFilterDefinition<Record<string, any>>);
+
+    test('$exists:true is false for an inherited member, top-level and nested', () => {
+        const row = { data: { foo: { value: 'v' } } };
+        for (const name of ['toString', 'valueOf', 'hasOwnProperty']) {
+            expect(match(row, { [name]: { $exists: true } })).toBe(false);
+            expect(match(row, { [`data.foo.${name}`]: { $exists: true } })).toBe(false);
+        }
+    });
+
+    test('$exists:true is true for an own key spelling an inherited name', () => {
+        expect(match({ data: { foo: { toString: 'v' } } }, { 'data.foo.toString': { $exists: true } })).toBe(true);
+    });
+})
+
 
 
 

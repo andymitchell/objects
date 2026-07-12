@@ -156,5 +156,22 @@ export function registerRecordPaths(ctx: SectionCtx): void {
             });
         });
 
+        describe('26.8 an inherited member beyond the denylist is absent, never an Object.prototype leak', () => {
+            // 26.6 pins the denylisted pair; this pins the general rule. A record value is a plain object,
+            // so `toString`/`valueOf`/`hasOwnProperty` are reachable through its prototype chain — but they
+            // are inherited members, not data. Every engine must resolve them as absent, and an own key
+            // that merely spells an inherited name must stay readable as the data it is.
+            test('a non-denylisted inherited member does not $exist', async () => {
+                for (const name of ['toString', 'valueOf', 'hasOwnProperty']) {
+                    expect(await rec(withData({ foo: { value: 'v' } }), { [`data.foo.${name}`]: { $exists: true } })).toBe(false);
+                }
+            });
+
+            test('a record key that spells an inherited name is still data — own keys win', async () => {
+                expect(await rec(withData({ toString: { value: 'v' } }), { 'data.toString.value': 'v' })).toBe(true);
+                expect(await rec(withData({ innocent: { value: 'v' } }), { 'data.toString.value': 'v' })).toBe(false);
+            });
+        });
+
     });
 }

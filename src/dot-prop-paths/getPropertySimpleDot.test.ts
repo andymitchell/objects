@@ -1,4 +1,4 @@
-import { setProperty } from "dot-prop";
+import { setProperty, getProperty as dotPropGetProperty, deepKeys } from "dot-prop";
 import {  getProperty as getPropertySimpleDot, getPropertySpreadingArrays, DISALLOWED_GET_PROPERTY_PATHS_ARE_UNDEFINED } from "./getPropertySimpleDot.js";
 
 describe('getPropertySpreadingArrays test', () => {
@@ -274,4 +274,37 @@ describe('attacks', () => {
         })
     }
 
+})
+
+describe('inherited members resolve as absent (own-property-only reads)', () => {
+    // A path segment must name a container's OWN property to resolve; an inherited member such as
+    // `toString` or `valueOf` is not data, so it reads as a genuinely absent key. This is what keeps
+    // the value-driven matcher in agreement with the schema-driven SQL engines, whose path resolution
+    // is own-property-only.
+    const row = { data: { foo: { value: 'v' } } };
+
+    test('an inherited name at any depth resolves undefined, with the same spreading shape as a genuinely absent key', () => {
+        for (const name of ['toString', 'valueOf', 'hasOwnProperty']) {
+            expect(getPropertySimpleDot(row, name)).toBe(undefined);
+            expect(getPropertySimpleDot(row, `data.foo.${name}`)).toBe(undefined);
+            expect(getPropertySpreadingArrays(row, `data.foo.${name}`)).toEqual(getPropertySpreadingArrays(row, 'data.foo.nope'));
+        }
+    });
+
+    test('an own key that spells an inherited name is still real data (the guard is own-property, not a denylist)', () => {
+        const own = { data: { foo: { toString: 'v' } } };
+        expect(getPropertySimpleDot(own, 'data.foo.toString')).toBe('v');
+        expect(getPropertySpreadingArrays(own, 'data.foo.toString')).toEqual([{ path: 'data.foo.toString', value: 'v' }]);
+    });
+
+    test('own-reachable paths resolve identically to the dot-prop package (grammar parity: escapes, brackets, falsy leaves)', () => {
+        // Metamorphic pin: `deepKeys` enumerates every OWN leaf path in dot-prop's own grammar (escaped
+        // dots, bracket indices), so on those paths the own-only reader must agree with dot-prop exactly.
+        const fixture = { a: { 'b.c': 1, list: [{ x: 'x0' }, { x: 'x1' }] }, top: null, z: 0, s: '', f: false };
+        const paths = deepKeys(fixture);
+        expect(paths.length).toBeGreaterThan(5);
+        for (const path of paths) {
+            expect(getPropertySimpleDot(fixture, path)).toBe(dotPropGetProperty(fixture, path));
+        }
+    });
 })

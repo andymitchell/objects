@@ -34,6 +34,25 @@ export function registerSecurity(ctx: SectionCtx): void {
             }
         });
 
+        describe('Inherited members beyond the denylist', () => {
+            // Every `Object.prototype` member — not just the denylisted pollution trio — must resolve as
+            // absent: an inherited name is not data, so `$exists` cannot observe it on any engine.
+            for (const name of ['toString', 'valueOf', 'hasOwnProperty']) {
+                test(`inherited member "${name}" does not $exist, top-level or nested`, async () => {
+                    expect(await matchJavascriptObject(
+                        { contact: { name: 'Andy', emailAddress: 'andy@andy.com' } },
+                        { [name]: { $exists: true } },
+                        ContactSchema
+                    )).toBe(false);
+                    expect(await matchJavascriptObject(
+                        { contact: { name: 'Andy', emailAddress: 'andy@andy.com' } },
+                        { [`contact.${name}`]: { $exists: true } },
+                        ContactSchema
+                    )).toBe(false);
+                });
+            }
+        });
+
         describe('SQL injection resistance', () => {
             test('crafted string value with SQL injection does not match', async () => {
                 const result = await matchJavascriptObject(

@@ -5,7 +5,9 @@ import type {  LogicFilter, PartialObjectFilter, ValueComparisonFlexi, ValueComp
 
 export function isLogicFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<T>):filter is LogicFilter<T> {
     return WhereFilterLogicOperators.some(type => {
-        return filter.hasOwnProperty(type) && Array.isArray((filter as WhereFilterDefinition<any>)[type])
+        // Object.hasOwn, not filter.hasOwnProperty: the filter is untrusted, so an own key literally
+        // named `hasOwnProperty` would shadow the inherited method and calling it would throw.
+        return Object.hasOwn(filter, type) && Array.isArray((filter as WhereFilterDefinition<any>)[type])
     });
 }
 export function isPartialObjectFilter<T extends Record<string, any>>(filter:WhereFilterDefinition<T>):filter is PartialObjectFilter<T> {

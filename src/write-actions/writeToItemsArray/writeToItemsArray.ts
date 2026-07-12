@@ -46,12 +46,31 @@ function getOptionDefaults(options?:Partial<WriteToItemsArrayOptions>):OptionsWi
     }
 }
 
+/**
+ * An index whose keys come from caller data — a primary-key value, an action uuid — and therefore has NO
+ * prototype.
+ *
+ * A plain `{}` is unusable here. Its keys are drawn from untrusted strings, and `'toString'`, `'constructor'`
+ * and friends are perfectly legal ones: `hash['toString']` would inherit a truthy function for a key nobody
+ * ever wrote, so a presence test silently answers yes. Worse, `hash['__proto__'] = value` reaches the
+ * inherited setter and stores NOTHING. Both failures are silent and corrupt data — a create reported `ok`
+ * whose row never lands, or an untouched row overwritten by an inherited function.
+ *
+ * With no prototype there is nothing to inherit and no setter to hit, so every key is an ordinary own
+ * property and a truthiness test means exactly what it says. `Object.values`, `delete` and index access all
+ * behave normally.
+ */
+function makeKeyedByCallerData<V>(): Record<string, V> {
+    return Object.create(null) as Record<string, V>;
+}
+
 class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     private pk:PrimaryKeyGetter<T>;
     private actionsMap:Record<string, WriteOutcomeOk<T>>;
     constructor(primaryKey:keyof T) {
         this.pk = makePrimaryKeyGetter(primaryKey);
-        this.actionsMap = {};
+        // Keyed by action uuid, which is caller data — see makeKeyedByCallerData.
+        this.actionsMap = makeKeyedByCallerData<WriteOutcomeOk<T>>();
     }
 
     private findSuccessfulWriteAction(action:WriteAction<T>, createIfMissing?: boolean) {
@@ -194,9 +213,10 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
     const rules: RootListRules<T> = ddl.lists['.'];
     const pk = makePrimaryKeyGetter<T>(rules.primary_key);
 
-    const addedHash: ItemHash<T> = {};
-    const updatedHash: ItemHash<T> = {};
-    const deletedHash: ItemHash<T> = {};
+    // Keyed by primary-key VALUE, which is caller data — see makeKeyedByCallerData.
+    const addedHash: ItemHash<T> = makeKeyedByCallerData<T>();
+    const updatedHash: ItemHash<T> = makeKeyedByCallerData<T>();
+    const deletedHash: ItemHash<T> = makeKeyedByCallerData<T>();
     let wipItems = [...items] as T[];
 
 

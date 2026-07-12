@@ -18,6 +18,7 @@ import { registerResultContract } from "./section-14-result-contract.ts";
 import { registerWhereBehavioural } from "./section-15-where-behavioural.ts";
 import { registerDuplicateCreateEdges } from "./section-16-duplicate-create-edges.ts";
 import { registerMultiMatchPartialFailure } from "./section-17-multimatch-partial-failure.ts";
+import { registerPrototypeNamedKeys } from "./section-19-prototype-named-keys.ts";
 import { runFuzzSection } from "./fuzz.ts";
 
 /**
@@ -65,6 +66,7 @@ export function standardTests(config: StandardTestConfig): void {
     registerWhereBehavioural(ctx);
     registerDuplicateCreateEdges(ctx);
     registerMultiMatchPartialFailure(ctx);
+    registerPrototypeNamedKeys(ctx);
     runFuzzSection(ctx);
 }
 

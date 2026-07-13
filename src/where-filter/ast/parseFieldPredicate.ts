@@ -62,7 +62,7 @@ export function parseFieldPredicate(condition: unknown): Predicate {
 function parseOperator(key: string, operand: unknown, payload: Record<string, unknown>): Predicate {
     switch (key) {
         case '$eq': return { kind: 'eq', operand: asScalar(key, operand) };
-        case '$ne': return { kind: 'ne', operand };
+        case '$ne': return { kind: 'ne', operand: asScalar(key, operand) };
         case '$in': return { kind: 'in', operand: asArray(key, operand) };
         case '$nin': return { kind: 'nin', operand: asArray(key, operand) };
         case '$regex': return typeof payload.$options === 'string'

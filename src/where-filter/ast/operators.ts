@@ -13,11 +13,12 @@ export type OperatorCategory = 'value' | 'array';
  * @property name The `$`-prefixed key, e.g. `$eq`.
  * @property categories The payload(s) the operator may appear in.
  * @property broadening Whether carrying ONLY this operator classifies a leaf as *broadening* for the
- *   validator — i.e. the operator can match widely (including a missing field), so its lone presence never
- *   proves a clause "matches nothing". This is a STATIC over-approximation, not literal missing-field
- *   behaviour: `$not`, `$exists` and `$type` are broadening only for a particular operand
- *   (`$not:{$exists:false}`, `$exists:false`, `$type:'null'`), and `$eq` broadens only as `$eq:null` — the
- *   validator resolves those operand-conditional cases itself, so they are not flagged here.
+ *   validator — i.e. the operator can match widely, so its lone presence never proves a clause "matches
+ *   nothing". This is a STATIC over-approximation that exists to keep the validator free of false positives,
+ *   not a statement of literal missing-field behaviour: `$not` and `$exists` broaden only for a particular
+ *   operand (`$not:{$exists:false}`, `$exists:false`) and `$eq` only as `$eq:null` — the validator resolves
+ *   those operand-conditional cases itself. `$type` is listed because the validator does not reason about
+ *   runtime types at all, so it can never prove a `$type` leaf matches nothing.
  */
 export type OperatorMeta = {
     readonly name: string;

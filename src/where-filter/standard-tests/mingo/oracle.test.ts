@@ -15,7 +15,10 @@ import { genMongoFilter } from "./generator.ts";
 describe('mingo secondary oracle', () => {
 
     type Row = Record<string, unknown>;
-    const both = (row: Row, filter: WhereFilterDefinition<Row>): { ours: boolean, mongo: boolean } => ({
+    // The filter is untyped: the corpus exercises the language the ENGINES accept, which is wider than a
+    // schema-derived type — a comparison operator on an array field and a path descending through an array are
+    // both accepted by the validity gate, as MongoDB accepts them, but neither is reachable from `WhereFilterDefinition<T>`.
+    const both = (row: Row, filter: WhereFilterDefinition): { ours: boolean, mongo: boolean } => ({
         ours: matchJavascriptObjectReference(row, filter),
         mongo: evaluateWithMingo(row, filter),
     });
@@ -57,6 +60,56 @@ describe('mingo secondary oracle', () => {
             expect(ours).toBe(true);
             expect(mongo).toBe(true);
         });
+
+        test('a comparison operator on an array field reads element-wise on both', () => {
+            const { ours, mongo } = both({ tags: ['a'] }, { tags: { $eq: 'a' } });
+            expect(ours).toBe(true);
+            expect(mongo).toBe(true);
+        });
+
+        test('a range bound on an array field reads element-wise on both', () => {
+            const { ours, mongo } = both({ scores: [9] }, { scores: { $gt: 5 } });
+            expect(ours).toBe(true);
+            expect(mongo).toBe(true);
+        });
+
+        test('each bound is applied independently across elements, so $elemMatch asks a stricter question', () => {
+            const independent = both({ scores: [1, 5] }, { scores: { $gt: 2, $lt: 4 } });
+            expect(independent.ours).toBe(true);
+            expect(independent.mongo).toBe(true);
+
+            const elementBound = both({ scores: [1, 5] }, { scores: { $elemMatch: { $gt: 2, $lt: 4 } } });
+            expect(elementBound.ours).toBe(false);
+            expect(elementBound.mongo).toBe(false);
+        });
+
+        test('$ne on an array field is the complement of $eq — no element may equal the operand', () => {
+            const holdsIt = both({ tags: ['x'] }, { tags: { $ne: 'x' } });
+            expect(holdsIt.ours).toBe(false);
+            expect(holdsIt.mongo).toBe(false);
+
+            const lacksIt = both({ tags: ['x'] }, { tags: { $ne: 'z' } });
+            expect(lacksIt.ours).toBe(true);
+            expect(lacksIt.mongo).toBe(true);
+        });
+
+        test('$type null requires the field to exist on both — an absent field has no type', () => {
+            const { ours, mongo } = both({ name: 'ann' }, { age: { $type: 'null' } });
+            expect(ours).toBe(false);
+            expect(mongo).toBe(false);
+        });
+
+        test('$type null matches a field that exists and holds null on both', () => {
+            const { ours, mongo } = both({ age: null }, { age: { $type: 'null' } });
+            expect(ours).toBe(true);
+            expect(mongo).toBe(true);
+        });
+
+        test('plain equality to null still matches a missing field on both, where $type does not', () => {
+            const { ours, mongo } = both({ name: 'ann' }, { age: null });
+            expect(ours).toBe(true);
+            expect(mongo).toBe(true);
+        });
     });
 
     /**
@@ -70,18 +123,6 @@ describe('mingo secondary oracle', () => {
             const { ours, mongo } = both({ tags: ['a'] }, { tags: { $all: [] } });
             expect(ours).toBe(true);
             expect(mongo).toBe(false);
-        });
-
-        test('#13 — a comparison operator on an array field is not element-wise here', () => {
-            const { ours, mongo } = both({ tags: ['a'] }, { tags: { $eq: 'a' } });
-            expect(ours).toBe(false);
-            expect(mongo).toBe(true);
-        });
-
-        test('#13 — the same holds for a range bound on an array field', () => {
-            const { ours, mongo } = both({ scores: [9] }, { scores: { $gt: 5 } });
-            expect(ours).toBe(false);
-            expect(mongo).toBe(true);
         });
 
         test('#15 — $exists inside a scalar $elemMatch body describes no element here', () => {
@@ -98,38 +139,32 @@ describe('mingo secondary oracle', () => {
     });
 
     /**
-     * Bugs the oracle found, each independently confirmed against a real `mongod` 8.2.6 before being believed.
-     *
-     * They are pinned as they behave TODAY, so the fix — when it is scheduled — arrives with a test that already
-     * describes the wrong answer and must be inverted. Both are recorded in `PENDING_BUGS`; neither is an
-     * accepted divergence, and neither should be moved to `MONGO-DIVERGENCES.md`.
+     * The negation laws, which are where a Mongo-conformance mistake does real damage: an engine that reads a
+     * negation as "some value differs" rather than "no value matches" returns documents the caller asked to
+     * exclude. `$elemMatch` is the construct that DOES ask about one element, and the contrast pins both.
      */
-    describe('found real Mongo-conformance bugs (pinned as they behave today, awaiting a fix)', () => {
+    describe('agrees on how a negation reads a path that descends through an array', () => {
 
-        test('BUG-A — $type null wrongly matches a MISSING field, where MongoDB requires the field to exist', () => {
-            // mongod 8.2.6: `{age:{$type:"null"}}` matches only a document whose `age` EXISTS and is null.
-            // (`{age:null}` — plain equality — DOES match a missing field. $type does not. They differ.)
-            const { ours, mongo } = both({ name: 'ann' }, { age: { $type: 'null' } });
-            expect(ours).toBe(true);
+        test('$ne excludes a document when some element DOES equal the operand', () => {
+            const { ours, mongo } = both({ items: [{ k: 'a' }, { k: 'b' }, { k: 'c' }] }, { 'items.k': { $ne: 'b' } });
+            expect(ours).toBe(false);
             expect(mongo).toBe(false);
         });
 
-        test('BUG-A — a field that exists and holds null matches on both, so only absence is wrong', () => {
-            const { ours, mongo } = both({ age: null }, { age: { $type: 'null' } });
+        test('$ne matches when no element equals the operand', () => {
+            const { ours, mongo } = both({ items: [{ k: 'a' }, { k: 'b' }] }, { 'items.k': { $ne: 'z' } });
             expect(ours).toBe(true);
             expect(mongo).toBe(true);
         });
 
-        test('BUG-B — $ne on a path through an array means "some element differs" here, "no element matches" in MongoDB', () => {
-            // mongod 8.2.6: this document is EXCLUDED — one element has k === 'b'.
-            const { ours, mongo } = both({ items: [{ k: 'a' }, { k: 'b' }, { k: 'c' }] }, { 'items.k': { $ne: 'b' } });
+        test('$elemMatch with an inner $ne IS "some element differs", and is a different query', () => {
+            const { ours, mongo } = both({ items: [{ k: 'a' }, { k: 'b' }] }, { items: { $elemMatch: { k: { $ne: 'b' } } } });
             expect(ours).toBe(true);
-            expect(mongo).toBe(false);
+            expect(mongo).toBe(true);
         });
 
-        test('BUG-B — $elemMatch with an inner $ne IS "some element differs", and both agree on it', () => {
-            // The query BUG-B accidentally implements. That MongoDB spells it differently is the whole point.
-            const { ours, mongo } = both({ items: [{ k: 'a' }, { k: 'b' }] }, { items: { $elemMatch: { k: { $ne: 'b' } } } });
+        test('negation composes, so negating $ne asks whether some element does equal the operand', () => {
+            const { ours, mongo } = both({ items: [{ k: 'a' }, { k: 'b' }] }, { 'items.k': { $not: { $ne: 'b' } } });
             expect(ours).toBe(true);
             expect(mongo).toBe(true);
         });

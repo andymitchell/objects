@@ -27,16 +27,6 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
         claims: (filter) => someOperator(filter, (op, operand) => op === '$all' && Array.isArray(operand) && operand.length === 0),
     },
     {
-        id: '#13',
-        note: 'A comparison operator on an array field is not element-wise here; MongoDB traverses the array.',
-        claims: (filter, isArrayField) => someFieldCondition(filter, isArrayField, (isArray, condition) => {
-            if (!isArray || !isOperatorPayload(condition)) return false;
-            // `$not` inherits the polarity of whatever it negates, so look through it.
-            const payloads = [condition, ...operandsOf(condition, '$not').filter(isOperatorPayload)];
-            return payloads.some(p => Object.keys(p).some(k => NON_TRAVERSING_ON_ARRAY.has(k)));
-        }),
-    },
-    {
         id: '#15',
         note: '$exists/$type in a scalar $elemMatch body describe no element, so the body matches nothing; MongoDB applies them element-wise.',
         claims: (filter) => someOperator(filter, (op, operand) =>
@@ -67,56 +57,27 @@ export const MINGO_QUIRKS: readonly { readonly note: string }[] = [
             + 'three. This package answers true, i.e. it AGREES with MongoDB and mingo is the outlier, so such paths '
             + 'are excluded from the oracle\'s generator rather than filtered from its output: an oracle that cannot '
             + 'evaluate a construct must not be asked about it. '
-            + 'Consequence — the oracle is BLIND to a real divergence here: MongoDB treats a multi-value `$all` on '
-            + 'such a path as an $and of independent matches, so `{"groups.subtags":{$all:["d","a"]}}` matches when '
-            + '"d" and "a" live in DIFFERENT groups, where this package requires one leaf array to hold both. That '
-            + 'divergence is real and unwitnessed; it needs an example-based test, not a fuzz property.',
+            + 'Consequence — the oracle is BLIND to a real divergence on such paths (MONGO-DIVERGENCES.md #16: a '
+            + 'multi-value $all is an $and of independent matches in MongoDB, so it spans different groups, where '
+            + 'this package requires one leaf array to hold every value). A fuzz property cannot cover what its '
+            + 'oracle cannot answer, so that ground is held by example tests (§4) and the mongo-truth corpus.',
     },
 ];
 
 /**
  * Disagreements that are CONFIRMED BUGS in this package — not accepted divergences.
  *
- * They are listed so the oracle can run green while they are outstanding, and they are kept apart from
- * {@link KNOWN_DIVERGENCES} because the distinction is the whole point: a divergence is a decision, a bug is a
- * debt. Each entry cites the MongoDB behaviour it violates and must be DELETED, not re-explained, when fixed —
- * the deletion is its regression test.
+ * Kept apart from {@link KNOWN_DIVERGENCES} because the distinction is the whole point: a divergence is a
+ * decision, a bug is a debt. An entry lets the oracle run green while the bug is outstanding, and must be
+ * DELETED — never re-explained — when the bug is fixed. The deletion is its regression test: with nothing left
+ * to claim the disagreement, a regression surfaces immediately as an unexplained shape.
+ *
+ * Empty is the healthy state.
  */
-export const PENDING_BUGS: readonly KnownDivergence[] = [
-    {
-        id: 'BUG-A',
-        note: '`$type:"null"` matches a MISSING field here; MongoDB matches only a field that EXISTS and holds null. '
-            + 'Verified against mongod 8.2.6 and stated outright by the manual\'s "Query for Null or Missing Fields" '
-            + 'tutorial: "The { item : { $type: 10 } } query matches only documents that contain the item field whose '
-            + 'value is null." (Equality to null — `{item: null}` — DOES match a missing field; $type does not.) '
-            + 'NOTE: MONGO-DIVERGENCES.md #4 currently asserts the OPPOSITE — that the JS engine "matches, consistent '
-            + 'with MongoDB" — and blames the SQL engines for answering false. The SQL engines were right.',
-        claims: (filter, isArrayField) => someFieldCondition(filter, isArrayField, (_isArray, condition) =>
-            isOperatorPayload(condition) && condition['$type'] === 'null'),
-    },
-    {
-        id: 'BUG-B',
-        note: '`$ne`/`$nin` on a dotted path into an array of objects means "SOME element differs" here; in MongoDB it '
-            + 'means "NO element matches". Verified against mongod 8.2.6: `{"items.k":{$ne:"b"}}` does NOT match '
-            + '`{items:[{k:"a"},{k:"b"},{k:"c"}]}` — one element has k=="b", so the document is excluded. The manual: '
-            + '"$nin ... selects the documents whose field has an array with no element equal to a value in the '
-            + 'specified array." ("some element differs" is what `{items:{$elemMatch:{k:{$ne:"b"}}}}` means, and that '
-            + 'is a DIFFERENT query, which does match.)',
-        claims: (filter, isArrayField) => someFieldCondition(filter, isArrayField, (_isArray, condition, path) =>
-            // Only a path that DESCENDS THROUGH an array (`items.k`) — a plain array field (`tags`) taking `$ne`
-            // is MONGO-DIVERGENCES.md #13, a different and already-accepted thing.
-            path.includes('.') && isOperatorPayload(condition) && ('$ne' in condition || '$nin' in condition)),
-    },
-];
-
-/** The operators MongoDB applies element-wise on an array field, and this package applies to the array itself. */
-const NON_TRAVERSING_ON_ARRAY: ReadonlySet<string> = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$regex']);
+export const PENDING_BUGS: readonly KnownDivergence[] = [];
 
 const isOperatorPayload = (x: unknown): x is Record<string, unknown> =>
     x !== null && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).some(isOperatorKey);
-
-const operandsOf = (payload: Record<string, unknown>, op: string): unknown[] =>
-    op in payload ? [payload[op]] : [];
 
 /** Visit every `(operator, operand)` pair anywhere in the filter, at any depth. */
 function someOperator(node: unknown, pred: (op: string, operand: unknown) => boolean): boolean {
@@ -126,17 +87,3 @@ function someOperator(node: unknown, pred: (op: string, operand: unknown) => boo
         (isOperatorKey(key) && pred(key, value)) || someOperator(value, pred));
 }
 
-/** Visit every field path and the condition applied to it, at any depth. */
-function someFieldCondition(
-    node: unknown,
-    isArrayField: (path: string) => boolean,
-    pred: (fieldIsArray: boolean, condition: unknown, path: string) => boolean,
-): boolean {
-    if (node === null || typeof node !== 'object') return false;
-    if (Array.isArray(node)) return node.some(child => someFieldCondition(child, isArrayField, pred));
-    return Object.entries(node as Record<string, unknown>).some(([key, value]) => {
-        // A logic operator's arms are filters in their own right; any other operator is not a field.
-        if (isOperatorKey(key)) return someFieldCondition(value, isArrayField, pred);
-        return pred(isArrayField(key), value, key) || someFieldCondition(value, isArrayField, pred);
-    });
-}

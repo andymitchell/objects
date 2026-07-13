@@ -92,25 +92,33 @@ export function evaluatePredicate(value: unknown, predicate: Predicate, matchSub
                 : evaluatePredicate(element, scalarPredicate, matchSubFilter));
         }
 
-        // The scalar operators. Against an array field they read as a sub-document match over its elements,
-        // the same reading a bare sub-document gets, because the operator does not describe the array itself.
+        // The scalar operators. An array field is read element-wise: the operator matches when SOME element
+        // satisfies it, exactly as a bare scalar already matches by containment. Note this is not the question
+        // `$elemMatch` asks — see the `range` arm, where the two visibly part company.
         case 'eq':
-            if (Array.isArray(value)) return matchesElementsAsSubFilter(value, { $eq: predicate.operand }, matchSubFilter);
-            if (predicate.operand === null) return value === null || value === undefined;
-            if (value === undefined || value === null) return false;
-            return value === predicate.operand;
+            return matchesEquality(value, predicate.operand);
         case 'ne':
-            if (Array.isArray(value)) return matchesElementsAsSubFilter(value, { $ne: predicate.operand }, matchSubFilter);
-            if (value === undefined || value === null) return true;
-            return value !== predicate.operand;
-        case 'regex':
-            if (Array.isArray(value)) return matchesElementsAsSubFilter(value, rebuildRegexPayload(predicate), matchSubFilter);
-            if (typeof value !== 'string') return false;
-            return new RegExp(predicate.pattern, predicate.options).test(value);
+            // `$ne` IS the complement of `$eq` — "no element equals it", never "some element differs". They share
+            // one definition so they cannot drift apart, which matters because a negation on an array-descended
+            // path is compiled as the negation of its positive core.
+            return !matchesEquality(value, predicate.operand);
+        case 'regex': {
+            // Compiled on first use, not up front: a pattern that cannot compile must not throw for a field that
+            // holds no string to test it against. `$options` is a free string, so the pattern may carry `g`/`y`
+            // and keep a `lastIndex` between calls — reset it so one element's match cannot skew the next one's.
+            let pattern: RegExp | undefined;
+            return someElementOrValue(value, element => {
+                if (typeof element !== 'string') return false;
+                pattern ??= new RegExp(predicate.pattern, predicate.options);
+                pattern.lastIndex = 0;
+                return pattern.test(element);
+            });
+        }
         case 'range':
-            if (Array.isArray(value)) return matchesElementsAsSubFilter(value, rebuildRangePayload(predicate.bounds), matchSubFilter);
-            if (typeof value !== 'number' && typeof value !== 'string') return false;
-            return predicate.bounds.every(bound => satisfiesBound(value, bound));
+            // Each bound is applied independently across the elements, so different elements may satisfy
+            // different bounds: `{scores: {$gt: 2, $lt: 4}}` matches `[1, 5]`. Binding every bound to ONE element
+            // is the other question, and `$elemMatch` is how a caller asks it — which does NOT match `[1, 5]`.
+            return predicate.bounds.every(bound => someElementOrValue(value, element => satisfiesBoundValue(element, bound)));
     }
 }
 
@@ -140,9 +148,16 @@ const unreachableSubFilterMatcher: SubFilterMatcher = () => {
     throw new Error('evaluatePredicate: a missing field cannot hold array elements to match a sub-filter against');
 };
 
-/** Whether a value's runtime type is the one `$type` names. A missing field is reported as `null`. */
+/**
+ * Whether a value's runtime type is the one `$type` names.
+ *
+ * An absent field has no type, so it matches nothing — not even `$type: 'null'`. This is the one place `$type`
+ * parts company with plain equality, which reads a missing field as null: `{age: null}` matches an absent `age`,
+ * while `{age: {$type: 'null'}}` requires it to be present and hold null.
+ */
 function matchesJsType(value: unknown, typeName: ValueComparisonType['$type']): boolean {
-    if (value === undefined || value === null) return typeName === 'null';
+    if (value === undefined) return false;
+    if (value === null) return typeName === 'null';
     switch (typeName) {
         case 'string': return typeof value === 'string';
         case 'number': return typeof value === 'number';
@@ -153,16 +168,37 @@ function matchesJsType(value: unknown, typeName: ValueComparisonType['$type']): 
     }
 }
 
-/** Read an array field's elements as sub-documents, matching the operator payload against each in turn. */
-function matchesElementsAsSubFilter(value: unknown[], payload: Record<string, unknown>, matchSubFilter: SubFilterMatcher): boolean {
-    return value.some(element => isPlainObject(element) && matchSubFilter(element, payload));
+/**
+ * Apply a scalar test to a field's value, reading an array field element-wise.
+ *
+ * An array matches when SOME element does. This is the one place the element-wise reading is expressed, so every
+ * scalar operator inherits it identically and none can drift into asking a subtly different question.
+ */
+function someElementOrValue(value: unknown, test: (element: unknown) => boolean): boolean {
+    return Array.isArray(value) ? value.some(test) : test(value);
 }
 
-const rebuildRegexPayload = (predicate: Predicate & { kind: 'regex' }): Record<string, unknown> =>
-    predicate.options === undefined ? { $regex: predicate.pattern } : { $regex: predicate.pattern, $options: predicate.options };
+/**
+ * Equality read across a field's value: an array matches when SOME element equals the operand.
+ *
+ * A `null` operand is the one that reaches past presence — it also matches an absent field, which is why
+ * `{age: null}` finds a row with no `age` at all while `{age: {$type: 'null'}}` does not.
+ *
+ * `$eq` is this, and `$ne` is its negation. Both read it from here so neither can drift.
+ */
+function matchesEquality(value: unknown, operand: unknown): boolean {
+    return someElementOrValue(value, element => {
+        if (operand === null) return element === null || element === undefined;
+        if (element === undefined || element === null) return false;
+        return element === operand;
+    });
+}
 
-const rebuildRangePayload = (bounds: readonly RangeBound[]): Record<string, unknown> =>
-    Object.fromEntries(bounds.map(bound => [bound.operator, bound.operand]));
+/** A range bound against a value of any shape. A value of an uncomparable type simply does not match. */
+function satisfiesBoundValue(value: unknown, bound: RangeBound): boolean {
+    if (typeof value !== 'number' && typeof value !== 'string') return false;
+    return satisfiesBound(value, bound);
+}
 
 /**
  * A single range bound. A bound whose operand is not comparable is a malformed filter and throws; a bound

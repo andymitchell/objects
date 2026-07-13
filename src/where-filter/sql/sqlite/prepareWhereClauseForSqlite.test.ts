@@ -332,9 +332,11 @@ describe('sqlite where clause builder', () => {
         test('an operator that does not match a missing field still fails an absent outer array', async () => {
             expect(await onNested({ id: 'x' }, { 'groups.subtags': { $size: 2 } })).toBe(false);
         });
-        test('the present-array verdicts are unaffected: $nin is judged per leaf array', async () => {
+        test('a negation denies the whole path, so ONE leaf holding a forbidden value excludes the row', async () => {
             expect(await onNested({ id: 'x', groups: [{ subtags: ['x'] }] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(false);
-            expect(await onNested({ id: 'x', groups: [{ subtags: ['a'] }, { subtags: ['x'] }] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(true);
+            // A clean sibling leaf does not excuse the offending one: the row still holds a value $nin forbids.
+            expect(await onNested({ id: 'x', groups: [{ subtags: ['a'] }, { subtags: ['x'] }] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(false);
+            expect(await onNested({ id: 'x', groups: [{ subtags: ['a'] }, { subtags: ['b'] }] }, { 'groups.subtags': { $nin: ['x'] } })).toBe(true);
         });
     });
 

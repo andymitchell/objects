@@ -396,16 +396,28 @@ export function leafSatisfiesAll(leaf: readonly string[], ops: readonly LeafScop
 }
 
 /**
- * The independent oracle for {@link NESTED_ARRAY_PATH}: a compound predicate matches when SOME leaf array
- * satisfies all of it — and, when there is no leaf array at all (an absent `groups`), when the predicate is one
- * a missing field satisfies. Only `$nin` matches a missing field, so that reduces to "every operator is $nin".
+ * The independent oracle for {@link NESTED_ARRAY_PATH}.
+ *
+ * Two rules meet here, and keeping them apart is the whole point:
+ * - a POSITIVE predicate is leaf-scoped — it matches when SOME leaf array satisfies all of it at once, so two
+ *   different leaves cannot each supply half of a compound condition;
+ * - a NEGATION denies the whole path — `$nin` holds only when NO leaf holds a forbidden value. Folding it in
+ *   with the positives would let a clean leaf excuse an offending sibling, admitting a row the caller excluded.
+ *
+ * With no leaf array at all (an absent `groups`), both rules still apply and give the missing-field verdict for
+ * free: nothing satisfies a positive, and nothing holds a forbidden value.
+ *
  * Hand-written for the same reason as {@link fuzzDeepEqual} — a law comparing an engine against a copy of that
- * engine's own traversal would be blind to a shared misreading of leaf scope or of the missing-field verdict.
+ * engine's own traversal would be blind to a shared misreading of leaf scope or of negation.
  */
 export function slowLeafScopeEval(row: FuzzRow, ops: readonly LeafScopeOp[]): boolean {
-    const leaves = row.groups ?? [];
-    if (leaves.length === 0) return ops.every(o => o.op === '$nin');
-    return leaves.some(g => leafSatisfiesAll(g.subtags, ops));
+    const leaves = (row.groups ?? []).map(g => g.subtags);
+    const positives = ops.filter(o => o.op !== '$nin');
+    const denials = ops.filter(o => o.op === '$nin');
+
+    const someLeafSatisfiesEveryPositive = positives.length === 0 || leaves.some(leaf => leafSatisfiesAll(leaf, positives));
+    const noLeafHoldsAForbiddenValue = denials.every(o => !leaves.some(leaf => leafSatisfiesAll(leaf, [{ ...o, op: '$in' }])));
+    return someLeafSatisfiesEveryPositive && noLeafHoldsAForbiddenValue;
 }
 
 // ═══════════════════════════════════════════════════════════════════

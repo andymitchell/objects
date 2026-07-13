@@ -5,7 +5,8 @@ import { findNormalizingPaths } from "../dot-prop-paths/schema-normalization.ts"
 import type { MatchJavascriptObject, MatchJavascriptObjectOptions, MatchJavascriptObjectWithFilter, ObjOrDraft, WhereFilterDefinition } from "./types.js";
 import { isWhereFilterDefinition } from "./schemas.ts";
 import { isLogicFilter } from "./typeguards.ts";
-import { evaluatePredicate, parseFieldPredicate } from "./ast/index.ts";
+import { evaluatePredicate, negationCore, parseFieldPredicate, partitionNegations } from "./ast/index.ts";
+import type { Predicate, SubFilterMatcher } from "./ast/index.ts";
 import { safeJson } from "./safeJson.ts";
 // TODO Optimise: isPlainObject is still expensive, and used in compareValue/etc. But if the top function (matchJavascriptObject) checks object, then all children can assume to be plain object too, avoiding the need for the test. Just check the assumption that isPlainObject does indeed check all children.
 
@@ -181,10 +182,16 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
             // It's possible that it's an array nested under an array (spreading), so needs to be broken down to test every combination
             const spreadArrays = getPropertySpreadingArrays(object, dotpropKey);
             if( spreadArrays && spreadArrays.length && !(spreadArrays.length===1 && spreadArrays[0]!.value===undefined) ) {
-                const orFilter:WhereFilterDefinition = {
-                    $or: spreadArrays.map(x => ({[x.path]: dotpropFilter}))
-                }
-                return _matchJavascriptObject(object, orFilter, [...debugPath, dotpropFilter])
+                const leafMatchSubFilter = (element: Record<string, unknown>, subFilter: WhereFilterDefinition): boolean =>
+                    _matchJavascriptObject(element, subFilter, [...debugPath, subFilter]);
+                const predicate = parseFieldPredicate(dotpropFilter);
+                // An element the path does not reach carries no value, so it offers nothing to test — the spread
+                // reports it with an empty path. Reaching NO value at all is exactly a missing field, and the
+                // condition's own verdict on one decides, just as it would for a path that spreads no arrays.
+                const leaves = spreadArrays.filter(x => x.path!=='').map(x => x.value);
+                return leaves.length===0
+                    ? evaluatePredicate(undefined, predicate, leafMatchSubFilter)
+                    : matchPredicateOverLeaves(leaves, predicate, leafMatchSubFilter);
             }
         }
 
@@ -196,4 +203,39 @@ function _matchJavascriptObject<T extends Record<string, any> = Record<string, a
     }
 
 
+}
+
+/**
+ * Answer a field condition against every leaf a path reaching through an array arrives at.
+ *
+ * A positive condition holds when SOME leaf satisfies it — and where several positive operators sit together,
+ * when some single leaf satisfies them ALL. That leaf scope is deliberate: it stops a compound condition being
+ * answered by pooling two different leaves (`MONGO-DIVERGENCES.md`).
+ *
+ * A negation cannot join that fold, because it denies the whole path rather than one leaf. So it is lifted out
+ * and applied to the positive condition it wraps — see {@link negationCore}, which every engine shares.
+ *
+ * @param leaves - The value at each leaf the path reached.
+ * @param predicate - The parsed field condition.
+ * @param matchSubFilter - Applies a sub-filter to an object element of an array.
+ * @returns Whether the path, taken as a whole, satisfies the condition.
+ *
+ * @example
+ * // {items: [{k: 'a'}, {k: 'b'}]} under {'items.k': {$ne: 'b'}}
+ * // → the negation asks whether SOME leaf equals 'b'. One does, so the document does not match.
+ *
+ * @remarks
+ * A negation recurses through this same function rather than through a single leaf, which is what lets negations
+ * nest: `{$not: {$ne: 'b'}}` unwinds to "some leaf equals 'b'".
+ */
+function matchPredicateOverLeaves(leaves: readonly unknown[], predicate: Predicate, matchSubFilter: SubFilterMatcher): boolean {
+    const core = negationCore(predicate);
+    if (core) return !matchPredicateOverLeaves(leaves, core, matchSubFilter);
+
+    const { positive, negations } = partitionNegations(predicate);
+    const someLeafSatisfies = positive === undefined
+        || leaves.some(leaf => evaluatePredicate(leaf, positive, matchSubFilter));
+
+    return someLeafSatisfies
+        && negations.every(negation => matchPredicateOverLeaves(leaves, negation, matchSubFilter));
 }

@@ -10,7 +10,7 @@ import isPlainObject from "../../../utils/isPlainObject.ts";
 import { convertDotPropPathToPostgresJsonPath, UNSAFE_WARNING } from "./convertDotPropPathToPostgresJsonPath.ts";
 import { pgJsonbAccessor } from "../../../utils/sql/postgres/pgJsonbAccessor.ts";
 import { isLogicFilter } from "../../typeguards.ts";
-import { isOperatorKey, matchesMissingField, parseFieldPredicate } from "../../ast/index.ts";
+import { isOperatorKey, matchesMissingField, negationCore, parseFieldPredicate, partitionNegations } from "../../ast/index.ts";
 import type { ElemMatchBody, Predicate } from "../../ast/index.ts";
 import { planSqlArrayTraversal } from "../planSqlArrayTraversal.ts";
 import type { SqlPredicate, TraverseArrayPredicate } from "../planSqlArrayTraversal.ts";
@@ -287,12 +287,28 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         const spreadArrayCount = node.intermediates.filter(intermediate => intermediate.kind === 'array').length;
         const nextAlias = this.aliasFactory(spreadArrayCount);
         const leafArrayExpr = pgJsonbAccessor(spread.output_column, node.leafSegments, { asText: false });
-        const childSql = this.emitLeafArrayPredicate(dotpropPath, resolved, node, leafArrayExpr, node.child, statementArguments, errors, rootFilter, nextAlias);
 
-        const someLeafSatisfies = `EXISTS (SELECT 1 FROM ${spread.sql} WHERE ${childSql})`;
+        // A positive condition binds to ONE leaf array; a negation denies the whole path, so it is lifted out of
+        // the fold and applied to the condition it wraps. Folding it in would let a clean leaf excuse an
+        // offending sibling — `$nin` would admit a row holding the very value it forbids.
+        const matchOverLeaves = (child: Predicate): string => {
+            const core = negationCore(child);
+            if (core) return `NOT (${matchOverLeaves(core)})`;
+
+            const { positive, negations } = partitionNegations(child);
+            const terms: string[] = [];
+            if (positive) {
+                const leafSql = this.emitLeafArrayPredicate(dotpropPath, resolved, node, leafArrayExpr, positive, statementArguments, errors, rootFilter, nextAlias);
+                terms.push(`EXISTS (SELECT 1 FROM ${spread.sql} WHERE ${leafSql})`);
+            }
+            for (const negation of negations) terms.push(matchOverLeaves(negation));
+            return terms.length === 1 ? terms[0]! : `(${terms.join(' AND ')})`;
+        };
+
+        const overLeaves = matchOverLeaves(node.child);
         return matchesMissingField(node.child)
-            ? `(${someLeafSatisfies} OR NOT EXISTS (SELECT 1 FROM ${spread.sql}))`
-            : someLeafSatisfies;
+            ? `(${overLeaves} OR NOT EXISTS (SELECT 1 FROM ${spread.sql}))`
+            : overLeaves;
     }
 
     /**
@@ -308,6 +324,17 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         // field), which coerces to an empty array and matches nothing rather than erroring.
         const guardedLeafArray = guardedJsonbArray(leafArrayExpr);
         const elements = (alias: string) => `jsonb_array_elements(${guardedLeafArray}) AS ${alias}`;
+        // A comparison operator scanning the elements reads each one as text, cast to numeric when the operand is
+        // numeric — otherwise `<`/`>` would compare lexically, where `'-8' < '-9'` is true.
+        const comparisonElementContext = (alias: string, forPredicate: Predicate): EmitContext => {
+            const numeric = (forPredicate.kind === 'eq' || forPredicate.kind === 'ne')
+                ? typeof forPredicate.operand === 'number'
+                : this.elementNeedsNumericCast(forPredicate);
+            return {
+                customSqlIdentifier: numeric ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`,
+                customRawJsonb: multiScalarElement ? alias : undefined,
+            };
+        };
 
         switch (predicate.kind) {
             case 'and':
@@ -383,7 +410,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     const sizeSql = arraySizeEquals(leafArrayExpr, this.generatePlaceholder(predicate.inner.n, statementArguments));
                     return `(jsonb_typeof(${leafArrayExpr}) IS NULL OR NOT (${sizeSql}))`;
                 }
-                return this.emitSubFilterOverElements(node, leafArrayExpr, guardedLeafArray, predicate, statementArguments, errors, rootFilter, nextAlias);
+                // Negation complements whatever its operand says about this array — it must not be pushed inside
+                // the element scan, which would ask whether SOME element fails the condition instead.
+                return `NOT (${emitChild(predicate.inner)})`;
 
             case 'elemMatch': {
                 const alias = nextAlias();
@@ -439,13 +468,34 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 // An exact-array operand compares against the LEAF array itself, never the element carrying it.
                 return this.optionalWrapper(resolved, leafArrayExpr, `${leafArrayExpr} = ${this.generatePlaceholder(predicate.value as PreparedStatementArgumentOrObject[], statementArguments)}::jsonb`);
 
-            // A scalar operator does not describe the array itself, so it reads as a sub-document match over the
-            // array's elements — the same reading a bare sub-document gets.
+            // A comparison operator reads the array element-wise: it holds when SOME element satisfies it.
             case 'eq':
-            case 'ne':
+            case 'regex': {
+                const alias = nextAlias();
+                const body = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, comparisonElementContext(alias, predicate));
+                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
+            }
+
+            case 'ne': {
+                // `$ne` is the complement of `$eq` — NO element may equal the operand. Negating the comparison
+                // inside the scan would instead ask whether SOME element differs, which an array holding both the
+                // operand and anything else would satisfy.
+                const alias = nextAlias();
+                const equality: Predicate = { kind: 'eq', operand: predicate.operand };
+                const body = this.emitPredicate(dotpropPath, resolved, equality, statementArguments, errors, rootFilter, comparisonElementContext(alias, equality));
+                return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
+            }
+
             case 'range':
-            case 'regex':
-                return this.emitSubFilterOverElements(node, leafArrayExpr, guardedLeafArray, predicate, statementArguments, errors, rootFilter, nextAlias);
+                // Each bound is scanned independently, so different elements may satisfy different bounds:
+                // `{$gt: 2, $lt: 4}` holds on `[1, 5]`. Binding every bound to ONE element is the question
+                // `$elemMatch` asks, and it answers false on that same array.
+                return `(${predicate.bounds.map(bound => {
+                    const alias = nextAlias();
+                    const oneBound: Predicate = { kind: 'range', bounds: [bound] };
+                    const body = this.emitPredicate(dotpropPath, resolved, oneBound, statementArguments, errors, rootFilter, comparisonElementContext(alias, oneBound));
+                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
+                }).join(' AND ')})`;
         }
     }
 
@@ -461,13 +511,6 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         return false;
     }
 
-    /** Apply a condition to each element of a leaf array as a sub-filter over that element's fields. */
-    private emitSubFilterOverElements(node: TraverseArrayPredicate, leafArrayExpr: string, guardedLeafArray: string, predicate: Predicate, statementArguments: PreparedStatementArgument[], errors: WhereClauseError[], rootFilter: WhereFilterDefinition<T>, nextAlias: AliasFactory): string {
-        const alias = nextAlias();
-        const subTranslator = new PropertyTranslatorPgJsonbSchema(node.leafArrayNode.schema!, alias, true);
-        const result = compileWhereFilterRecursive(reconstructFieldCondition(predicate), statementArguments, subTranslator, errors, rootFilter);
-        return `EXISTS (SELECT 1 FROM jsonb_array_elements(${guardedLeafArray}) AS ${alias} WHERE ${result})`;
-    }
 
     // ── A scalar or object leaf beneath an array — read from every spread element ──
 
@@ -546,13 +589,32 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             }
             case 'size':
                 return arraySizeEquals(this.pathAccessor(resolved, false), this.generatePlaceholder(predicate.n, statementArguments));
-            case 'not':
+            case 'not': {
                 if (predicate.inner.kind === 'size') {
                     const acc = this.pathAccessor(resolved, false);
                     const sizeSql = arraySizeEquals(acc, this.generatePlaceholder(predicate.inner.n, statementArguments));
                     return `(${acc} IS NULL OR NOT (${sizeSql}))`;
                 }
-                break;
+                // A negation denies the whole path, so it wraps the condition's own verdict over every element.
+                return `NOT (${this.emitSpreadLeafPredicate(dotpropPath, resolved, predicate.inner, statementArguments, errors, rootFilter)})`;
+            }
+
+            // A comparison operator binds to ONE element's leaf, and the path matches when SOME element's leaf
+            // satisfies it — the same leaf scope a compound condition gets.
+            case 'eq':
+            case 'regex':
+            case 'range': {
+                const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
+            }
+            case 'ne': {
+                // The complement of `$eq` over the whole path: NO element's leaf may equal the operand.
+                const equality: Predicate = { kind: 'eq', operand: predicate.operand };
+                const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                const subClause = this.emitPredicate(dotpropPath, resolved, equality, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
+            }
             case 'exists': {
                 if (remainingSegments.length > 0) {
                     // The field exists iff some array element carries the leaf. A whole-path jsonb_typeof cannot

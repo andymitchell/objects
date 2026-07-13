@@ -20,16 +20,6 @@ describe('the known-divergence ignore-list', () => {
             expect(claimants({ tags: { $all: [] } })).toEqual(['#2']);
         });
 
-        test('#13 recognises a comparison operator applied to an array field', () => {
-            expect(claimants({ tags: { $eq: 'a' } })).toEqual(['#13']);
-            expect(claimants({ scores: { $gt: 5 } })).toEqual(['#13']);
-            expect(claimants({ tags: { $regex: '^a' } })).toEqual(['#13']);
-        });
-
-        test('#13 looks through a $not, which inherits the polarity of what it negates', () => {
-            expect(claimants({ tags: { $not: { $eq: 'a' } } })).toEqual(['#13']);
-        });
-
         test('#15 recognises $exists or $type inside a scalar $elemMatch body', () => {
             expect(claimants({ tags: { $elemMatch: { $exists: true } } })).toEqual(['#15']);
             expect(claimants({ tags: { $elemMatch: { $type: 'string' } } })).toEqual(['#15']);
@@ -37,11 +27,18 @@ describe('the known-divergence ignore-list', () => {
         });
 
         test('a divergence nested inside a logic arm is still recognised', () => {
-            expect(claimants({ $or: [{ age: 5 }, { tags: { $eq: 'a' } }] })).toEqual(['#13']);
+            expect(claimants({ $or: [{ age: 5 }, { tags: { $elemMatch: { $exists: true } } }] })).toEqual(['#15']);
         });
     });
 
     describe('stays silent on everything it does not explain', () => {
+
+        test('a comparison operator on an array field reads element-wise and is unclaimed', () => {
+            expect(claimants({ tags: { $eq: 'a' } })).toEqual([]);
+            expect(claimants({ scores: { $gt: 5 } })).toEqual([]);
+            expect(claimants({ tags: { $regex: '^a' } })).toEqual([]);
+            expect(claimants({ tags: { $not: { $eq: 'a' } } })).toEqual([]);
+        });
 
         test('a comparison operator on a SCALAR field is conformant and unclaimed', () => {
             expect(claimants({ name: { $eq: 'ann' } })).toEqual([]);
@@ -81,47 +78,31 @@ describe('the known-divergence ignore-list', () => {
 });
 
 /**
- * The recorded bugs are held to the same narrowness bar as the accepted divergences — a loose predicate here
- * would let a NEW bug hide behind an old one, which is precisely how a known-issues list rots into a blindfold.
+ * The debt register, and why an empty one is the assertion.
+ *
+ * A bug entry exists so the oracle can run green while the bug is outstanding. Deleting it when the bug is fixed
+ * is the regression test — with nothing left to claim the disagreement, a regression surfaces immediately as an
+ * unexplained shape rather than being quietly re-absorbed as accepted behaviour.
  */
 describe('the pending-bug list', () => {
 
     const claimants = (filter: unknown): string[] =>
         PENDING_BUGS.filter(d => d.claims(filter, isArrayFieldPath)).map(d => d.id);
 
-    describe('claims the bug it records', () => {
-
-        test('BUG-A recognises $type null, which wrongly matches a missing field', () => {
-            expect(claimants({ name: { $type: 'null' } })).toEqual(['BUG-A']);
-            expect(claimants({ tags: { $type: 'null' } })).toEqual(['BUG-A']);
-        });
-
-        test('BUG-B recognises $ne/$nin on a path descending through an array', () => {
-            expect(claimants({ 'items.k': { $ne: 'b' } })).toEqual(['BUG-B']);
-            expect(claimants({ 'items.v': { $nin: [1] } })).toEqual(['BUG-B']);
-        });
+    test('is empty, so no disagreement can be excused as a known bug', () => {
+        expect(PENDING_BUGS).toEqual([]);
     });
 
-    describe('stays silent on everything else', () => {
-
-        test('BUG-A does not claim a $type of another kind — only null conflates with absence', () => {
-            expect(claimants({ name: { $type: 'string' } })).toEqual([]);
-            expect(claimants({ tags: { $type: 'array' } })).toEqual([]);
-        });
-
-        test('BUG-B does not claim $ne/$nin on a plain array field — that is the accepted divergence #13', () => {
-            expect(claimants({ tags: { $ne: 'a' } })).toEqual([]);
-            expect(claimants({ tags: { $nin: ['a'] } })).toEqual([]);
-        });
-
-        test('BUG-B does not claim a conformant operator on a dotted path', () => {
-            expect(claimants({ 'items.k': { $eq: 'b' } })).toEqual([]);
-            expect(claimants({ 'items.k': 'b' })).toEqual([]);
-        });
-
-        test('neither bug claims an ordinary conformant filter', () => {
-            expect(claimants({ name: { $eq: 'ann' } })).toEqual([]);
-            expect(claimants({ tags: { $size: 2 } })).toEqual([]);
-        });
+    test('claims nothing — every conformance question now goes to the oracle unexcused', () => {
+        for (const filter of [
+            { 'items.k': { $ne: 'b' } },
+            { 'items.v': { $nin: [1] } },
+            { name: { $type: 'null' } },
+            { tags: { $ne: 'a' } },
+            { tags: { $eq: 'a' } },
+            { name: { $eq: 'ann' } },
+        ]) {
+            expect(claimants(filter)).toEqual([]);
+        }
     });
 });

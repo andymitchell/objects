@@ -182,35 +182,23 @@ reusing it would have produced a green that proved nothing. Disagreements are sh
 before being grouped by shape — a logic node disagrees because one arm does, and reporting the whole tree both
 buries the cause and lets an accepted divergence claim a bug riding along in a sibling arm.
 
-The residual set after triage is four shapes, under the threshold above:
+The residual set after triage was four shapes, under the threshold above. Two were accepted divergences already
+documented (`#2`, `#15`); two were real Mongo-conformance **bugs**, and the oracle is the reason they are known.
+Both are fixed (see the Release notes), and their `PENDING_BUGS` entries are deleted — the deletion is the
+regression test, since nothing is left to excuse the disagreement if it returns.
 
-- **Accepted divergences, already documented** — `#2` (empty `$all`), `#13` (comparison operators on an array
-  field), `#15` (`$exists`/`$type` in a scalar `$elemMatch` body). The oracle reproduces all three, which is
-  what calibrates it: a run that surfaced none of them would mean the generator never reached the interesting
-  language, not that we conform.
-- **`BUG-A` — `$type: 'null'` matches a MISSING field.** MongoDB matches only a field that exists and holds
-  null. Confirmed against `mongod` 8.2.6 and stated outright by the manual. **The JS matcher is wrong and the
-  SQL engines are right**, which inverts MONGO-DIVERGENCES.md #4 (it had asserted the JS engine conformed).
-  Not fixed here: the reference matcher is the oracle every other fuzz property is measured against, so
-  changing it re-greens the whole battery and belongs in its own change.
-- **`BUG-B` — `$ne`/`$nin` on a path descending through an array** means "some element differs" here, where
-  MongoDB means "no element matches". `{'items.k': {$ne:'b'}}` does not match `{items:[{k:'a'},{k:'b'}]}` in
-  MongoDB; it does here. Confirmed against `mongod` 8.2.6. Not fixed here, for the same reason.
-
-Both bugs are recorded in `standard-tests/mingo/knownDivergences.ts` as `PENDING_BUGS`, kept deliberately apart
-from the accepted divergences — a divergence is a decision, a bug is a debt — and pinned by tests describing
-the wrong answer, so a fix arrives with a test to invert. Deleting a `PENDING_BUGS` entry is its regression test.
+The oracle earns its keep by reproducing the divergences that *are* accepted. That is its calibration: a run
+surfacing none of them would mean the generator never reached the interesting language, not that we conform.
 
 **`mingo` is not itself a faithful oracle, and the blind spots are recorded** (`MINGO_QUIRKS`). It does not
 traverse arrays for `$type`, so it shares divergence #1 and cannot witness it. More dangerously, it
-mis-evaluates a path crossing two arrays: for `groups.subtags` it answers `false` where `mongod` 8.2.6 answers
-`true` — **this package agrees with MongoDB and mingo is the outlier**. Such paths are excluded from the
-oracle's generator rather than filtered from its output, because an oracle that cannot evaluate a construct
-must not be asked about it; filtering afterwards would be an ignore-list concealing the oracle's own defect.
-The cost is a real, unwitnessed divergence: MongoDB reads a multi-value `$all` on such a path as an `$and` of
-independent matches, so `{'groups.subtags': {$all: ['d','a']}}` matches when `d` and `a` sit in *different*
-groups, where this package requires one leaf array to hold both. That needs an example-based test, not a fuzz
-property.
+mis-evaluates a path crossing two arrays, answering `false` where `mongod` answers `true` — **this package
+agrees with MongoDB and mingo is the outlier**. Such paths are excluded from the oracle's generator rather than
+filtered from its output, because an oracle that cannot evaluate a construct must not be asked about it;
+filtering afterwards would be an ignore-list concealing the oracle's own defect. The coverage that costs is
+carried by example tests and by the `mongo-truth` corpus instead (decision 12).
+
+See `standard-tests/mingo/MINGO-ORACLE.md` for how the oracle works and what to do when it disagrees.
 
 ---
 
@@ -309,6 +297,70 @@ needs red-first tests — flipping §18.30/18.31 (false→true) and the §18.34 
 
 ---
 
+## 12. How to handle the 2 where-filter test oracles (Mingo and matchJavascriptObject) disagreeing
+
+**Context**: The suite runs two oracles. `matchJavascriptObject` — the reference matcher — is what every engine
+is measured against, so it decides *engine agreement*. `mingo`, an independent implementation of the MongoDB
+query language, is run against that reference as a secondary oracle (`WF-P14`), so it decides *MongoDB
+conformance*. When they disagree, one of them is wrong about MongoDB, and it is not always the one you expect:
+of the findings the oracle produced, one was **mingo** being wrong while this package was right. Acting on it
+would have "fixed" behaviour that already conformed.
+
+**Decision**: **Neither oracle is authoritative. A real `mongod` is.** On a disagreement, add the case to
+`standard-tests/mongo-truth/` and run it (`npm run test:mongo-truth`) *before* changing any code. Then file the
+finding in exactly one of three registers — never a fourth:
+
+- **`KNOWN_DIVERGENCES`** — `mongod` agrees with mingo, and we differ *deliberately*. It must cite a numbered
+  `MONGO-DIVERGENCES.md` entry. This is a decision.
+- **`PENDING_BUGS`** — `mongod` agrees with mingo, and we differ *by accident*. This is a debt. Pin it with a
+  test describing the wrong answer, so a fix arrives with a test to invert. **Delete the entry when it is
+  fixed — never re-explain it.** The deletion is its regression test: with nothing left to claim the
+  disagreement, a regression surfaces immediately as an unexplained shape rather than being quietly reabsorbed
+  as accepted behaviour.
+- **`MINGO_QUIRKS`** — `mongod` agrees with **us**, and mingo is the outlier. The oracle is blind here, and
+  saying so is the point: silence must not be mistaken for conformance.
+
+Two rules keep the apparatus honest:
+
+1. **A construct mingo evaluates incorrectly is excluded from the generator, never filtered from its output.**
+   Filtering afterwards would bury the oracle's own defect inside the list of *our* divergences, which is how a
+   blind spot becomes mistaken for conformance. Excluding at the source keeps the ignore list honestly about us
+   — and the coverage that costs must be stated and carried by an example test.
+2. **An ignore predicate must be minimal.** Each one needs a test proving it fires on its own construct *and*
+   stays silent on its neighbours, plus a sabotage proving an unrelated defect still reds the run. An
+   over-broad predicate is the single failure that would make the whole apparatus decorative: it files a real
+   bug under an accepted divergence, and the suite goes green.
+
+**Why**: an oracle exists to catch a misunderstanding *shared* by everything else. Its value is entirely in the
+disagreements it produces, so the disagreements must be triaged against something neither oracle can influence.
+A large ignore list, or a register that blurs "decision" into "debt", is indistinguishable from having no oracle
+at all — it produces reassurance instead of evidence.
+
+---
+
+## 13. Fix an over-match; document an under-match
+
+**Context**: This package reads an array-descended path differently from MongoDB (divergence #16), and such a
+reading is never neutral — it either returns rows MongoDB excludes, or excludes rows MongoDB returns. The two
+are not equally bad, and a rule was needed for deciding which departures to fix and which to write down.
+
+**Decision**: **An over-match is a bug and gets fixed. An under-match may be a documented divergence.** A filter
+is a caller's statement about which rows they will accept, so returning one they excluded is unsound — no amount
+of documentation makes it safe. Returning fewer rows than MongoDB would is a loss of recall: a caller can see it,
+work around it, and nothing downstream is corrupted by it.
+
+**Why**: it is the only line that stays stable under composition. Leaf scope (#16) is conservative on its own —
+`∃leaf. (P ∧ Q)` implies `(∃leaf. P) ∧ (∃leaf. Q)`, so it can only under-match. But **negation inverts the
+sign**: `¬` of an under-match is an over-match. So the conservatism argument is only available to a package whose
+negations are handled at the level they deny — which is why `$ne`, `$nin` and `$not` are lifted out of the leaf
+fold (#16) and why a comparison operator was made element-wise (retiring #13) rather than left as a "conservative"
+under-match that `$not` turned into a spurious match.
+
+This is the same argument decision 11 uses to keep #15: it is inert, so it can only under-match. That argument is
+sound **only** while nothing negates it, and it is worth re-checking whenever an operator's reach changes.
+
+---
+
 ## Release notes
 
 Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The exported types are
@@ -320,9 +372,6 @@ unchanged; the semantics of existing filters are not.
   matches a row where `n` is absent.
 - **A range comparison against a wrong-typed stored value returns `false`** instead of throwing (JS) or
   failing the statement (SQL) — decision 1.
-- **A compound filter on a nested-array path must be satisfied within a single leaf array.**
-  `{ 'groups.tags': { $all: ['a', 'b'] } }` no longer matches a row whose `'a'` and `'b'` live in
-  different `groups` entries.
 - **A raw dotted filter key never borrows a literal-dot field of the same spelling.** `{ 'x.y': … }` reads as
   nested `x`→`y`; a schema declaring the literal-dot key `"x.y"` no longer answers the raw path from that
   field on the SQL engines — it resolves as a missing field, matching the JS matcher. Each reading of a
@@ -331,8 +380,34 @@ unchanged; the semantics of existing filters are not.
 - **An untrusted filter path naming an inherited property no longer crashes SQL compilation.** A record path
   such as `data.<key>.constructor` or `…__proto__` resolves as a missing field (as the JS matcher already
   treats it) rather than reading a non-schema value as a schema and throwing during compilation.
+- **A comparison operator on an array field now reads element-wise** (retires divergence #13).
+  `{ tags: { $eq: 'a' } }` matches `['a']`, where it previously compared against the whole array and returned
+  `false`. `$ne` is its complement — `{ tags: { $ne: 'a' } }` no longer matches `['a', 'b']`, because an
+  element does equal `'a'`. Each bound of a range is applied across the elements independently, so
+  `{ scores: { $gt: 2, $lt: 4 } }` matches `[1, 5]`; `$elemMatch` remains the way to require ONE element to
+  satisfy the whole body, and answers `false` on that same array. This also closes a silent over-match: because
+  `$not` complements its operand, an operator that could not reach an element made its own negation match
+  everything, so `{ tags: { $not: { $eq: 'a' } } }` used to return `['a']`.
+- **A negation on a path that descends through an array now denies the whole path** (divergence #16).
+  `{ 'items.k': { $ne: 'b' } }` no longer matches `{ items: [{k:'a'}, {k:'b'}] }` — one element's `k` IS `'b'`,
+  so the row is excluded, as MongoDB excludes it. The same holds for `$nin` and `$not`. "Some element differs"
+  is a different query, and `$elemMatch` is how to ask it: `{ items: { $elemMatch: { k: { $ne: 'b' } } } }`
+  still matches.
+- **`$type: 'null'` no longer matches a missing field** (retires divergence #4). It requires the field to be
+  present and hold `null`. Plain equality is unchanged and still matches a missing field, so `{ age: null }`
+  and `{ age: { $type: 'null' } }` now differ — as they do in MongoDB. The JS matcher was the outlier here;
+  the SQL engines already answered this way.
+- **A value operator on a scalar leaf below an array now compiles on the SQL engines.**
+  `{ 'items.k': { $ne: 'z' } }` and `{ 'items.v': { $gt: 4 } }` previously could not be expressed there and
+  were answered `false` regardless of the data (and a range could fail to compile at all).
 
 Each of these moves an engine *toward* MongoDB's semantics; none is a new divergence.
+
+Leaf scope is the exception, and is called out here because it is easy to misread as a conformance fix: **a
+compound filter on a nested-array path must be satisfied within a single leaf array** (`{ 'groups.tags': { $all:
+['a', 'b'] } }` does not match a row whose `'a'` and `'b'` live in different `groups`). That moved `$size`
+toward MongoDB but moves a multi-term condition *away* from it. It is a deliberate trade, recorded as divergence
+**#16**, not a fix.
 
 Separately, a type-only tightening (no runtime or semantic change): with `exactOptionalPropertyTypes` enabled
 (decision 2), `{ field: { $gt: undefined } }` and `{ $or: undefined }` no longer type-check, and a bare

@@ -417,15 +417,13 @@ export function registerScalarComparisonsB(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(result, false);
             });
 
-            test('$type "null" on missing optional field (JS treats missing as null; SQL may not)', async () => {
-                // JS: missing optional field → undefined → $type 'null' passes
-                // SQL: jsonb_typeof / json_type returns SQL NULL for missing path, not 'null' string
+            test('$type "null" on a missing optional field: an absent field has no type, so it does not match', async () => {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
                     { 'contact.age': { $type: 'null' } },
                     ContactSchema
                 );
-                expectOrAcknowledgeDivergence(result, true, '$type null on missing field: SQL returns SQL NULL not JSON null type');
+                expectOrAcknowledgeUnsupported(result, false);
             });
 
             test('$type "object": passes on object field', async () => {

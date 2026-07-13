@@ -45,7 +45,8 @@ export type Predicate =
     /** A sub-document with no operator keys: `{'child': {name: 'ann'}}`. */
     | { readonly kind: 'compoundObject'; readonly filter: WhereFilterDefinition }
     | { readonly kind: 'eq'; readonly operand: PredicateScalar }
-    | { readonly kind: 'ne'; readonly operand: unknown }
+    /** The complement of `eq`, and it carries the same operand so the two cannot be read differently. */
+    | { readonly kind: 'ne'; readonly operand: PredicateScalar }
     | { readonly kind: 'in'; readonly operand: readonly unknown[] }
     | { readonly kind: 'nin'; readonly operand: readonly unknown[] }
     | { readonly kind: 'range'; readonly bounds: readonly RangeBound[] }

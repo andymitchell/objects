@@ -6,9 +6,10 @@ import type { SectionCtx } from "./harness.ts";
  * §22. $type mapping.
  *
  * `$type` checks the FIELD's own runtime type, not its elements (divergence #1): an array field is
- * `'array'`, never the element type. `'number'` covers ints and reals, `'object'` excludes arrays,
- * `'null'` matches explicit null (and, per divergence #4, missing on JS), and the SQLite `'bool'`
- * mapping is a documented divergence (#5). `$type` composes with nested paths, spreading, and $elemMatch.
+ * `'array'`, never the element type. `'number'` covers ints and reals, `'object'` excludes arrays, and
+ * `'null'` matches an explicit null but NOT a missing field — an absent field has no type at all, which is
+ * where `$type: 'null'` parts company with the plain equality `{n: null}`. The SQLite `'bool'` mapping is a
+ * documented divergence (#5). `$type` composes with nested paths, spreading, and $elemMatch.
  */
 export function registerTypeMapping(ctx: SectionCtx): void {
     const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
@@ -60,9 +61,14 @@ export function registerTypeMapping(ctx: SectionCtx): void {
             expectOrAcknowledgeUnsupported(result, true);
         });
 
-        test('22.10 $type "null" on a missing field', async () => {
+        test('22.10 $type "null" on a missing field does not match, because an absent field has no type', async () => {
             const result = await matchJavascriptObject({ id: 'x' }, { n: { $type: 'null' } }, NullishGridSchema);
-            expectOrAcknowledgeDivergence(result, true, '#4 $type null on missing fields');
+            expectOrAcknowledgeUnsupported(result, false);
+        });
+
+        test('22.10b $not of $type "null" matches a missing field, since there is no type to negate', async () => {
+            const result = await matchJavascriptObject({ id: 'x' }, { n: { $not: { $type: 'null' } } }, NullishGridSchema);
+            expectOrAcknowledgeUnsupported(result, true);
         });
 
         test('22.11 $type on a nested path', async () => {

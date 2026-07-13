@@ -7,7 +7,9 @@ The entries below are of three kinds, and each states which it is:
 - a **loud-rejection subset gap** — an input MongoDB/BSON accepts is refused up front (at the validity gate, or as a typed compile-time refusal) rather than silently mis-evaluated, so every engine stays uniform across the JSON storage boundary;
 - a **single-engine storage limit** — a value one engine cannot persist that the others round-trip.
 
-Entries are numbered for stable reference: the capability manifests (`standard-tests/manifests/`) cite them by number, so a number is never reused or renumbered. A retired entry leaves its number as a gap (entry #6 was retired when a fix made the behaviour conformant).
+Entries are numbered for stable reference: the capability manifests (`standard-tests/manifests/`) cite them by number, so a number is never reused or renumbered. A retired entry leaves its number as a gap.
+
+Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` restates each one as a query against a real `mongod` and asserts both answers — MongoDB's and this package's — so an entry cannot quietly become fiction. Run it with `npm run test:mongo-truth`. It is opt-in because it downloads and boots a server; nothing else in the suite does.
 
 ---
 
@@ -49,17 +51,9 @@ Entries are numbered for stable reference: the capability manifests (`standard-t
 
 ---
 
-## 4. `$type 'null'` on missing fields
+## 4. (retired)
 
-**MongoDB**: `{ field: { $type: 'null' } }` matches **only** documents where the field is present and holds `null`. A missing field does **not** match. This is the one place `$type: 'null'` parts company with plain equality: `{ field: null }` matches both a stored null and a missing field, while `{ field: { $type: 'null' } }` matches only the stored null. (MongoDB manual, *Query for Null or Missing Fields* — "The `{ item : { $type: 10 } }` query matches only documents that contain the `item` field whose value is `null`"; confirmed against `mongod` 8.2.6.)
-
-**WhereFilterDefinition (JS)**: A missing optional field is `undefined`, which the JS matcher treats the same as `null` for `$type: 'null'` — so it **matches, and diverges from MongoDB**.
-
-**WhereFilterDefinition (SQL)**: A missing JSON path yields SQL `NULL` from `jsonb_typeof` / `json_type`, which is not the string `'null'`, so the SQL engines answer `false` — **which is what MongoDB answers**.
-
-**Rationale**: The engines disagree with each other, and the JS engine is the one that departs from MongoDB. Reconciling them means changing the JS matcher, not the SQL emitters; that change is outstanding and is tracked as `BUG-A` in DECISIONS.md §7, together with the evidence. Until it lands, the cross-engine disagreement is acknowledged here so the conformance battery has a single documented home for it.
-
-**Test**: `$type "null" on missing optional field`
+`$type: 'null'` once matched a missing field on the JS engine, where MongoDB requires the field to be present and hold `null`. The engines disagreed with each other and the JS one was wrong; it now answers `false`, as the SQL engines always did, so this is no longer a divergence. The number is kept as a gap rather than reused.
 
 ---
 
@@ -171,17 +165,11 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 
 ---
 
-## 13. Comparison operators on an array field are not element-wise
+## 13. (retired)
 
-**MongoDB**: an equality or comparison operator on an array field is applied to each element — `{ tags: { $eq: 'a' } }`, `{ tags: { $gt: 'm' } }`, `{ tags: { $regex: '^a' } }` all match an array that contains a qualifying element.
+A comparison operator on an array field (`$eq`, `$ne`, ranges, `$regex`) once compared against the array value as a whole, so `{ tags: { $eq: 'a' } }` was `false` on `['a']`. It now reads element-wise, as MongoDB does, and this is no longer a divergence. The number is kept as a gap rather than reused.
 
-**WhereFilterDefinition**: only a bare scalar (`{ tags: 'a' }`) and `$in` / `$nin` apply implicitly across an array's elements (containment). An explicit comparison operator — `$eq`, `$ne`, `$gt`/`$gte`/`$lt`/`$lte`, `$regex` — compares against the array value *as a whole*, so it does not match a scalar element: `{ tags: { $eq: 'a' } }` is **`false`** on `['a']`, even though the bare `{ tags: 'a' }` is `true`. To match elements, wrap the operator in `$elemMatch` — `{ tags: { $elemMatch: { $eq: 'a' } } }`.
-
-Both the JS matcher and the SQL emitters agree here (element-wise spreading for these operators is triggered only by `$elemMatch`), so this is a uniform divergence, not a cross-engine gap.
-
-**Rationale**: applying every operator element-wise by default would erase the array/scalar distinction and force each operator's SQL through the array-spreading path. Bare-scalar containment is kept because it is the common case; `$elemMatch` makes the element-wise intent explicit.
-
-**Tests**: element-wise matching via `$elemMatch` is covered in §3b ("Element-type branching") and §18; the whole-array behaviour of a bare comparison operator is its complement.
+The behaviour was not merely a conservative under-match, which is why it went: `$not` complements its operand, so an operator that could not reach an element made its own negation match everything — `{ tags: { $not: { $eq: 'a' } } }` returned `['a']`, a document the caller had excluded. Negating an under-match over-matches.
 
 ---
 
@@ -214,6 +202,32 @@ This is the same field-vs-element split as divergence #1 (`$type` checks the fie
 
 ---
 
+## 16. A positive condition on a nested-array path binds to a single leaf
+
+**MongoDB**: a dotted path flattens across every array on it into one *candidate set*, and each operator in the field condition is applied to that set **independently**, the results conjoined at the document level. So different candidates may answer different operators: `{ 'groups.subtags': { $all: ['d', 'a'] } }` matches a row whose `'d'` and `'a'` sit in **different** `groups`, and `{ 'items.v': { $gt: 2, $lt: 3 } }` matches `items: [{v: 1}, {v: 5}]` — one element clears the lower bound, another the upper, and no single element clears both.
+
+**WhereFilterDefinition**: the path reaches a *leaf* per array element, and a positive condition must be satisfied by **one** leaf in full. Both examples above are therefore `false` here. To ask MongoDB's question, name the operators separately — `{ $and: [{ 'items.v': { $gt: 2 } }, { 'items.v': { $lt: 3 } }] }` matches, because each arm is answered independently.
+
+This is strictly **conservative**: it can only under-match, never return a row MongoDB would exclude. `∃leaf. (P ∧ Q)` implies `(∃leaf. P) ∧ (∃leaf. Q)`, so every row this package returns, MongoDB returns too.
+
+A **negation is not folded this way**, and that exception is what keeps the divergence conservative. `$ne`, `$nin` and `$not` deny the *whole path* — no leaf may satisfy the condition they wrap — so `{ 'items.k': { $ne: 'b' } }` excludes a row where any element's `k` is `'b'`, exactly as MongoDB does. Folding a negation per leaf would let a clean leaf excuse an offending sibling and **over**-match, which is the one thing the conservatism argument cannot survive.
+
+The same reading applies where a leaf is itself an array: `{ 'groups.tags': { $all: ['a', 'bx'] } }` requires one `tags` array to hold both. `$size` counts a single leaf array, and bare containment asks whether some leaf holds the value — both single-term, so nothing splits and both agree with MongoDB.
+
+**Rationale**: leaf scope is the reading a caller writing `{ 'groups.tags': { $all: [...] } }` almost always means — "one group has all of these" — and pooling every leaf into a flat candidate set silently answers a different question. It is also the only reading the schema-driven SQL emitters can express without a second traversal per operator. The divergence is conservative, so it costs recall, never correctness.
+
+### If you wish to match MongoDB's candidate-set semantics
+
+Flatten the path to a candidate set (each array on the path contributes its elements; a leaf that is itself an array contributes both the array and its elements), then apply each operator to that set independently — positives as `∃candidate`, negations as `¬∃candidate` — and conjoin at the document level. Concretely: `matchPredicateOverLeaves` (`matchJavascriptObject.ts`) stops conjoining positives inside `leaves.some(...)` and instead maps each positive operator over the whole set; `emitTraverseArray` in both SQL translators emits one `EXISTS` per operator over a single shared spread, rather than one `EXISTS` around the whole conjunction; `slowLeafScopeEval` (`standard-tests/fuzz-internals.ts`), which is WF-P13's *independent* oracle, must be rewritten to the same law or it will contradict the engines.
+
+Be clear about what it costs. It **widens** the result set, so it is a breaking change for any caller relying on the leaf reading. It retires divergence **#15** by the same stroke on a one-level array, since `$exists`/`$type` inside a scalar `$elemMatch` body are the same field-vs-element split. And it removes the only thing distinguishing `{ 'groups.tags': { $all: ['a', 'bx'] } }` from `{ $and: [{ 'groups.tags': 'a' }, { 'groups.tags': 'bx' }] }`, which a caller can already write today when that is what they mean.
+
+**Tests**: §4 "a positive predicate on a nested-array path binds to a single leaf array (divergence #16)"; the negation laws in §4 "a value operator reaches a scalar leaf below an array"; `standard-tests/mongo-truth/corpus.ts`.
+
+---
+
 ## Not divergences: conformance fixes
 
-Some past behaviours that *did* differ from MongoDB have been fixed toward it, so they are **not** listed above as divergences. In particular: multiple operators in one payload are now conjunctive everywhere (including inside `$not` and a scalar `$elemMatch`); `$not` negates its operand on a missing field; a range comparison against a wrong-typed stored value returns `false` rather than throwing; and a compound filter on a nested-array path must be satisfied within a single leaf array. Each moved an engine *toward* MongoDB's semantics — see the **Release notes** in `DECISIONS.md`.
+Some past behaviours that *did* differ from MongoDB have been fixed toward it, so they are **not** listed above as divergences: multiple operators in one payload are now conjunctive everywhere (including inside `$not` and a scalar `$elemMatch`); `$not` negates its operand on a missing field; a range comparison against a wrong-typed stored value returns `false` rather than throwing; a comparison operator on an array field reads element-wise (retiring #13); `$type: 'null'` requires the field to exist (retiring #4); and a negation on an array-descended path denies the whole path rather than one leaf. See the **Release notes** in `DECISIONS.md`.
+
+Leaf scope itself is **not** in that list. It moved one engine's `$size` toward MongoDB (which is why #6 could retire), but for a multi-term condition it moves *away* — that is divergence #16 above, and it is a deliberate trade, not a fix.

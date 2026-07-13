@@ -1,10 +1,15 @@
-import { NestedScalarArraySchema, SpreadNestedSchema, NullableMemberArraySchema, type NestedScalarArray, type SpreadNested, type NullableMemberArray } from "./fixtures.ts";
+import { NestedScalarArraySchema, SpreadNestedSchema, NullableMemberArraySchema, ObjArraySchema, type NestedScalarArray, type SpreadNested, type NullableMemberArray, type ObjArray } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
 /** §4. Dot-prop paths and array spreading. */
 export function registerDotPropSpreading(ctx: SectionCtx): void {
     const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+
+    // A dotted path into an array of objects is not expressible in a schema-derived filter type, though the
+    // validity gate accepts it — as MongoDB does. The battery holds every engine to it regardless.
+    const objLeaf = (row: ObjArray, filter: unknown) =>
+        matchJavascriptObject(row, filter as WhereFilterDefinition<ObjArray>, ObjArraySchema);
 
     describe('4. Dot-prop paths and array spreading', () => {
 
@@ -347,28 +352,88 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
             expectOrAcknowledgeUnsupported(result, false);
         });
 
-        // ── Leaf scope: a predicate on a nested-array path binds to ONE leaf array ─────────────────
+        // ── Leaf scope: a POSITIVE predicate on a nested-array path binds to ONE leaf array ────────
         //
-        // `groups.tags` reaches several `tags` arrays — one per `groups` entry. The whole field condition
-        // must be satisfied by a single one of them; the row matches if ANY leaf array satisfies it. An
-        // implementation that pools every leaf array's elements into one flat set matches rows it must not.
-        describe('a nested-array path binds its predicate to a single leaf array', () => {
+        // `groups.tags` reaches several `tags` arrays — one per `groups` entry. A positive field condition
+        // must be satisfied by a single one of them; the row matches if ANY leaf array satisfies it all.
+        //
+        // This is divergence #16. MongoDB instead flattens the path into one candidate set and applies each
+        // operator to it independently, so it matches rows this package does not. The divergence is strictly
+        // conservative — it can only UNDER-match — and these tests are what pin it. A negation is the one
+        // thing that does not fold this way, because negating an under-match would over-match; it is lifted
+        // to the whole path, and its own tests live with the missing-field verdicts below.
+        describe('a positive predicate on a nested-array path binds to a single leaf array (divergence #16)', () => {
             const split: NestedScalarArray = { id: 'x', groups: [{ tags: ['a'] }, { tags: ['bx'] }] };
             const together: NestedScalarArray = { id: 'x', groups: [{ tags: ['a', 'bx'] }, { tags: [] }] };
             const scalarLeaf = (row: NestedScalarArray, filter: unknown) =>
                 matchJavascriptObject(row, filter as WhereFilterDefinition<NestedScalarArray>, NestedScalarArraySchema);
 
-            test('$all terms scattered across two leaf arrays do not match', async () => {
+            test('$all terms scattered across two leaf arrays do not match, where MongoDB matches them', async () => {
                 expect(await scalarLeaf(split, { 'groups.tags': { $all: ['a', 'bx'] } })).toBe(false);
             });
             test('$all terms present together in one leaf array match', async () => {
                 expect(await scalarLeaf(together, { 'groups.tags': { $all: ['a', 'bx'] } })).toBe(true);
             });
-            test('a compound $all + $elemMatch satisfied only across two leaf arrays does not match', async () => {
+            test('a compound $all + $elemMatch satisfied only across two leaf arrays does not match, where MongoDB matches it', async () => {
                 expect(await scalarLeaf(split, { 'groups.tags': { $all: ['a'], $elemMatch: { $eq: 'bx' } } })).toBe(false);
             });
             test('a compound $all + $elemMatch satisfied within one leaf array matches', async () => {
                 expect(await scalarLeaf(together, { 'groups.tags': { $all: ['a'], $elemMatch: { $eq: 'bx' } } })).toBe(true);
+            });
+            test('a single-term predicate has nothing to split, so it agrees with MongoDB', async () => {
+                expect(await scalarLeaf(split, { 'groups.tags': { $all: ['bx'] } })).toBe(true);
+                expect(await scalarLeaf(split, { 'groups.tags': 'bx' })).toBe(true);
+            });
+
+            // The same law where the path ends at a SCALAR leaf: `items.v` reaches one number per element, and
+            // both bounds must be met by the same one. MongoDB lets a different element answer each bound and
+            // matches this row; that difference is the divergence, in its smallest form.
+            test('range bounds met only by two different elements do not match, where MongoDB matches them', async () => {
+                expect(await objLeaf({ id: 'o', items: [{ k: 'a', v: 1 }, { k: 'b', v: 5 }] }, { 'items.v': { $gt: 2, $lt: 3 } })).toBe(false);
+                // One element meets both, so the leaf-scoped reading and MongoDB's agree.
+                expect(await objLeaf({ id: 'o', items: [{ k: 'a', v: 1 }, { k: 'b', v: 2.5 }] }, { 'items.v': { $gt: 2, $lt: 3 } })).toBe(true);
+            });
+        });
+
+        /**
+         * A value operator applied to a SCALAR leaf below an array.
+         *
+         * `items.k` reaches one `k` per element. A positive operator holds when SOME element's `k` satisfies it;
+         * `$ne` is its complement and holds only when NONE does. Both readings must survive the array, and an
+         * engine that cannot express the operator down there has to say so rather than quietly answer `false` —
+         * which is what makes these strict rather than acknowledged.
+         */
+        describe('a value operator reaches a scalar leaf below an array', () => {
+            const row: ObjArray = { id: 'o', items: [{ k: 'a', v: 1 }, { k: 'b', v: 5 }] };
+
+            test('$eq matches when some element carries the value', async () => {
+                expect(await objLeaf(row, { 'items.k': { $eq: 'b' } })).toBe(true);
+                expect(await objLeaf(row, { 'items.k': { $eq: 'z' } })).toBe(false);
+            });
+            test('$ne excludes the row when some element carries the value', async () => {
+                expect(await objLeaf(row, { 'items.k': { $ne: 'b' } })).toBe(false);
+            });
+            test('$ne matches when no element carries the value', async () => {
+                expect(await objLeaf(row, { 'items.k': { $ne: 'z' } })).toBe(true);
+            });
+            test('$not of $eq is the same denial as $ne', async () => {
+                expect(await objLeaf(row, { 'items.k': { $not: { $eq: 'b' } } })).toBe(false);
+                expect(await objLeaf(row, { 'items.k': { $not: { $eq: 'z' } } })).toBe(true);
+            });
+            test('negation composes, so negating $ne asks whether some element does carry the value', async () => {
+                expect(await objLeaf(row, { 'items.k': { $not: { $ne: 'b' } } })).toBe(true);
+                expect(await objLeaf(row, { 'items.k': { $not: { $ne: 'z' } } })).toBe(false);
+            });
+            test('a range bound matches when some element satisfies it', async () => {
+                expect(await objLeaf(row, { 'items.v': { $gt: 4 } })).toBe(true);
+                expect(await objLeaf(row, { 'items.v': { $gt: 9 } })).toBe(false);
+            });
+            test('$regex matches when some element satisfies it', async () => {
+                expect(await objLeaf(row, { 'items.k': { $regex: '^b' } })).toBe(true);
+                expect(await objLeaf(row, { 'items.k': { $regex: '^z' } })).toBe(false);
+            });
+            test('$elemMatch binds the condition to one element, which is a different question', async () => {
+                expect(await objLeaf(row, { items: { $elemMatch: { k: { $ne: 'b' } } } })).toBe(true);
             });
 
             // The same law where the leaf array holds objects rather than scalars.
@@ -431,11 +496,19 @@ export function registerDotPropSpreading(ctx: SectionCtx): void {
                 expect(await noLeafArray(absent, { 'groups.tags': { $exists: true } })).toBe(false);
                 expect(await noLeafArray(empty, { 'groups.tags': { $exists: true } })).toBe(false);
             });
-            test('present leaf arrays are still judged per leaf: $nin holds when ANY one leaf holds none of the forbidden values', async () => {
-                // The one leaf array holds 'x', so no leaf satisfies $nin — the row does not match.
+            test('a negation denies the whole path, so ONE leaf holding a forbidden value excludes the row', async () => {
+                // $nin says no value the path reaches may be forbidden — not "some leaf avoids them". Reading it
+                // per leaf would let a clean sibling leaf excuse the offending one, and return a row the caller
+                // asked to exclude.
                 expect(await noLeafArray({ id: 'x', groups: [{ tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(false);
-                // The first leaf array holds none of them, so it satisfies $nin — pooling both leaves would wrongly see 'x'.
-                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(false);
+                // No leaf holds a forbidden value, so the row does match.
+                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['b'] }] }, { 'groups.tags': { $nin: ['x'] } })).toBe(true);
+            });
+
+            test('a negation composes, so negating it again asks whether some leaf DOES hold the value', async () => {
+                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['x'] }] }, { 'groups.tags': { $not: { $nin: ['x'] } } })).toBe(true);
+                expect(await noLeafArray({ id: 'x', groups: [{ tags: ['a'] }, { tags: ['b'] }] }, { 'groups.tags': { $not: { $nin: ['x'] } } })).toBe(false);
             });
         });
 

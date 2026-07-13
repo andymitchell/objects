@@ -1,4 +1,5 @@
 import { TagsSchema, ObjArraySchema, NestedItemsSchema, MixedArraySchema, DeepSpread3Schema, ContactSchema, RegexSchema, NullishGridSchema } from "./fixtures.ts";
+import type { Tags } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
@@ -195,6 +196,121 @@ export function registerArraySemantics(ctx: SectionCtx): void {
             // this is a required cross-engine law, and the divergence from MongoDB is a conservative under-match.
             const result = await matchJavascriptObject({ id: 't', tags: ['a'], nums: [] }, { tags: { $elemMatch: { $exists: true, $eq: 'a' } } }, TagsSchema);
             expect(result).toBe(false);
+        });
+
+        /**
+         * A comparison operator on an array field reads element-wise: it matches when SOME element satisfies it.
+         *
+         * The negated forms are the reason this block is strict rather than acknowledged. `$ne` is the complement
+         * of `$eq` — "no element equals it" — so an operator that failed to reach the elements would make its own
+         * negation match everything, and an engine could return rows that hold the very value the caller excluded.
+         * A cross-engine gap here is therefore unsound, not merely inconsistent.
+         */
+        describe('18.35 a comparison operator on an array field reads element-wise', () => {
+
+            const tags = (values: string[]) => ({ id: 't', tags: values, nums: [] });
+            const nums = (values: number[]) => ({ id: 't', tags: [], nums: values });
+            // The runtime filter language is wider than the schema-derived type here: the validity gate accepts a
+            // comparison operator on an array field (as MongoDB does), while `WhereFilterDefinition<T>` offers an
+            // array field only the array operators. A filter arriving as JSON is therefore free to carry one, so
+            // the engines must agree on it — which is exactly what this block holds them to.
+            const arrayField = (row: Tags, filter: unknown) =>
+                matchJavascriptObject(row, filter as WhereFilterDefinition<Tags>, TagsSchema);
+
+            test('$eq matches when an element equals the operand', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $eq: 'a' } });
+                expect(result).toBe(true);
+            });
+
+            test('$eq does not match when no element equals the operand', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $eq: 'z' } });
+                expect(result).toBe(false);
+            });
+
+            test('$eq matches a numeric element, which must not be compared as text', async () => {
+                const result = await arrayField(nums([1, 9]), { nums: { $eq: 9 } });
+                expect(result).toBe(true);
+            });
+
+            test('$ne on a numeric array is the complement of $eq', async () => {
+                const result = await arrayField(nums([1, 9]), { nums: { $ne: 9 } });
+                expect(result).toBe(false);
+            });
+
+            test('a range bound compares numerically, not lexically', async () => {
+                const result = await arrayField(nums([-8]), { nums: { $lt: -9 } });
+                expect(result).toBe(false);
+            });
+
+            test('$ne is the complement of $eq, so an array holding the operand does not match', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $ne: 'a' } });
+                expect(result).toBe(false);
+            });
+
+            test('$ne matches when no element equals the operand', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $ne: 'z' } });
+                expect(result).toBe(true);
+            });
+
+            test('$ne matches an empty array, which holds nothing to equal the operand', async () => {
+                const result = await arrayField(tags([]), { tags: { $ne: 'a' } });
+                expect(result).toBe(true);
+            });
+
+            test('a range bound matches when an element satisfies it', async () => {
+                const result = await arrayField(nums([1, 9]), { nums: { $gt: 5 } });
+                expect(result).toBe(true);
+            });
+
+            test('a range bound does not match when no element satisfies it', async () => {
+                const result = await arrayField(nums([1, 4]), { nums: { $gt: 5 } });
+                expect(result).toBe(false);
+            });
+
+            test('each bound is applied independently, so different elements may satisfy different bounds', async () => {
+                const result = await arrayField(nums([1, 5]), { nums: { $gt: 2, $lt: 4 } });
+                expect(result).toBe(true);
+            });
+
+            test('$elemMatch asks the stricter question — one element must satisfy the whole body', async () => {
+                const result = await arrayField(nums([1, 5]), { nums: { $elemMatch: { $gt: 2, $lt: 4 } } });
+                expect(result).toBe(false);
+            });
+
+            test('$regex matches when an element matches the pattern', async () => {
+                const result = await arrayField(tags(['ann', 'bob']), { tags: { $regex: '^a' } });
+                expect(result).toBe(true);
+            });
+
+            test('$regex does not match when no element matches the pattern', async () => {
+                const result = await arrayField(tags(['ann', 'bob']), { tags: { $regex: '^z' } });
+                expect(result).toBe(false);
+            });
+
+            test('negating $eq excludes an array that holds the operand', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $eq: 'a' } } });
+                expect(result).toBe(false);
+            });
+
+            test('negating $eq matches an array that does not hold the operand', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $eq: 'z' } } });
+                expect(result).toBe(true);
+            });
+
+            test('negating a range bound excludes an array with an element that satisfies it', async () => {
+                const result = await arrayField(nums([1, 9]), { nums: { $not: { $gt: 5 } } });
+                expect(result).toBe(false);
+            });
+
+            test('negating a $regex excludes an array with an element that matches it', async () => {
+                const result = await arrayField(tags(['ann']), { tags: { $not: { $regex: '^a' } } });
+                expect(result).toBe(false);
+            });
+
+            test('$size still describes the array itself rather than an element', async () => {
+                const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $size: 3 } } });
+                expect(result).toBe(true);
+            });
         });
 
     });

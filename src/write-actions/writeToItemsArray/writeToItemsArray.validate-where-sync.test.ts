@@ -47,5 +47,5 @@ const createValidatingAdapter: AdapterFactory = <T extends Record<string, any>>(
 
 describe("writeToItemsArray + validateWhereFilter (validator/matcher sync)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vitest global vs import type mismatch
-    standardTests({ test: test as any, expect: expect as any, createAdapter: createValidatingAdapter, implementationName: "writeToItemsArray+validateWhereFilter" });
+    standardTests({ test: test as any, expect: expect as any, createAdapter: createValidatingAdapter, implementationName: "writeToItemsArray+validateWhereFilter", pinReferenceDefects: true });
 });

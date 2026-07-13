@@ -6,5 +6,6 @@ export { standardTests } from "./standard-tests/index.ts";
 export type { StandardTestConfig, MatchJavascriptObjectInTesting } from "./standard-tests/index.ts";
 export { ContactSchema } from "./standard-tests/fixtures.ts";
 export { classifyWhereClauseErrors, classifyInsertError, AcknowledgementCollector } from "./standard-tests/outcomes.ts";
-export type { ConformanceOutcome, AcknowledgementEvent } from "./standard-tests/outcomes.ts";
+export type { ConformanceOutcome, AcknowledgementEvent, AcknowledgementKind } from "./standard-tests/outcomes.ts";
 export { assertNoCapabilityDrift } from "./standard-tests/manifests/driftGuard.ts";
+export type { ExpectLike } from "./standard-tests/manifests/driftGuard.ts";

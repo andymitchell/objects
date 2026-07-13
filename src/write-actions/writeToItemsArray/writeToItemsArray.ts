@@ -46,12 +46,31 @@ function getOptionDefaults(options?:Partial<WriteToItemsArrayOptions>):OptionsWi
     }
 }
 
+/**
+ * An index whose keys come from caller data — a primary-key value, an action uuid — and therefore has NO
+ * prototype.
+ *
+ * A plain `{}` is unusable here. Its keys are drawn from untrusted strings, and `'toString'`, `'constructor'`
+ * and friends are perfectly legal ones: `hash['toString']` would inherit a truthy function for a key nobody
+ * ever wrote, so a presence test silently answers yes. Worse, `hash['__proto__'] = value` reaches the
+ * inherited setter and stores NOTHING. Both failures are silent and corrupt data — a create reported `ok`
+ * whose row never lands, or an untouched row overwritten by an inherited function.
+ *
+ * With no prototype there is nothing to inherit and no setter to hit, so every key is an ordinary own
+ * property and a truthiness test means exactly what it says. `Object.values`, `delete` and index access all
+ * behave normally.
+ */
+function makeKeyedByCallerData<V>(): Record<string, V> {
+    return Object.create(null) as Record<string, V>;
+}
+
 class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
     private pk:PrimaryKeyGetter<T>;
     private actionsMap:Record<string, WriteOutcomeOk<T>>;
     constructor(primaryKey:keyof T) {
         this.pk = makePrimaryKeyGetter(primaryKey);
-        this.actionsMap = {};
+        // Keyed by action uuid, which is caller data — see makeKeyedByCallerData.
+        this.actionsMap = makeKeyedByCallerData<WriteOutcomeOk<T>>();
     }
 
     private findSuccessfulWriteAction(action:WriteAction<T>, createIfMissing?: boolean) {
@@ -194,9 +213,10 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
     const rules: RootListRules<T> = ddl.lists['.'];
     const pk = makePrimaryKeyGetter<T>(rules.primary_key);
 
-    const addedHash: ItemHash<T> = {};
-    const updatedHash: ItemHash<T> = {};
-    const deletedHash: ItemHash<T> = {};
+    // Keyed by primary-key VALUE, which is caller data — see makeKeyedByCallerData.
+    const addedHash: ItemHash<T> = makeKeyedByCallerData<T>();
+    const updatedHash: ItemHash<T> = makeKeyedByCallerData<T>();
+    const deletedHash: ItemHash<T> = makeKeyedByCallerData<T>();
     let wipItems = [...items] as T[];
 
 
@@ -285,8 +305,17 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                     const schemaOk = failureTracker.testSchema(action, newItem);
                     if( schemaOk ) {
                         existingIds.add(pkValue);
-                        addedHash[pkValue] = newItem;
-                        if( deletedHash[pkValue] ) delete deletedHash[pkValue];
+                        // The change hashes report the batch's NET effect on the original items, so a primary key
+                        // belongs to at most one of them, and `addedHash` holds only keys ABSENT from those items.
+                        // Re-creating a key this batch already deleted therefore replaces a row that still exists
+                        // for the caller: it is a whole-row update, not an insert. Recording it as an insert would
+                        // leave the original row in place AND append the re-creation, duplicating the key.
+                        if( deletedHash[pkValue] ) {
+                            updatedHash[pkValue] = newItem;
+                            delete deletedHash[pkValue];
+                        } else {
+                            addedHash[pkValue] = newItem;
+                        }
                         successTracker.report(action, newItem);
                         //failureTracker.undoable()?.add(wipItems.length);
                         wipItems.push(newItem);
@@ -451,9 +480,16 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                     if( !failureTracker.shouldHalt() ) {
                         successTracker.report(action, item);
                         if (deleted) {
-                            deletedHash[pkValue] = item;
-                            if( addedHash[pkValue] ) delete addedHash[pkValue];
-                            if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                            // `deletedHash` holds only keys PRESENT in the original items. Deleting a key this batch
+                            // created nets to nothing for the caller — drop the pending insert and record no removal,
+                            // otherwise `remove_keys` names a key that never existed. Any other delete removes a
+                            // pre-existing row, superseding an in-batch update of it.
+                            if( addedHash[pkValue] ) {
+                                delete addedHash[pkValue];
+                            } else {
+                                deletedHash[pkValue] = item;
+                                if( updatedHash[pkValue] ) delete updatedHash[pkValue];
+                            }
                             wipItems.splice(i, 1);
                             i--;
                         } else if( mutableUpdatedItem ) {

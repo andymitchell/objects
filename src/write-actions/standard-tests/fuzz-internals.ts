@@ -72,11 +72,28 @@ export function makeWriteAction(uuid: string, payload: WriteAction<FuzzItem>['pa
 // Generators (all values JSON-safe; `undefined` only as a rare update delete-sentinel)
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Primary keys that collide with an `Object.prototype` member name. They are ordinary strings, so they must
+ * behave as inert data — but an implementation indexing rows in a plain `{}` inherits a truthy member for a
+ * key it never wrote (and `__proto__` reaches a setter rather than storing), which silently loses or corrupts
+ * rows. Seeding them into the world puts EVERY property in this file behind that trap.
+ */
+const PROTOTYPE_NAME_IDS = ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__'] as const;
+
+/** The id a generated row takes: usually plain, occasionally one that a plain-object index would mishandle. */
+const genId = (rng: Rng, i: number): string => (rng.bool(0.2) ? rng.pick(PROTOTYPE_NAME_IDS) : 'k' + i);
+
 export function genWorld(rng: Rng): FuzzItem[] {
     const n = rng.int(9); // 0-8
     const items: FuzzItem[] = [];
+    const taken = new Set<string>();
     for (let i = 0; i < n; i++) {
-        const item: FuzzItem = { id: 'k' + i };
+        // A world may not hold a primary key twice — a generated duplicate would be an invalid premise, not a
+        // finding, so it falls back to the plain id (which is unique by construction).
+        const candidate = genId(rng, i);
+        const id = taken.has(candidate) ? 'k' + i : candidate;
+        taken.add(id);
+        const item: FuzzItem = { id };
         if (rng.bool(0.7)) item.text = rng.pick(TEXT_POOL);
         if (rng.bool(0.6)) item.count = rng.intRange(-10, 10);
         if (rng.bool(0.5)) item.tags = Array.from({ length: rng.int(5) }, () => rng.pick(TAG_POOL));
@@ -138,7 +155,10 @@ export function genWriteAction(rng: Rng, world: FuzzItem[], uuid: string): Write
     switch (pickVerb(rng)) {
         case 'create': {
             const dup = world.length > 0 && rng.bool(0.15);
-            const id = dup ? rng.pick(world).id : 'n' + rng.int(1000);
+            // A fresh create sometimes takes a prototype-member name, so the insert path meets the same trap as
+            // the world (see PROTOTYPE_NAME_IDS): a plain-object index reads it as already-present and loses it.
+            const fresh = rng.bool(0.2) ? rng.pick(PROTOTYPE_NAME_IDS) : 'n' + rng.int(1000);
+            const id = dup ? rng.pick(world).id : fresh;
             // sub_items is always present (see genWorld) so a later same-batch array_scope never hits an
             // undefined array on this freshly-created row.
             const data: FuzzItem = { id, sub_items: [] };

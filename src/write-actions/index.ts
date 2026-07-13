@@ -99,4 +99,4 @@ export { resolveDdlListRules } from '../ddl/resolveDdlListRules.ts';
 // Published so a stackable-collection conformance suite can run the standard write-action
 // battery against a real ICollection (it supplies an adapter wrapping its own write path).
 export { standardTests } from "./standardTests.ts";
-export type { StandardTestConfig, AdapterFactory, WriteTestAdapter, WriteTestAdapterResult } from "./standardTests.ts";
+export type { StandardTestConfig, AdapterFactory, WriteTestAdapter, WriteTestAdapterResult, WriteTestCapabilities } from "./standardTests.ts";

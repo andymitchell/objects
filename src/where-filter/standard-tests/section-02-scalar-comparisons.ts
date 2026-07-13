@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §2 (part A) Scalar value comparisons — deep object equality, range ops, $regex, $ne, $eq. */
 export function registerScalarComparisonsA(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
         describe('Deep object equality', () => {
 
@@ -223,7 +223,7 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                         { 'contact.name': { $gt: 10 } },
                         ContactSchema
                     );
-                    expect(result).toBe(false);
+                    expectOrAcknowledgeUnsupported(result, false);
                 });
             })
 
@@ -302,7 +302,7 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                         },
                         ContactSchema
                     );
-                    expect(result).toBe(true);
+                    expectOrAcknowledgeUnsupported(result, true);
                 });
 
                 test('case sensitivity: "apple" > "Zebra"', async () => {
@@ -317,7 +317,7 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                         },
                         ContactSchema
                     );
-                    expect(result).toBe(true);
+                    expectOrAcknowledgeUnsupported(result, true);
                 });
 
                 test('string vs number logic: "100" < "2"', async () => {
@@ -334,7 +334,7 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                         },
                         ContactSchema
                     );
-                    expect(result).toBe(true);
+                    expectOrAcknowledgeUnsupported(result, true);
                 });
 
                 test('shorter prefix < longer word: "Car" < "Cart"', async () => {
@@ -350,7 +350,7 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                         },
                         ContactSchema
                     );
-                    expect(result).toBe(true);
+                    expectOrAcknowledgeUnsupported(result, true);
                 });
 
                 test('spaces matter: "A B" < "AB"', async () => {
@@ -370,7 +370,7 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                         },
                         ContactSchema
                     );
-                    expect(result).toBe(true);
+                    expectOrAcknowledgeUnsupported(result, true);
                 });
             })
         });

@@ -5,6 +5,8 @@ import type { DDL } from "../../ddl/types.ts";
 import { produce } from "immer";
 import { writeToItemsArray } from "./writeToItemsArray.ts";
 import { standardTests, type AdapterFactory } from "../standardTests.ts";
+import { applyDelta } from "../../objects-delta/apply-delta/applyDelta.ts";
+import { makePrimaryKeyGetter } from "../../utils/getKeyValue.ts";
 
 // ═══════════════════════════════════════════════════════════════════
 // Shared fixtures for implementation-specific tests
@@ -73,7 +75,7 @@ describe('writeToItemsArray', () => {
         // into the deliberately-invalid where corpus (§9 + fuzz P10 where-variant). The validate-where-sync
         // consumer must NOT set this — it throws on any invalid_filter.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vitest global vs import type mismatch
-        standardTests({ test: test as any, expect: expect as any, createAdapter, implementationName: 'writeToItemsArray', capabilities: { invalidWhereCorpus: true } });
+        standardTests({ test: test as any, expect: expect as any, createAdapter, implementationName: 'writeToItemsArray', capabilities: { invalidWhereCorpus: true }, pinReferenceDefects: true });
     });
 
     // ═══════════════════════════════════════════════════════════════
@@ -452,6 +454,117 @@ describe('writeToItemsArray', () => {
                 });
                 // Immer should not have changed anything since atomic rolled back
                 expect(finalItems[0]!.children![0]!.name).toBeUndefined();
+            });
+        });
+
+        // ───────────────────────────────────────────────────────────
+        // 6. Same-batch delete + recreate reconciliation
+        // ───────────────────────────────────────────────────────────
+
+        // A batch reports its NET effect on the original items: a primary key appears in at most one of
+        // insert / update / remove_keys, `insert` only ever holds keys absent from the original items, and
+        // `remove_keys` only ever holds keys present in them. Deleting and re-creating a pre-existing key in
+        // one batch is therefore a whole-row replacement (an update), and creating then deleting a brand-new
+        // key nets to nothing at all.
+
+        describe('6. Same-batch delete + recreate reconciliation', () => {
+
+            const pkOf = makePrimaryKeyGetter<Obj>('id');
+            const idsOf = (items: Obj[]): string[] => items.map(x => x.id);
+
+            test('delete then recreate a pre-existing key yields one clean row, reported as an update', () => {
+                const items: Obj[] = [{ id: 'c', text: 'orig', owner: 'ann' }, { id: 'd', text: 'dee' }];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'delete', where: { id: 'c' } } },
+                        { type: 'write', ts: 1, uuid: '1', payload: { type: 'create', data: { id: 'c', text: 'new' } } },
+                    ],
+                    items, ObjSchema, ddl,
+                );
+
+                expect(result.ok).toBe(true);
+                // One row per key, holding exactly the re-created data — no field of the deleted row survives.
+                expect(idsOf(result.changes.final_items)).toEqual(['c', 'd']);
+                expect(result.changes.final_items[0]).toEqual({ id: 'c', text: 'new' });
+
+                expect(idsOf(result.changes.update)).toEqual(['c']);
+                expect(result.changes.insert).toEqual([]);
+                expect(result.changes.remove_keys).toEqual([]);
+                expect(result.changes.changed).toBe(true);
+            });
+
+            test('delete then recreate then mutate the same key leaves no stale fields', () => {
+                const items: Obj[] = [{ id: '1', text: 'orig', owner: 'ann', arr_items: ['old'] }];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'delete', where: { id: '1' } } },
+                        { type: 'write', ts: 1, uuid: '1', payload: { type: 'create', data: { id: '1', text: 'new' } } },
+                        { type: 'write', ts: 2, uuid: '2', payload: { type: 'update', data: { owner: 'bob' }, where: { id: '1' } } },
+                    ],
+                    items, ObjSchema, ddl,
+                );
+
+                expect(result.ok).toBe(true);
+                expect(result.changes.final_items).toEqual([{ id: '1', text: 'new', owner: 'bob' }]);
+
+                expect(idsOf(result.changes.update)).toEqual(['1']);
+                expect(result.changes.insert).toEqual([]);
+                expect(result.changes.remove_keys).toEqual([]);
+            });
+
+            test('create then delete a brand-new key reports no insert and no removal', () => {
+                const items: Obj[] = [{ id: 'keep', text: 'kept' }];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: 'x', text: 'ephemeral' } } },
+                        { type: 'write', ts: 1, uuid: '1', payload: { type: 'delete', where: { id: 'x' } } },
+                    ],
+                    items, ObjSchema, ddl,
+                );
+
+                expect(result.ok).toBe(true);
+                // 'x' never existed in the original items, so removing it is not a change the caller can apply.
+                expect(result.changes.remove_keys).toEqual([]);
+                expect(result.changes.insert).toEqual([]);
+                expect(result.changes.update).toEqual([]);
+                expect(result.changes.changed).toBe(false);
+                expect(idsOf(result.changes.final_items)).toEqual(['keep']);
+            });
+
+            test('delete then recreate then delete a pre-existing key nets to a removal', () => {
+                const items: Obj[] = [{ id: '1', text: 'orig' }, { id: '2', text: 'two' }];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'delete', where: { id: '1' } } },
+                        { type: 'write', ts: 1, uuid: '1', payload: { type: 'create', data: { id: '1', text: 'new' } } },
+                        { type: 'write', ts: 2, uuid: '2', payload: { type: 'delete', where: { id: '1' } } },
+                    ],
+                    items, ObjSchema, ddl,
+                );
+
+                expect(result.ok).toBe(true);
+                expect(result.changes.remove_keys).toEqual(['1']);
+                expect(result.changes.insert).toEqual([]);
+                expect(result.changes.update).toEqual([]);
+                expect(idsOf(result.changes.final_items)).toEqual(['2']);
+            });
+
+            test('the change lists are key-disjoint, so replaying them onto the original items rebuilds final_items', () => {
+                const items: Obj[] = [{ id: 'c', text: 'orig', owner: 'ann' }, { id: 'd', text: 'dee' }];
+                const result = writeToItemsArray(
+                    [
+                        { type: 'write', ts: 0, uuid: '0', payload: { type: 'delete', where: { id: 'c' } } },
+                        { type: 'write', ts: 1, uuid: '1', payload: { type: 'create', data: { id: 'c', text: 'new' } } },
+                    ],
+                    items, ObjSchema, ddl,
+                );
+                const { insert, update, remove_keys, final_items } = result.changes;
+
+                const appearances = [...insert.map(x => pkOf(x)), ...update.map(x => pkOf(x)), ...remove_keys];
+                expect(appearances).toEqual([...new Set(appearances)]);
+
+                // A caller replaying the delta gets the same world the engine reports.
+                expect(applyDelta(items, result.changes, pkOf)).toEqual(final_items);
             });
         });
     });

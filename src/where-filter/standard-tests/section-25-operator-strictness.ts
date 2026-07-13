@@ -41,7 +41,7 @@ import type { SectionCtx } from "./harness.ts";
  *     so on a missing field as well (`{$not:{$ne:5}}` does NOT match a missing field, because `$ne` does).
  */
 export function registerOperatorStrictness(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     // These payloads are deliberately malformed: the compile-time type rejects each one (TS2353 for unknown /
     // cross-category operators; excess/absent for the carriers). The runtime gate must reject them too. Cast
@@ -263,28 +263,30 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
         // `{$not:{$ne:9,$gt:5}}` negates the WHOLE conjunction: it matches exactly the values that fail
         // `$ne:9` OR fail `$gt:5`. A value of 3 satisfies `$ne:9` but not `$gt:5`, so the inner conjunction
         // is false and the negation is TRUE — the row every first-operator-wins implementation gets wrong.
-        // Every assertion here is strict: this is a cross-engine conformance contract, not a capability.
+        // An engine that CAN express this filter is held to the exact verdict; one that cannot acknowledges it
+        // through the seam. The four in-repo engines all express it, and their capability manifests are frozen,
+        // so none of them can quietly retreat to an acknowledgement here.
         describe('25.8 a multi-operator payload under $not is a conjunction', () => {
             const notNe9Gt5 = (n?: number) => matchJavascriptObject(n === undefined ? { id: 'x' } : { id: 'x', n }, bad({ n: { $not: { $ne: 9, $gt: 5 } } }), NullishGridSchema);
 
             test('25.8a a value failing only the inner $ne matches the negation', async () => {
-                expect(await notNe9Gt5(9)).toBe(true);
+                expectOrAcknowledgeUnsupported(await notNe9Gt5(9), true, '$not over a multi-operator conjunction');
             });
             test('25.8b a value failing only the inner $gt matches the negation', async () => {
-                expect(await notNe9Gt5(3)).toBe(true);
+                expectOrAcknowledgeUnsupported(await notNe9Gt5(3), true, '$not over a multi-operator conjunction');
             });
             test('25.8c a value satisfying both inner operators fails the negation', async () => {
-                expect(await notNe9Gt5(7)).toBe(false);
+                expectOrAcknowledgeUnsupported(await notNe9Gt5(7), false, '$not over a multi-operator conjunction');
             });
             test('25.8d a larger value satisfying both inner operators also fails the negation', async () => {
-                expect(await notNe9Gt5(10)).toBe(false);
+                expectOrAcknowledgeUnsupported(await notNe9Gt5(10), false, '$not over a multi-operator conjunction');
             });
             test('25.8e a missing field matches the negation (it fails the inner $gt)', async () => {
-                expect(await notNe9Gt5(undefined)).toBe(true);
+                expectOrAcknowledgeUnsupported(await notNe9Gt5(undefined), true, '$not over a multi-operator conjunction');
             });
             test('25.8f a doubly-negated multi-operator payload is the payload itself', async () => {
-                expect(await matchJavascriptObject({ id: 'x', n: 7 }, bad({ n: { $not: { $not: { $gt: 5, $lt: 10 } } } }), NullishGridSchema)).toBe(true);
-                expect(await matchJavascriptObject({ id: 'x', n: 12 }, bad({ n: { $not: { $not: { $gt: 5, $lt: 10 } } } }), NullishGridSchema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'x', n: 7 }, bad({ n: { $not: { $not: { $gt: 5, $lt: 10 } } } }), NullishGridSchema), true, '$not over a multi-operator conjunction');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'x', n: 12 }, bad({ n: { $not: { $not: { $gt: 5, $lt: 10 } } } }), NullishGridSchema), false, '$not over a multi-operator conjunction');
             });
         });
 
@@ -298,28 +300,28 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
             const elemNe9Gt5 = (nums: number[]) => matchJavascriptObject({ id: 'x', tags: [], nums }, bad({ nums: { $elemMatch: { $ne: 9, $gt: 5 } } }), TagsSchema);
 
             test('25.9a an element satisfying only the $ne does not match', async () => {
-                expect(await elemNe9Gt5([3])).toBe(false);
+                expectOrAcknowledgeUnsupported(await elemNe9Gt5([3]), false, '$elemMatch multi-operator conjunction');
             });
             test('25.9b a conjunction cannot be satisfied by two different elements', async () => {
-                expect(await elemNe9Gt5([9, 3])).toBe(false);
+                expectOrAcknowledgeUnsupported(await elemNe9Gt5([9, 3]), false, '$elemMatch multi-operator conjunction');
             });
             test('25.9c an element satisfying both operators matches', async () => {
-                expect(await elemNe9Gt5([7])).toBe(true);
+                expectOrAcknowledgeUnsupported(await elemNe9Gt5([7]), true, '$elemMatch multi-operator conjunction');
             });
             test('25.9d an element satisfying only the $gt does not match', async () => {
-                expect(await elemNe9Gt5([9])).toBe(false);
+                expectOrAcknowledgeUnsupported(await elemNe9Gt5([9]), false, '$elemMatch multi-operator conjunction');
             });
             test('25.9e one satisfying element among failing ones matches', async () => {
-                expect(await elemNe9Gt5([9, 7])).toBe(true);
+                expectOrAcknowledgeUnsupported(await elemNe9Gt5([9, 7]), true, '$elemMatch multi-operator conjunction');
             });
             test('25.9f an empty array never matches', async () => {
-                expect(await elemNe9Gt5([])).toBe(false);
+                expectOrAcknowledgeUnsupported(await elemNe9Gt5([]), false, '$elemMatch multi-operator conjunction');
             });
             test('25.9g a two-bound range inside $elemMatch binds to one element', async () => {
                 const gt5lt8 = (nums: number[]) => matchJavascriptObject({ id: 'x', tags: [], nums }, bad({ nums: { $elemMatch: { $gt: 5, $lt: 8 } } }), TagsSchema);
-                expect(await gt5lt8([7])).toBe(true);
-                expect(await gt5lt8([9])).toBe(false);
-                expect(await gt5lt8([7, 9])).toBe(true);
+                expectOrAcknowledgeUnsupported(await gt5lt8([7]), true, '$elemMatch multi-operator conjunction');
+                expectOrAcknowledgeUnsupported(await gt5lt8([9]), false, '$elemMatch multi-operator conjunction');
+                expectOrAcknowledgeUnsupported(await gt5lt8([7, 9]), true, '$elemMatch multi-operator conjunction');
             });
         });
 
@@ -332,20 +334,20 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
             const onMissing = (payload: unknown) => matchJavascriptObject({ id: 'x' }, bad({ n: payload }), NullishGridSchema);
 
             test('25.10a the inner $ne matches a missing field, so its negation does not', async () => {
-                expect(await onMissing({ $not: { $ne: 5 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onMissing({ $not: { $ne: 5 } }), false, '$not on a missing field');
             });
             test('25.10b the inner $exists:false matches a missing field, so its negation does not', async () => {
-                expect(await onMissing({ $not: { $exists: false } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onMissing({ $not: { $exists: false } }), false, '$not on a missing field');
             });
             test('25.10c the inner $exists:true fails a missing field, so its negation matches', async () => {
-                expect(await onMissing({ $not: { $exists: true } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onMissing({ $not: { $exists: true } }), true, '$not on a missing field');
             });
             test('25.10d the inner range fails a missing field, so its negation matches', async () => {
-                expect(await onMissing({ $not: { $gt: 5 } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onMissing({ $not: { $gt: 5 } }), true, '$not on a missing field');
             });
             test('25.10e on a present field $not is the plain complement', async () => {
-                expect(await matchJavascriptObject({ id: 'x', n: 5 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema)).toBe(true);
-                expect(await matchJavascriptObject({ id: 'x', n: 6 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema)).toBe(false);
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'x', n: 5 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema), true, '$not on a missing field');
+                expectOrAcknowledgeUnsupported(await matchJavascriptObject({ id: 'x', n: 6 }, bad({ n: { $not: { $ne: 5 } } }), NullishGridSchema), false, '$not on a missing field');
             });
         });
 
@@ -354,21 +356,21 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
         // A stored null is a PRESENT value, not a missing field, so `$not` negates its operand's verdict on
         // that null. An engine that decides "missing" by whether the extracted value is null — rather than
         // whether the path is there — inverts every row here; SQL uses a presence probe to separate the two.
-        // All four engines agree, so this is a cross-engine law.
+        // All four in-repo engines express this and are pinned to the exact verdicts by their frozen manifests.
         describe('25.11 $not distinguishes a stored JSON null from an absent field', () => {
             const onStoredNull = (payload: unknown) => matchJavascriptObject({ id: 'x', n: null }, bad({ n: payload }), NullishGridSchema);
 
             test('25.11a a stored null exists, so negating $exists:true excludes the row', async () => {
-                expect(await onStoredNull({ $not: { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onStoredNull({ $not: { $exists: true } }), false, '$not on a stored-null field');
             });
             test('25.11b a stored null exists, so negating $exists:false matches the row', async () => {
-                expect(await onStoredNull({ $not: { $exists: false } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await onStoredNull({ $not: { $exists: false } }), true, '$not on a stored-null field');
             });
             test('25.11c a stored null differs from 5, so negating that difference excludes the row', async () => {
-                expect(await onStoredNull({ $not: { $ne: 5 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onStoredNull({ $not: { $ne: 5 } }), false, '$not on a stored-null field');
             });
             test('25.11d a stored null equals a null operand, so negating that equality excludes the row', async () => {
-                expect(await onStoredNull({ $not: { $eq: null } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await onStoredNull({ $not: { $eq: null } }), false, '$not on a stored-null field');
             });
         });
 
@@ -376,18 +378,19 @@ export function registerOperatorStrictness(ctx: SectionCtx): void {
         //
         // `{$not:{$eq:true}}` excludes only the row equal to `true`; a string or number row is a genuine
         // non-match of `$eq:true`, so its negation matches. An engine that coerced the stored value to the
-        // operand's type before comparing would wrongly exclude them. Cross-engine law.
+        // operand's type before comparing would wrongly exclude them. All four in-repo engines express this
+        // and are pinned to the exact verdicts by their frozen manifests.
         describe('25.12 $not over a multi-scalar field does not conflate scalar kinds', () => {
             const notEqTrue = (secret: unknown) => matchJavascriptObject({ id: '1', secret }, bad({ secret: { $not: { $eq: true } } }), MultiScalarSchema);
 
             test('25.12a a string row is not equal to true, so its negation matches', async () => {
-                expect(await notEqTrue('hush')).toBe(true);
+                expectOrAcknowledgeUnsupported(await notEqTrue('hush'), true, '$not over a multi-scalar field');
             });
             test('25.12b a numeric row is not equal to true, so its negation matches', async () => {
-                expect(await notEqTrue(7)).toBe(true);
+                expectOrAcknowledgeUnsupported(await notEqTrue(7), true, '$not over a multi-scalar field');
             });
             test('25.12c the true row is equal to true, so its negation excludes it', async () => {
-                expect(await notEqTrue(true)).toBe(false);
+                expectOrAcknowledgeUnsupported(await notEqTrue(true), false, '$not over a multi-scalar field');
             });
         });
 

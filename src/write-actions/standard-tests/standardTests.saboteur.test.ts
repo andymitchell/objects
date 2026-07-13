@@ -118,6 +118,16 @@ const GROUP_A: Saboteur[] = [
             },
         },
     },
+    {
+        name: 'S14 duplicatesPrimaryKey', trips: [11],
+        ops: {
+            tamperOutput: (out) => {
+                const first = out.finalItems[0];
+                if (first) out.finalItems = [...out.finalItems, structuredClone(first)];
+                return out;
+            },
+        },
+    },
 ];
 
 // GROUP B — a referential-aliasing impl produces value-identical output, so a value-only fuzz cannot see it.

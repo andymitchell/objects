@@ -71,6 +71,16 @@ export type StandardTestConfig = {
     createAdapter: AdapterFactory,
     implementationName?: string,
     capabilities?: WriteTestCapabilities,
+    /**
+     * Register the battery's known reference-engine defects as a `test.fails` ratchet rather than a visible skip.
+     * DEFAULT false.
+     *
+     * A handful of tests assert the ideal contract that the reference engine does not yet meet. Pinning them
+     * makes them turn RED the day the reference is fixed, which is what the in-package reference suites want.
+     * Any other implementation wants the opposite: an implementation that is MORE correct than the reference
+     * must not be failed for it, so by default these register as skips.
+     */
+    pinReferenceDefects?: boolean,
     fuzz?: { iterations?: number, seed?: number },
 }
 
@@ -104,11 +114,16 @@ export function makeItIfSupported(test: StandardTestConfig['test'], caps: WriteT
 }
 
 /**
- * Wrap ideal-contract tests the reference engine doesn't yet satisfy. Uses vitest `test.fails`
- * (green WHILE it fails as documented; turns RED the day the impl is fixed → remove the marker).
+ * Wrap ideal-contract tests the reference engine doesn't yet satisfy.
+ *
+ * With {@link StandardTestConfig.pinReferenceDefects} the test becomes a vitest `test.fails` ratchet: green
+ * WHILE it fails as documented, RED the day the engine is fixed (→ remove the marker). Without it — the
+ * default, and the right answer for any implementation other than the reference — the test registers as a
+ * visible `test.skip`, so an implementation that already meets the ideal contract is never punished for it.
  * Falls back to plain `test` (visibly red) on runners without `.fails`.
  */
-export function makeExpectedFailToday(test: StandardTestConfig['test']): StandardTestConfig['test'] {
+export function makeExpectedFailToday(test: StandardTestConfig['test'], pinReferenceDefects?: boolean): StandardTestConfig['test'] {
+    if (!pinReferenceDefects) return test.skip;
     // `.fails` is a runtime vitest modifier absent from the `It` global type; assert the known type
     // widened with an optional `fails`, then runtime-check it so non-vitest runners degrade to plain `test`.
     const withFails = test as StandardTestConfig['test'] & { fails?: StandardTestConfig['test'] };
@@ -131,7 +146,10 @@ export type SectionCtx = {
     implName: string;
     /** `itIfSupported('capabilityKey')` → `test` when supported, else visible `test.skip`. */
     itIfSupported: (key: keyof WriteTestCapabilities) => StandardTestConfig['test'];
-    /** `test.fails`-style wrapper for tests that assert the ideal contract the reference fails today. */
+    /**
+     * Wrapper for tests asserting an ideal contract the reference engine does not meet: a `test.fails` ratchet
+     * when {@link StandardTestConfig.pinReferenceDefects} is set, otherwise a visible skip.
+     */
     expectedFailToday: StandardTestConfig['test'];
     capabilities: WriteTestCapabilities | undefined;
     fuzz: StandardTestConfig['fuzz'];

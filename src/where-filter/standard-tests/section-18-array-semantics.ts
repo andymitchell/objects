@@ -12,7 +12,7 @@ import type { SectionCtx } from "./harness.ts";
  * fields. Dot-prop spreading reaches arbitrarily deep leaves.
  */
 export function registerArraySemantics(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     // Nested spreading-array fixtures (three and four array levels).
     const spread3 = (leaf: string) => ({ a: [{ b: [{ c: [{ leaf }] }] }] });
@@ -191,11 +191,11 @@ export function registerArraySemantics(ctx: SectionCtx): void {
             // MEASURED: false on every engine — see MONGO-DIVERGENCES.md #15. A field-level operator ($exists/$type)
             // anywhere in a scalar $elemMatch body routes the WHOLE body to a per-element deep-equal, so it is compared
             // as the literal object {$exists:true,$eq:'a'} against each element; no scalar element equals that object.
-            // MongoDB instead reads the body element-wise, where 'a' satisfies both, and matches. Strict toBe, not the
-            // acknowledge helper: every consumer returns a real boolean here (the $eq gives SQL a concrete predicate), so
-            // this is a required cross-engine law, and the divergence from MongoDB is a conservative under-match.
+            // MongoDB instead reads the body element-wise, where 'a' satisfies both, and matches. Every consumer
+            // returns a real boolean here (the $eq gives SQL a concrete predicate), so this is a required
+            // cross-engine law, and the divergence from MongoDB is a conservative under-match.
             const result = await matchJavascriptObject({ id: 't', tags: ['a'], nums: [] }, { tags: { $elemMatch: { $exists: true, $eq: 'a' } } }, TagsSchema);
-            expect(result).toBe(false);
+            expectOrAcknowledgeUnsupported(result, false);
         });
 
         /**
@@ -219,97 +219,97 @@ export function registerArraySemantics(ctx: SectionCtx): void {
 
             test('$eq matches when an element equals the operand', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $eq: 'a' } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('$eq does not match when no element equals the operand', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $eq: 'z' } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('$eq matches a numeric element, which must not be compared as text', async () => {
                 const result = await arrayField(nums([1, 9]), { nums: { $eq: 9 } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('$ne on a numeric array is the complement of $eq', async () => {
                 const result = await arrayField(nums([1, 9]), { nums: { $ne: 9 } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('a range bound compares numerically, not lexically', async () => {
                 const result = await arrayField(nums([-8]), { nums: { $lt: -9 } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('$ne is the complement of $eq, so an array holding the operand does not match', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $ne: 'a' } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('$ne matches when no element equals the operand', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $ne: 'z' } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('$ne matches an empty array, which holds nothing to equal the operand', async () => {
                 const result = await arrayField(tags([]), { tags: { $ne: 'a' } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('a range bound matches when an element satisfies it', async () => {
                 const result = await arrayField(nums([1, 9]), { nums: { $gt: 5 } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('a range bound does not match when no element satisfies it', async () => {
                 const result = await arrayField(nums([1, 4]), { nums: { $gt: 5 } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('each bound is applied independently, so different elements may satisfy different bounds', async () => {
                 const result = await arrayField(nums([1, 5]), { nums: { $gt: 2, $lt: 4 } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('$elemMatch asks the stricter question — one element must satisfy the whole body', async () => {
                 const result = await arrayField(nums([1, 5]), { nums: { $elemMatch: { $gt: 2, $lt: 4 } } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('$regex matches when an element matches the pattern', async () => {
                 const result = await arrayField(tags(['ann', 'bob']), { tags: { $regex: '^a' } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('$regex does not match when no element matches the pattern', async () => {
                 const result = await arrayField(tags(['ann', 'bob']), { tags: { $regex: '^z' } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('negating $eq excludes an array that holds the operand', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $eq: 'a' } } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('negating $eq matches an array that does not hold the operand', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $eq: 'z' } } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
 
             test('negating a range bound excludes an array with an element that satisfies it', async () => {
                 const result = await arrayField(nums([1, 9]), { nums: { $not: { $gt: 5 } } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('negating a $regex excludes an array with an element that matches it', async () => {
                 const result = await arrayField(tags(['ann']), { tags: { $not: { $regex: '^a' } } });
-                expect(result).toBe(false);
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
             });
 
             test('$size still describes the array itself rather than an element', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $size: 3 } } });
-                expect(result).toBe(true);
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
         });
 

@@ -62,6 +62,12 @@ export type SectionCtx = {
     expectMalformedFilterRejected: (call: () => Promise<boolean | undefined>, throwMessage?: string) => Promise<void>;
     /** ONLY for a documented `MONGO-DIVERGENCES.md` entry (reason must cite it). */
     expectOrAcknowledgeDivergence: (result: boolean | undefined, expected: boolean, reason: string) => void;
+    /**
+     * A law relating TWO seam calls (e.g. De Morgan): the two answers must agree, whatever they are.
+     * Either side `undefined` ⇒ the implementation cannot express one of the filters, so the law is
+     * acknowledged-unsupported rather than silently skipped.
+     */
+    expectEquivalentOrAcknowledge: (a: boolean | undefined, b: boolean | undefined, reason?: string) => void;
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -141,5 +147,26 @@ export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues
         expect(result).toBe(expected);
     }
 
-    return { expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence };
+    /**
+     * Assert a metamorphic law between two seam calls: whatever the answers are, they must be the SAME.
+     *
+     * Unlike {@link expectOrAcknowledgeUnsupported} there is no expected verdict — the law is what is under
+     * test, not the value. An implementation that cannot express either filter yields `undefined` on that
+     * side, which is an acknowledged skip of the law, never a pass.
+     */
+    function expectEquivalentOrAcknowledge(
+        a: boolean | undefined,
+        b: boolean | undefined,
+        reason?: string
+    ): void {
+        if (a === undefined || b === undefined) {
+            const note = reason ?? 'not supported';
+            console.warn(`[ACKNOWLEDGED UNSUPPORTED: ${implementationName}] ${note}`);
+            acknowledgements?.record({ kind: 'unsupported', reason: note, testName: currentTestName() });
+            return;
+        }
+        expect(a).toBe(b);
+    }
+
+    return { expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence, expectEquivalentOrAcknowledge };
 }

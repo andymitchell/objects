@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * only via the dot-prop escape (`a\.b`), never the raw `a.b` (which resolves as nested `a`→`b`).
  */
 export function registerDegeneratePaths(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('17. Degenerate & hostile paths', () => {
 
@@ -44,17 +44,17 @@ export function registerDegeneratePaths(ctx: SectionCtx): void {
             const dotted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition, DottedKeySchema);
 
             test('$exists reaches a literal-dot key', async () => {
-                expect(await dotted({ 'a\\.b': { $exists: true } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await dotted({ 'a\\.b': { $exists: true } }), true);
             });
             test('$type reaches a literal-dot key', async () => {
-                expect(await dotted({ 'a\\.b': { $type: 'string' } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await dotted({ 'a\\.b': { $type: 'string' } }), true);
             });
             test('$size reaches a literal-dot array key', async () => {
-                expect(await dotted({ 'x\\.y': { $size: 1 } })).toBe(true);
-                expect(await dotted({ 'x\\.y': { $size: 2 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x\\.y': { $size: 1 } }), true);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x\\.y': { $size: 2 } }), false);
             });
             test('$ne reaches a literal-dot key', async () => {
-                expect(await dotted({ 'a\\.b': { $ne: 'v' } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'a\\.b': { $ne: 'v' } }), false);
             });
         });
 
@@ -66,7 +66,7 @@ export function registerDegeneratePaths(ctx: SectionCtx): void {
                 { 'rows.a\\.b': 'v' } as unknown as WhereFilterDefinition,
                 DottedKeyInArraySchema
             );
-            expect(result).toBe(true);
+            expectOrAcknowledgeUnsupported(result, true);
         });
 
         // ── 17.15 A raw dotted path never reaches a literal-dot ARRAY key ──────────────────────────
@@ -79,19 +79,19 @@ export function registerDegeneratePaths(ctx: SectionCtx): void {
             const dotted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition, DottedKeySchema);
 
             test('$size on the raw path is false (missing field)', async () => {
-                expect(await dotted({ 'x.y': { $size: 1 } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x.y': { $size: 1 } }), false);
             });
             test('$all on the raw path is false (missing field)', async () => {
-                expect(await dotted({ 'x.y': { $all: ['t'] } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x.y': { $all: ['t'] } }), false);
             });
             test('$elemMatch on the raw path is false (missing field)', async () => {
-                expect(await dotted({ 'x.y': { $elemMatch: { $eq: 't' } } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x.y': { $elemMatch: { $eq: 't' } } }), false);
             });
             test('a bare-scalar contains on the raw path is false (missing field)', async () => {
-                expect(await dotted({ 'x.y': 't' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x.y': 't' }), false);
             });
             test('the escape still reaches the literal-dot array (control)', async () => {
-                expect(await dotted({ 'x\\.y': { $all: ['t'] } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await dotted({ 'x\\.y': { $all: ['t'] } }), true);
             });
         });
 
@@ -104,13 +104,13 @@ export function registerDegeneratePaths(ctx: SectionCtx): void {
             const dotted = (filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition, DottedKeyInArraySchema);
 
             test('a bare-scalar match on the raw path is false (missing field)', async () => {
-                expect(await dotted({ 'rows.a.b': 'v' })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'rows.a.b': 'v' }), false);
             });
             test('$exists:true on the raw path is false (missing field)', async () => {
-                expect(await dotted({ 'rows.a.b': { $exists: true } })).toBe(false);
+                expectOrAcknowledgeUnsupported(await dotted({ 'rows.a.b': { $exists: true } }), false);
             });
             test('$exists:false on the raw path is true (missing field)', async () => {
-                expect(await dotted({ 'rows.a.b': { $exists: false } })).toBe(true);
+                expectOrAcknowledgeUnsupported(await dotted({ 'rows.a.b': { $exists: false } }), true);
             });
         });
 

@@ -75,3 +75,11 @@ export type {
 // semantics battery against a real ICollection (it injects its own `matchJavascriptObject`).
 export { standardTests } from './standardTests.ts';
 export type { StandardTestConfig, MatchJavascriptObjectInTesting } from './standardTests.ts';
+
+// A partial implementation answers `undefined` for a filter it cannot express, which the battery records as
+// an acknowledged seam rather than a failure. Collect those acknowledgements and freeze them against a
+// capability manifest, and an implementation's known gaps become a pinned contract: a new gap fails the
+// guard rather than hiding behind a skip, and a closed one demands the manifest record the win. This is the
+// machinery the in-repo engines hold themselves to, published so any consumer can do the same.
+export { AcknowledgementCollector, assertNoCapabilityDrift } from './standardTests.ts';
+export type { AcknowledgementEvent, AcknowledgementKind, ExpectLike } from './standardTests.ts';

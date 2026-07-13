@@ -11,9 +11,22 @@ Entries are numbered for stable reference: the capability manifests (`standard-t
 
 Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` restates each one as a query against a real `mongod` and asserts both answers — MongoDB's and this package's — so an entry cannot quietly become fiction. Run it with `npm run test:mongo-truth`. It is opt-in because it downloads and boots a server; nothing else in the suite does.
 
+## When a divergence-tracking test fails
+
+Every entry below carries a **Slug** line — a stable kebab-case identifier — and is pinned by
+`divergence-tracking/<slug>.test.ts` (a retired entry's file pins that the behaviour now *conforms*).
+A red test there means a documented claim has stopped holding — do **not** edit the test to green. Instead:
+1. The failing file's header names the entry's slug; find the entry here by that slug.
+2. Check recent history for the change that moved behaviour: `git log --oneline -- src/where-filter/`.
+3. Check what MongoDB actually does: `npm run test:mongo-truth` boots a real `mongod` (the `mongodb` dev dependency).
+4. Present the case to the maintainer to decide: a regression (fix the code) or a deliberate change
+   (update or retire the entry **and** its test in the same commit).
+
 ---
 
 ## 1. `$type` checks the field, not array elements
+
+**Slug**: `type-checks-field-not-elements`
 
 **MongoDB**: When a field is an array, `{ field: { $type: 'string' } }` returns `true` if *any element* is a string.
 
@@ -27,6 +40,8 @@ Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` re
 
 ## 2. `$all` with empty array matches everything
 
+**Slug**: `all-empty-array-matches-everything`
+
 **MongoDB**: `{ field: { $all: [] } }` either throws an error or returns no matches.
 
 **WhereFilterDefinition**: Returns `true` (JavaScript `Array.every([])` evaluates to `true`).
@@ -38,6 +53,8 @@ Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` re
 ---
 
 ## 3. `$regex` case-sensitivity on SQLite
+
+**Slug**: `sqlite-regex-like-case-insensitive`
 
 **MongoDB**: `$regex` is case-sensitive by default. Use `{ $options: 'i' }` for case-insensitive.
 
@@ -53,11 +70,15 @@ Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` re
 
 ## 4. (retired)
 
+**Slug**: `type-null-on-missing-field`
+
 `$type: 'null'` once matched a missing field on the JS engine, where MongoDB requires the field to be present and hold `null`. The engines disagreed with each other and the JS one was wrong; it now answers `false`, as the SQL engines always did, so this is no longer a divergence. The number is kept as a gap rather than reused.
 
 ---
 
 ## 5. `$type 'bool'` on SQLite
+
+**Slug**: `sqlite-bool-type-mapping`
 
 **MongoDB**: Uses BSON type name `'bool'`.
 
@@ -71,11 +92,15 @@ Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` re
 
 ## 6. (retired)
 
+**Slug**: `size-on-spread-dotprop-paths`
+
 `$size` on spread dot-prop paths once diverged on SQL. The leaf-scope fix made every engine evaluate `$size` against each individual leaf array, so this is no longer a divergence. The number is kept as a gap (see the note above) rather than reused.
 
 ---
 
 ## 7. NaN, Infinity, -Infinity in stored data become JSON null
+
+**Slug**: `nan-infinity-stored-as-json-null`
 
 **MongoDB**: BSON natively supports NaN, Infinity, and -Infinity as Doubles; they survive insert→query round-trips. `{age: {$gt: 1e308}}` matches Infinity; `{age: {$exists: true}}` matches NaN.
 
@@ -96,6 +121,8 @@ Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` re
 
 ## 8. Value-driven JS matcher vs schema-driven SQL emitter (non-conforming or shape-ambiguous data)
 
+**Slug**: `value-driven-js-vs-schema-driven-sql`
+
 **MongoDB**: Value-driven and duck-typing. A scalar equality `{ owner: 'a' }` also matches a document whose `owner` is the array `['a', 'b']` (array containment), and `$in` matches an array by intersection — the match depends on the runtime value, never a declared schema.
 
 **WhereFilterDefinition (JS)**: `matchJavascriptObject` is value-driven too — it duck-types the runtime value and so conforms with MongoDB (an array under a scalar filter matches by containment).
@@ -115,6 +142,8 @@ Every "**MongoDB**:" claim below is executable. `standard-tests/mongo-truth/` re
 
 ## 9. Operand domain is the portable (JSON) value subset (non-JSON carriers are rejected)
 
+**Slug**: `non-json-operands-rejected`
+
 **MongoDB / BSON**: BSON's operand and value domain is rich — `Date`, `BinData`, `ObjectId`, `Long`/`Decimal128`, regular expressions as first-class values, etc. `{ createdAt: { $gt: new Date('2020-01-01') } }` and a stored `{ tags: [new Date()] }` are all valid.
 
 **WhereFilterDefinition**: every data and operand position — a bare scalar, an `$eq`/range/`$in` operand, an exact-array element, an `$all` element — accepts only the portable value subset: `string | number | boolean | null` and plain objects/arrays composed of those, plus non-finite numbers (`NaN`/`±Infinity`) as the one documented exception. A non-JSON carrier — `Date`, `bigint`, `Symbol`, `Map`, `Set`, or an explicit `undefined` element — is **rejected at the validity gate** (`isWhereFilterDefinition`): the JS matcher throws ("filter was not well-defined") and the SQL builders rethrow a not-well-defined error. Unlike the silent semantic divergences above, this subset gap **fails loudly**.
@@ -128,6 +157,8 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 ---
 
 ## 10. A U+0000 (null byte) in stored data cannot round-trip through Postgres
+
+**Slug**: `pg-null-byte-unstorable`
 
 **MongoDB / BSON**: BSON strings are length-prefixed byte sequences, so an embedded U+0000 (`'a\u0000b'`) stores and queries like any other character.
 
@@ -143,6 +174,8 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 
 ## 11. A value-normalizing schema is refused by the schema-driven engines
 
+**Slug**: `normalizing-schema-refused`
+
 **MongoDB**: has no schema — it compares stored values as-is.
 
 **WhereFilterDefinition**: a field whose declared Zod schema *normalizes* the value on parse — a `z.coerce.*` flag, or a `transform` / `pipe` / `preprocess` node — makes the value-driven JS matcher and the schema-driven SQL emitters read different values. The matcher compares the raw stored value with strict `===`, while the SQL emitter casts per the declared type: `z.coerce.number()` accepts a stored string `'1'` that a `::numeric` cast equates with `1`, but the matcher's `===` rejects it.
@@ -157,6 +190,8 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 
 ## 12. An array inside a record value is a typed unsupported path
 
+**Slug**: `record-value-array-unsupported`
+
 **MongoDB**: resolves any path against the runtime value, regardless of declared shape.
 
 **WhereFilterDefinition**: a path that crosses an array *inside* a `z.record(...)` value — e.g. `data.<key>.tags` where `data` is `Record<string, { tags: string[] }>` — cannot be emitted by the schema-driven SQL array-spreading builders, which key off schema-tree nodes that a dynamic record key does not have. Rather than crash or silently return no match, the builders return a typed unsupported-path error, surfaced to callers as a refusal to compile. Non-array leaves beneath a record resolve and compile normally.
@@ -167,6 +202,8 @@ Related structural rejections at the same gate: an explicitly-`undefined` *opera
 
 ## 13. (retired)
 
+**Slug**: `operator-on-array-compared-whole`
+
 A comparison operator on an array field (`$eq`, `$ne`, ranges, `$regex`) once compared against the array value as a whole, so `{ tags: { $eq: 'a' } }` was `false` on `['a']`. It now reads element-wise, as MongoDB does, and this is no longer a divergence. The number is kept as a gap rather than reused.
 
 The behaviour was not merely a conservative under-match, which is why it went: `$not` complements its operand, so an operator that could not reach an element made its own negation match everything — `{ tags: { $not: { $eq: 'a' } } }` returned `['a']`, a document the caller had excluded. Negating an under-match over-matches.
@@ -174,6 +211,8 @@ The behaviour was not merely a conservative under-match, which is why it went: `
 ---
 
 ## 14. Escaped-dot path grammar diverges between the JS and SQL readers
+
+**Slug**: `escaped-dot-path-grammar-split`
 
 **MongoDB**: field names are opaque strings — there is no dot-escaping grammar to diverge.
 
@@ -186,6 +225,8 @@ Both readers agree on the common `\.` case; they diverge only on the backslash/b
 ---
 
 ## 15. `$exists` and `$type` in a scalar `$elemMatch` body describe no element, so the body matches nothing
+
+**Slug**: `exists-type-in-elemmatch-body`
 
 **MongoDB**: `$elemMatch` reads its body element-wise, and every operator inside it — including `$exists` and `$type` — applies to each element. `{ tags: { $elemMatch: { $exists: true } } }` matches any non-empty array, and `{ tags: { $elemMatch: { $exists: true, $eq: 'a' } } }` matches `['a']`.
 
@@ -203,6 +244,8 @@ This is the same field-vs-element split as divergence #1 (`$type` checks the fie
 ---
 
 ## 16. A positive condition on a nested-array path binds to a single leaf
+
+**Slug**: `positive-condition-single-leaf`
 
 **MongoDB**: a dotted path flattens across every array on it into one *candidate set*, and each operator in the field condition is applied to that set **independently**, the results conjoined at the document level. So different candidates may answer different operators: `{ 'groups.subtags': { $all: ['d', 'a'] } }` matches a row whose `'d'` and `'a'` sit in **different** `groups`, and `{ 'items.v': { $gt: 2, $lt: 3 } }` matches `items: [{v: 1}, {v: 5}]` — one element clears the lower bound, another the upper, and no single element clears both.
 

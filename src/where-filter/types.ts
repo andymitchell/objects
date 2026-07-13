@@ -75,19 +75,31 @@ export type ValueComparisonNot<T = any> = {
           | ArrayValueComparisonSize
 };
 
-export type ValueComparisonFlexi<T = any> =
-    (T extends string
-        ? ValueComparisonRangeString | ValueComparisonRegex
-        : T extends number
-            ? ValueComparisonRangeNumeric
-            : never)
+/**
+ * Every value-operator payload that may condition one field, parameterised by the type of the value being
+ * compared.
+ *
+ * A scalar field compares its own value, so `T` is the field's type. An array field compares each ELEMENT in
+ * turn (the field matches when any one element satisfies the payload), so there `T` is the element type — the
+ * same vocabulary, applied one level down. Operators that cannot express a given `T` collapse to `never`:
+ * `$regex` exists only for strings, `$ne` only for strings and numbers.
+ *
+ * @remarks
+ * Mirrors the runtime gate, which admits this operator set on any field regardless of the field's shape.
+ */
+type ValueComparisonOperators<T = any> =
+    ValueComparisonRange<T>
+    | (T extends string ? ValueComparisonRegex : never)
     | ValueComparisonEq<T>
     | ValueComparisonNe<T>
     | ValueComparisonIn<T>
     | ValueComparisonNin<T>
     | ValueComparisonNot<T>
     | ValueComparisonExists
-    | ValueComparisonType
+    | ValueComparisonType;
+
+export type ValueComparisonFlexi<T = any> =
+    ValueComparisonOperators<T>
     // Bare value, narrowed to its JSON-serialisable subset. Non-JSON carriers — `bigint`, `symbol`, `Date`,
     // `Map`/`Set`, functions — cannot round-trip JSON, so the runtime gate rejects them (MONGO-DIVERGENCES.md #9)
     // and `JsonCompatible` collapses them to `never` here too, recursively (a nested `Date` inside an object
@@ -111,9 +123,17 @@ export type ArrayValueComparison<T = any, ISD extends number = 2> = ArrayValueCo
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
 
-type ArrayElementFilter<T = any, ISD extends number = 2> = (T extends Record<string, any>? PartialObjectFilter<T, ISD> :
-    T extends string | number ? T :
-    never) | ArrayValueComparison<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType
+// A scalar element takes the full value-operator vocabulary, read element-wise, plus the bare element as a
+// containment test. An OBJECT element deliberately does not take the comparison family ($eq/$ne/range/$regex):
+// its filter arm is `PartialObjectFilter`, whose keys are all optional, and TypeScript disables the excess-
+// property check on a union as soon as a key is known in ANY member — so admitting `$eq` beside it would let
+// an arbitrary unchecked operand through (`{addresses: {$eq: 5}}`). The runtime gate rejects an object operand
+// for those operators anyway; an object element is filtered with a sub-document filter or `$elemMatch`.
+type ArrayElementFilter<T = any, ISD extends number = 2> =
+    (T extends Record<string, any>
+        ? PartialObjectFilter<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType
+        : (T extends string | number | boolean ? T : never) | ValueComparisonOperators<T>)
+    | ArrayValueComparison<T, ISD>;
 export type ArrayFilter<T extends [], ISD extends number = 2> = ArrayElementFilter<T[number], ISD> | T;
 
 export type PartialObjectFilter<T extends Record<string, any>, ISD extends number = 2> = Partial<{
@@ -136,9 +156,10 @@ type ArrayValueComparisonStrict<T = any, ISD extends number = 2> =
     ArrayValueComparisonElemMatchStrict<T, ISD> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
 
 type ArrayElementFilterStrict<T = any, ISD extends number = 2> =
-    (T extends Record<string, any> ? PartialObjectFilterStrict<T, ISD> :
-        T extends string | number ? T :
-        never) | ArrayValueComparisonStrict<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType;
+    (T extends Record<string, any>
+        ? PartialObjectFilterStrict<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType
+        : (T extends string | number | boolean ? T : never) | ValueComparisonOperators<T>)
+    | ArrayValueComparisonStrict<T, ISD>;
 
 type ArrayFilterStrict<T extends [], ISD extends number = 2> = ArrayElementFilterStrict<T[number], ISD> | T;
 
@@ -297,6 +318,30 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * ```ts
  * { 'contact.locations': 'London' }
  * ```
+ *
+ * ### Value comparison (element-wise)
+ * A value operator on an array field is applied to each element in turn, and the field matches when **any
+ * one** element satisfies it — the operator descends into the array rather than comparing the array itself.
+ * The operand is therefore the ELEMENT's type, and the full value vocabulary is available (`$eq`, `$ne`,
+ * ranges, `$regex`, `$in`, `$nin`, `$not`, `$exists`, `$type`).
+ * ```ts
+ * // tags: ['ann', 'bob']
+ * { tags: { $eq: 'ann' } }        // → true: an element equals it
+ * { tags: { $regex: '^a' } }      // → true: an element matches the pattern
+ * { tags: { $not: { $eq: 'ann' } } }  // → false: the exact complement — NO element may equal it
+ * ```
+ * `$not` complements the whole element-wise question, so it excludes an array that holds the operand — which
+ * is why `$ne` on an array means "no element equals it", not "some element differs from it".
+ *
+ * Each bound of a multi-operator payload is applied independently, so different elements may satisfy
+ * different bounds. `$elemMatch` asks the stricter question — one single element must satisfy the whole body.
+ * ```ts
+ * // nums: [1, 5]
+ * { nums: { $gt: 2, $lt: 4 } }                  // → true: 5 satisfies $gt:2, 1 satisfies $lt:4
+ * { nums: { $elemMatch: { $gt: 2, $lt: 4 } } }  // → false: no ONE element satisfies both
+ * ```
+ * An array of OBJECTS takes a compound object filter or `$elemMatch` instead of the comparison family (an
+ * object element has no meaningful `$eq`/range/`$regex` operand).
  *
  * ### Compound object filter (exact document match — Mongo semantics)
  * Pass a plain object with property keys. A **single element** must satisfy **all** keys.

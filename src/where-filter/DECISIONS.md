@@ -361,10 +361,42 @@ sound **only** while nothing negates it, and it is worth re-checking whenever an
 
 ---
 
+## 14. An array field's type carries the same comparison vocabulary as the gate
+
+**Context**: A value operator on an array field reads element-wise (#13), and the runtime gate — which is
+schema-blind — admits the whole value vocabulary on any field. The schema-derived type did not: an array field
+was offered only the array operators, so `{ tags: { $eq: 'a' } }` was a compile error while
+`{ tags: { $not: { $eq: 'a' } } }` compiled, because `$not` was in the array-element union and its argument
+union is written in terms of the element type. The type forbade the sound form and permitted the form that was
+unsound before #13 was fixed.
+
+**Decision**: A SCALAR-element array takes the full value-operator payload vocabulary, parameterised by the
+ELEMENT type, plus the bare element as a containment test — the same set the gate admits and every engine
+answers. An OBJECT-element array does not take the comparison family (`$eq`/`$ne`/range/`$regex`); it keeps
+the compound object filter, `$elemMatch`, and the meta operators.
+
+**Why**: coherence in both directions. A caller who can write a filter in TypeScript can serialise it as JSON
+and get the same answer, and a filter arriving as JSON has a TypeScript spelling — the type is no longer a
+strict, arbitrarily-shaped subset of the language the engines actually run.
+
+The object-element exclusion is a soundness constraint, not a semantic one. An object element's filter arm is
+`PartialObjectFilter`, whose keys are all optional, and TypeScript disables the excess-property check on a
+union the moment a key is known in ANY member. Adding `$eq` beside that arm would therefore admit
+`{ addresses: { $eq: 5 } }` and any other unchecked operand — the type would get *weaker* by gaining an
+operator. The gate rejects an object operand for those operators regardless (#8), so no expressible filter is
+lost: an object element is filtered with a sub-document filter or `$elemMatch`.
+
+**Consequence**: boolean elements became expressible for the first time, which surfaced a latent Postgres
+defect — the element-spreading emission projects elements as text, so a boolean operand was compared against
+text and the statement failed. Boolean element comparisons now bind a jsonb-typed parameter, as `$in`/`$nin`/
+`$all` already did.
+
+---
+
 ## Release notes
 
-Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The exported types are
-unchanged; the semantics of existing filters are not.
+Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The semantics of existing
+filters are not; the exported types widen (below) without rejecting anything they previously accepted.
 
 - **Multiple operators in one payload are conjunctive everywhere.** `{ n: { $ne: 9, $gt: 5 } }` requires
   both. Previously the first operator won inside `$not` and inside a scalar `$elemMatch`, on every engine.
@@ -408,6 +440,14 @@ compound filter on a nested-array path must be satisfied within a single leaf ar
 ['a', 'b'] } }` does not match a row whose `'a'` and `'b'` live in different `groups`). That moved `$size`
 toward MongoDB but moves a multi-term condition *away* from it. It is a deliberate trade, recorded as divergence
 **#16**, not a fix.
+
+A type-only widening (no runtime or semantic change — every filter below already ran, and already answered
+this way, when it arrived as JSON): **an array field of scalars now accepts the full value-operator vocabulary
+in TypeScript**, parameterised by the element type — `{ tags: { $eq: 'a' } }`, `{ tags: { $ne: 'a' } }`,
+`{ tags: { $gte: 'a', $lt: 'z' } }`, `{ tags: { $regex: '^a' } }`, `{ scores: { $gt: 5 } }` — as does a boolean
+array (`{ flags: { $eq: true } }`, `{ flags: true }`). Nothing that compiled before stops compiling. An array
+of OBJECTS is unchanged: it takes a compound object filter or `$elemMatch`, not the comparison family
+(decision 14).
 
 Separately, a type-only tightening (no runtime or semantic change): with `exactOptionalPropertyTypes` enabled
 (decision 2), `{ field: { $gt: undefined } }` and `{ $or: undefined }` no longer type-check, and a bare

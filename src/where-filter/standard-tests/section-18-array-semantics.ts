@@ -210,12 +210,11 @@ export function registerArraySemantics(ctx: SectionCtx): void {
 
             const tags = (values: string[]) => ({ id: 't', tags: values, nums: [] });
             const nums = (values: number[]) => ({ id: 't', tags: [], nums: values });
-            // The runtime filter language is wider than the schema-derived type here: the validity gate accepts a
-            // comparison operator on an array field (as MongoDB does), while `WhereFilterDefinition<T>` offers an
-            // array field only the array operators. A filter arriving as JSON is therefore free to carry one, so
-            // the engines must agree on it — which is exactly what this block holds them to.
-            const arrayField = (row: Tags, filter: unknown) =>
-                matchJavascriptObject(row, filter as WhereFilterDefinition<Tags>, TagsSchema);
+            // The schema-derived type and the validity gate offer an array field the same comparison vocabulary,
+            // so every filter below is one a caller can write in TypeScript AND one that can arrive as raw JSON.
+            // Both routes reach the engines, and the engines must agree on them — which this block holds them to.
+            const arrayField = (row: Tags, filter: WhereFilterDefinition<Tags>) =>
+                matchJavascriptObject(row, filter, TagsSchema);
 
             test('$eq matches when an element equals the operand', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $eq: 'a' } });

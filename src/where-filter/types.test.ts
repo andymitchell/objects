@@ -537,6 +537,84 @@ describe('WhereFilterDefinition types', () => {
                 };
             })
         })
+
+        describe('value comparison operators on an array field', () => {
+            // A value operator on an array field reads ELEMENT-WISE: it matches when any one element satisfies
+            // it. The type therefore carries the same operator vocabulary the runtime gate admits, parameterised
+            // by the ELEMENT type — so an operand is checked against the element, not against the whole array.
+            type BoolArrObj = { id: string; flags: boolean[] };
+
+            it('accepts $eq against the element type', () => {
+                const a: WhereFilterDefinition<TestObj> = { tags: { $eq: 'a' } };
+                const b: WhereFilterDefinition<TestObj> = { scores: { $eq: 5 } };
+                const c: WhereFilterDefinition<BoolArrObj> = { flags: { $eq: true } };
+            })
+
+            it('accepts $ne against the element type', () => {
+                const a: WhereFilterDefinition<TestObj> = { tags: { $ne: 'a' } };
+            })
+
+            it('accepts range operators against the element type', () => {
+                const a: WhereFilterDefinition<TestObj> = { tags: { $gt: 'm' } };
+                const b: WhereFilterDefinition<TestObj> = { tags: { $gte: 'a', $lt: 'z' } };
+                const c: WhereFilterDefinition<TestObj> = { scores: { $gt: 5 } };
+            })
+
+            it('accepts $regex on a string-element array', () => {
+                const a: WhereFilterDefinition<TestObj> = { tags: { $regex: '^a', $options: 'i' } };
+            })
+
+            it('accepts a bare boolean element', () => {
+                const a: WhereFilterDefinition<BoolArrObj> = { flags: true };
+            })
+
+            it('accepts $not wrapping a value comparison', () => {
+                const a: WhereFilterDefinition<TestObj> = { tags: { $not: { $eq: 'a' } } };
+            })
+
+            it('rejects an operand that is not the element type', () => {
+                const a: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error number is not the string element type
+                    tags: { $eq: 5 }
+                };
+                const b: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error string is not the number element type
+                    scores: { $gt: 'm' }
+                };
+                const c: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error $regex has no meaning against a number element
+                    scores: { $regex: 'x' }
+                };
+                const d: WhereFilterDefinition<BoolArrObj> = {
+                    // @ts-expect-error $ne takes a string or number operand, so it cannot compare a boolean element
+                    flags: { $ne: true }
+                };
+            })
+
+            it('rejects a whole-array operand (an exact array match is the bare form)', () => {
+                const a: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error $eq compares one element; pass the array bare to match it exactly
+                    tags: { $eq: ['a'] }
+                };
+                const right: WhereFilterDefinition<TestObj> = { tags: ['a'] };
+            })
+
+            it('rejects the comparison family on an object-element array, which takes a sub-document filter or $elemMatch', () => {
+                const a: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error an object element is not compared with $eq
+                    addresses: { $eq: { street: 'Main' } }
+                };
+                const b: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error an object element is not compared with $eq
+                    addresses: { $eq: 'Main' }
+                };
+                const c: WhereFilterDefinition<TestObj> = {
+                    // @ts-expect-error an object element is not range-compared
+                    addresses: { $gt: 5 }
+                };
+                const right: WhereFilterDefinition<TestObj> = { addresses: { $elemMatch: { street: 'Main' } } };
+            })
+        })
     })
 
     describe('4. Dot-prop paths and array spreading', () => {
@@ -937,6 +1015,22 @@ describe('PartialObjectFilterStrict types', () => {
         it('$all and $size on array fields', () => {
             const a: PartialObjectFilterStrict<Doc> = { tags: { $all: ['a', 'b'] } };
             const b: PartialObjectFilterStrict<Doc> = { tags: { $size: 2 } };
+        });
+
+        it('element-wise value comparisons on a scalar array', () => {
+            const a: PartialObjectFilterStrict<Doc> = { tags: { $eq: 'foo' } };
+            const b: PartialObjectFilterStrict<Doc> = { tags: { $gte: 'a', $lt: 'z' } };
+        });
+
+        it('an element-wise comparison still checks the operand against the element type', () => {
+            const a: PartialObjectFilterStrict<Doc> = {
+                // @ts-expect-error number is not the string element type
+                tags: { $eq: 5 }
+            };
+            const b: PartialObjectFilterStrict<Doc> = {
+                // @ts-expect-error an object element is not compared with $eq
+                addresses: { $eq: { street: 'Main' } }
+            };
         });
 
         it('nested dot-prop path', () => {

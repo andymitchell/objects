@@ -482,6 +482,77 @@ describe("8. Schema <-> Type alignment", () => {
     expect(invalid.success).toBe(false);
   });
 
+  // The parse gate must agree with the write engine on which array_scope scopes are writable: any scope
+  // the engine would reject as invalid_scope must fail safeParse here — as a value, never a throw — so a
+  // store gating on the schema admits nothing the engine will refuse.
+  describe("makeWriteActionSchema rejects an unwritable array_scope.scope as a parse failure, never a throw", () => {
+    const RowSchema = z.object({
+      id: z.string(),
+      profile: z.object({ n: z.string() }).optional(),
+      children: z
+        .array(
+          z.object({
+            cid: z.string(),
+            items: z.array(z.object({ iid: z.string() })),
+          }),
+        )
+        .optional(),
+    });
+    const actionSchema = makeWriteActionSchema(RowSchema);
+    const scopedAction = (
+      scope: string,
+      nested: unknown = { type: "update", data: {}, where: { cid: "c1" } },
+    ) => ({
+      type: "write",
+      ts: 1,
+      uuid: "u",
+      payload: { type: "array_scope", scope, action: nested, where: { id: "1" } },
+    });
+
+    it.each([
+      "constructor",
+      "children.constructor",
+      "toString",
+      "nonexistent",
+      "id",
+      "profile",
+    ])("fails safeParse for scope %j without throwing", (scope) => {
+      expect(() => actionSchema.safeParse(scopedAction(scope))).not.toThrow();
+      expect(actionSchema.safeParse(scopedAction(scope)).success).toBe(false);
+    });
+
+    it("accepts a top-level and a nested object-array scope", () => {
+      expect(actionSchema.safeParse(scopedAction("children")).success).toBe(true);
+      expect(
+        actionSchema.safeParse(
+          scopedAction("children.items", { type: "update", data: {}, where: { iid: "i1" } }),
+        ).success,
+      ).toBe(true);
+    });
+
+    it("accepts a DECLARED field named after an inherited member outside the disallowed trio", () => {
+      const declaresToString = z.object({
+        id: z.string(),
+        toString: z.array(z.object({ tid: z.string() })),
+      });
+      const s = makeWriteActionSchema(declaresToString);
+      expect(
+        s.safeParse(scopedAction("toString", { type: "update", data: {}, where: { tid: "t1" } })).success,
+      ).toBe(true);
+    });
+
+    it("rejects a DECLARED constructor field — the runtime reader can never traverse that segment", () => {
+      const declaresConstructor = z.object({
+        id: z.string(),
+        constructor: z.array(z.object({ kid: z.string() })),
+      });
+      const s = makeWriteActionSchema(declaresConstructor);
+      const action = scopedAction("constructor", { type: "update", data: {}, where: { kid: "k1" } });
+      expect(() => s.safeParse(action)).not.toThrow();
+      expect(s.safeParse(action).success).toBe(false);
+    });
+  });
+
   it("WriteResultSchema validates a minimal result", () => {
     expect(WriteResultSchema.safeParse({ ok: true, actions: [] }).success).toBe(
       true,

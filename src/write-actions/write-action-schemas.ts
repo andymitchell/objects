@@ -19,7 +19,7 @@ import type {
   WritePayloadArrayScope,
   WritePayloadUpdate,
 } from "./types.ts";
-import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.ts";
+import { resolveArrayScope } from "./arrayScopeResolution.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
 
@@ -137,11 +137,13 @@ function checkArrayScopeAction(
   schema: z.ZodTypeAny,
   data: WritePayloadArrayScope<any>,
 ): boolean {
-  const subSchema = getZodSchemaAtSchemaDotPropPath(schema, data.scope);
-  if (!(subSchema instanceof z.ZodObject)) {
+  // Single-sourced with the write engine's preflight (resolveArrayScope), so the parse gate admits
+  // exactly the scopes the engine will write through — no gate/engine drift.
+  const resolution = resolveArrayScope(schema, data.scope);
+  if (!resolution.ok) {
     return false;
   }
-  const subActionSchema = makeWriteActionAndPayloadSchema(subSchema);
+  const subActionSchema = makeWriteActionAndPayloadSchema(resolution.elementSchema);
   const result = subActionSchema.payload.safeParse(data.action).success;
   return result;
 }

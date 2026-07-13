@@ -11,11 +11,11 @@ import type { AnyZodSchema } from "../zod/introspection.ts";
 export type ArrayScopeRejectionReason = 'disallowed_segment' | 'unknown_path' | 'not_an_object_array';
 
 /**
- * Outcome of {@link resolveArrayScope}: either the schema for one element of the scoped array,
+ * Outcome of {@link resolveArrayScope}: either the object schema for one element of the scoped array,
  * or the reason the scope can never be a valid write target.
  */
 export type ArrayScopeResolution =
-    | { ok: true; elementSchema: AnyZodSchema }
+    | { ok: true; elementSchema: z.ZodObject<any> }
     | { ok: false; reason: ArrayScopeRejectionReason };
 
 const DISALLOWED_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);

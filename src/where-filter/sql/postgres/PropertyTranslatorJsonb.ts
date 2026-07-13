@@ -575,6 +575,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         }
         const resolvedSpread = spread;
         const multiScalarElement = this.multiScalarPaths.has(resolved.lookupPath);
+        const nextAlias = this.aliasFactory(path.filter(node => node.kind === 'array').length);
 
         switch (predicate.kind) {
             case 'in': {
@@ -662,17 +663,31 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 return `jsonb_typeof(${this.pathAccessor(resolved, false)}) = ${placeholder}`;
             }
             case 'elemMatch': {
+                // `$elemMatch` asks a question only an array can answer: the value AT the leaf must ITSELF be an
+                // array, and one of ITS OWN elements must satisfy the body. The leaves reached across the spread
+                // elements are a SET of values, not an array — holding the body against one of them would answer a
+                // different, strictly wider question ("does some element's leaf satisfy it"), returning rows the
+                // element-wise reading excludes. A scalar leaf therefore answers nothing, which is the reading a
+                // `$elemMatch` on any non-array gets.
+                //
+                // The array test is on the STORED value, not the declared schema, so a row holding array data under
+                // a scalar-declared leaf still answers as the value-driven matcher does. `guardedJsonbArray` turns a
+                // non-array leaf into an empty array — no elements, no match — where `jsonb_array_elements` would
+                // otherwise error on a scalar.
+                const alias = nextAlias();
+                const leafElements = `jsonb_array_elements(${guardedJsonbArray(resolvedSpread.output_column)}) AS ${alias}`;
                 let subClause: string;
                 if (isSubDocumentBody(predicate.body)) {
-                    const subTranslator = new PropertyTranslatorPgJsonbSchema(leafNode.schema!, resolvedSpread.output_column, true);
+                    const subTranslator = new PropertyTranslatorPgJsonbSchema(leafNode.schema!, alias, true);
                     subClause = compileWhereFilterRecursive(predicate.body.objectFilter, statementArguments, subTranslator, errors, rootFilter);
                 } else if (predicate.body.scalarPredicate.kind === 'compoundObject') {
                     subClause = '1 = 0';
                 } else {
-                    const rawJsonbId = resolvedSpread.output_column;
-                    subClause = this.emitPredicate(dotpropPath, resolved, predicate.body.scalarPredicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                    const bodyPred = predicate.body.scalarPredicate;
+                    const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`;
+                    subClause = this.emitPredicate(dotpropPath, resolved, bodyPred, statementArguments, errors, rootFilter, { customSqlIdentifier: elementId, customRawJsonb: alias });
                 }
-                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE EXISTS (SELECT 1 FROM ${leafElements} WHERE ${subClause}))`;
             }
             case 'scalar':
             case 'undefinedField': {

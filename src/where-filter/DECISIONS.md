@@ -396,6 +396,37 @@ element, on every path that spreads an array.
 
 ---
 
+## 15. `$elemMatch` is answered by the value at the path, never by the set of values the path reaches
+
+**Context**: A dot-prop path that descends through an array yields one leaf per element — `'items.k'` over
+`[{k:'a'},{k:'b'}]` reaches `'a'` and `'b'`. Both SQL engines held an `$elemMatch` body against those leaves
+one at a time, so `{ 'items.k': { $elemMatch: { $eq: 'a' } } }` matched. MongoDB and the JS matcher answer
+`false`: `$elemMatch` requires the value AT the path to itself be an array, and a scalar is not one.
+
+**Decision**: `$elemMatch` matches only when the value at the path IS an array and one of ITS OWN elements
+satisfies the body. A scalar leaf answers nothing — the same reading `$elemMatch` on any non-array gets.
+
+**Why**: the set of leaves a path reaches is not an array, and treating it as one silently answers a different
+question — "does SOME element's leaf satisfy the body" instead of "does one element of this array satisfy it".
+That reading is strictly wider, so it returned rows MongoDB excludes: an over-match, which decision 13 classes
+as a bug to fix rather than a divergence to document. It also made `$elemMatch` indistinguishable from the
+plain element-wise reading on such a path, when the two asking different questions is the entire point of the
+operator (a nested-array leaf like `'groups.tags'`, whose value genuinely IS an array, was answering correctly
+throughout, and still does).
+
+**The array test reads the STORED value, not the declared schema.** The schema-driven emitters know the leaf
+is scalar and could have emitted a constant `false`, which is cheaper. They do not, because a row may hold
+array data under a scalar-declared field, and the value-driven matcher answers such a row from what is there.
+Deciding it from the schema would part company with the matcher exactly when the data does not conform — and
+since `$elemMatch` can sit under `$nor`, an under-match there inverts into an over-match. Testing the value
+keeps all four engines on the same answer for any data, conforming or not, and narrows the value-driven/
+schema-driven gap recorded in MONGO-DIVERGENCES.md rather than widening it.
+
+The verdicts are pinned against a real `mongod` (`standard-tests/mongo-truth`), not asserted from reading the
+MongoDB manual.
+
+---
+
 ## Release notes
 
 Behaviour visible to consumers of `WhereFilterDefinition` changes as follows. The semantics of existing
@@ -435,6 +466,12 @@ filters are not; the exported types widen (below) without rejecting anything the
 - **A value operator on a scalar leaf below an array now compiles on the SQL engines.**
   `{ 'items.k': { $ne: 'z' } }` and `{ 'items.v': { $gt: 4 } }` previously could not be expressed there and
   were answered `false` regardless of the data (and a range could fail to compile at all).
+- **`$elemMatch` on a scalar leaf below an array no longer matches** (decision 15). On the SQL engines,
+  `{ 'items.k': { $elemMatch: { $eq: 'a' } } }` matched `{ items: [{k:'a'}] }` by holding the body against each
+  element's leaf. It now answers `false`, as MongoDB and the JS matcher always did — the value at `items.k` is
+  a string, and `$elemMatch` reads only an array. A leaf that IS an array (`{ 'groups.tags': { $elemMatch: … } }`)
+  is unaffected and still matches from its own elements. This narrows a result set: a caller relying on the old
+  reading wants the element-wise form, `{ 'items.k': 'a' }` or `{ 'items.k': { $eq: 'a' } }`.
 - **Comparing a BOOLEAN against an array element, or against a leaf below an array, now answers on Postgres**
   rather than failing the statement (`operator does not exist: text = boolean`). `{ flags: { $eq: true } }`,
   `{ flags: true }`, `{ flags: { $elemMatch: { $eq: true } } }` and `{ 'items.done': true }` were affected;

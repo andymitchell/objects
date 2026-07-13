@@ -522,6 +522,8 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
         }
         const resolvedSpread = spread;
         const multiScalarElement = this.multiScalarPaths.has(resolved.lookupPath);
+        // Seeded past the aliases the spread already took, so an element scan below the leaf never shadows one.
+        const nextAlias = this.aliasFactory(path.filter(node => node.kind === 'array').length);
         /** The leaf read from one spread element, which is what a value operator is held against. */
         const spreadLeafContext = (): EmitContext => ({
             customSqlIdentifier: resolvedSpread.output_identifier,
@@ -609,17 +611,35 @@ class BasePropertyTranslatorSqliteJson<T extends Record<string, any> = Record<st
                 return `json_type(${this.sqlColumnName}, ${this.pathLiteral(resolved)}) = ${placeholder}`;
             }
             case 'elemMatch': {
+                // `$elemMatch` asks a question only an array can answer: the value AT the leaf must ITSELF be an
+                // array, and one of ITS OWN elements must satisfy the body. The leaves reached across the spread
+                // elements are a SET of values, not an array — holding the body against one of them would answer a
+                // different, strictly wider question ("does some element's leaf satisfy it"), returning rows the
+                // element-wise reading excludes. A scalar leaf therefore answers nothing, which is the reading a
+                // `$elemMatch` on any non-array gets.
+                //
+                // The array test is on the STORED value, not the declared schema, so a row holding array data under
+                // a scalar-declared leaf still answers as the value-driven matcher does. It is also load-bearing:
+                // `json_each` walking a path that holds a SCALAR yields that scalar as a single row, so without the
+                // guard the body would be held against the leaf itself and a scalar leaf would match.
+                const alias = nextAlias();
+                const leafIsArray = spreadLeafPathLiteral !== undefined
+                    ? `json_type(${spreadElement}, ${spreadLeafPathLiteral}) = 'array'`
+                    : `${resolvedSpread.output_type} = 'array'`;
+                const leafElements = spreadLeafPathLiteral !== undefined
+                    ? `json_each(${spreadElement}, ${spreadLeafPathLiteral}) AS ${alias}`
+                    : `json_each(${resolvedSpread.output_column}) AS ${alias}`;
                 let subClause: string;
                 if (isSubDocumentBody(predicate.body)) {
-                    const subTranslator = new PropertyTranslatorSqliteJsonSchema(leafNode.schema!, resolvedSpread.output_column, true);
+                    const subTranslator = new PropertyTranslatorSqliteJsonSchema(leafNode.schema!, `${alias}.value`, true);
                     subClause = compileWhereFilterRecursive(predicate.body.objectFilter, statementArguments, subTranslator, errors, rootFilter);
                 } else if (predicate.body.scalarPredicate.kind === 'compoundObject') {
                     subClause = '1 = 0';
                 } else {
-                    const customSpread = multiScalarElement ? { valueExpr: resolvedSpread.output_column, typeExpr: resolvedSpread.output_type } : undefined;
-                    subClause = this.emitPredicate(dotpropPath, resolved, predicate.body.scalarPredicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_column, customSpread });
+                    const customSpread = multiScalarElement ? { valueExpr: `${alias}.value`, typeExpr: `${alias}.type` } : undefined;
+                    subClause = this.emitPredicate(dotpropPath, resolved, predicate.body.scalarPredicate, statementArguments, errors, rootFilter, { customSqlIdentifier: `${alias}.value`, customSpread });
                 }
-                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${leafIsArray} AND EXISTS (SELECT 1 FROM ${leafElements} WHERE ${subClause}))`;
             }
             case 'scalar':
             case 'undefinedField': {

@@ -559,4 +559,57 @@ export const MONGO_TRUTH_CORPUS: readonly MongoTruthCase[] = [
         mongo: true,
         ours: true,
     },
+
+    // ---------------------------------------------------------------------------------------------------------
+    // $elemMatch is a question only an ARRAY can answer. A path descending through an array yields one leaf per
+    // element, and that SET of leaves is not itself an array — mistaking it for one turns $elemMatch into "does
+    // some element's leaf satisfy the body", which returns rows MongoDB excludes. These cases settle where the
+    // line falls: on the VALUE at the path, never on the set of values the path reaches.
+    // ---------------------------------------------------------------------------------------------------------
+
+    {
+        id: 'conformance-elemmatch-scalar-leaf-below-array-matches-nothing',
+        source: 'DECISIONS.md #15',
+        claim: '$elemMatch on a SCALAR leaf below an array matches nothing — the value at the path is not an array.',
+        row: { items: [{ k: 'a' }, { k: 'b' }] },
+        filter: { 'items.k': { $elemMatch: { $eq: 'a' } } },
+        mongo: false,
+        ours: false,
+    },
+    {
+        id: 'conformance-elemmatch-scalar-leaf-below-array-range-body',
+        source: 'DECISIONS.md #15',
+        claim: 'The body does not rescue it: a range body on a scalar leaf below an array still matches nothing.',
+        row: { items: [{ k: 'a' }] },
+        filter: { 'items.k': { $elemMatch: { $gt: 'A' } } },
+        mongo: false,
+        ours: false,
+    },
+    {
+        id: 'conformance-elemmatch-array-leaf-below-array-matches',
+        source: 'DECISIONS.md #15',
+        claim: 'An ARRAY leaf below an array DOES answer $elemMatch, from its own elements.',
+        row: { groups: [{ tags: ['a', 'b'] }] },
+        filter: { 'groups.tags': { $elemMatch: { $eq: 'a' } } },
+        mongo: true,
+        ours: true,
+    },
+    {
+        id: 'conformance-elemmatch-array-leaf-below-array-no-element-satisfies',
+        source: 'DECISIONS.md #15',
+        claim: 'An array leaf below an array does not match when none of its own elements satisfies the body.',
+        row: { groups: [{ tags: ['a', 'b'] }] },
+        filter: { 'groups.tags': { $elemMatch: { $eq: 'z' } } },
+        mongo: false,
+        ours: false,
+    },
+    {
+        id: 'conformance-elemmatch-on-a-plain-scalar-field-matches-nothing',
+        source: 'DECISIONS.md #15',
+        claim: 'The same rule one level up: $elemMatch on a plain scalar field matches nothing (the §18.9 reading).',
+        row: { name: 'a' },
+        filter: { name: { $elemMatch: { $eq: 'a' } } },
+        mongo: false,
+        ours: false,
+    },
 ];

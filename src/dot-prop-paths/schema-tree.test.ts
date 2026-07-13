@@ -495,6 +495,46 @@ describe('getZodSchemaAtSchemaDotPropPath { crossArrays: false }', () => {
     });
 });
 
+describe('getZodSchemaAtSchemaDotPropPath { unwrapTrailingArray: false }', () => {
+    // By default a path ending on an array resolves to the array's ELEMENT (the returned schema
+    // validates one item), which makes an array leaf indistinguishable from an object leaf. Callers
+    // that must tell them apart — e.g. validating that a write target IS an array — pass false to
+    // receive the array schema itself.
+    const s = z.object({
+        id: z.string(),
+        profile: z.object({ n: z.string() }),
+        children: z.array(z.object({ cid: z.string(), items: z.array(z.object({ iid: z.string() })) })),
+        maybe: z.array(z.object({ m: z.string() })).optional(),
+    });
+
+    it('returns the array schema whole at an array leaf, where the default returns the element', () => {
+        const whole = getZodSchemaAtSchemaDotPropPath(s, 'children', { unwrapTrailingArray: false });
+        expect(whole?.safeParse([{ cid: 'c1', items: [] }]).success).toBe(true);
+        expect(whole?.safeParse({ cid: 'c1', items: [] }).success).toBe(false);
+
+        const element = getZodSchemaAtSchemaDotPropPath(s, 'children');
+        expect(element?.safeParse({ cid: 'c1', items: [] }).success).toBe(true);
+        expect(element?.safeParse([{ cid: 'c1', items: [] }]).success).toBe(false);
+    });
+
+    it('still crosses an intermediate array, keeping only the trailing one whole', () => {
+        const whole = getZodSchemaAtSchemaDotPropPath(s, 'children.items', { unwrapTrailingArray: false });
+        expect(whole?.safeParse([{ iid: 'i1' }]).success).toBe(true);
+        expect(whole?.safeParse({ iid: 'i1' }).success).toBe(false);
+    });
+
+    it('sees through a trailing optional wrapper to the array beneath', () => {
+        const whole = getZodSchemaAtSchemaDotPropPath(s, 'maybe', { unwrapTrailingArray: false });
+        expect(whole?.safeParse([{ m: 'x' }]).success).toBe(true);
+        expect(whole?.safeParse({ m: 'x' }).success).toBe(false);
+    });
+
+    it('leaves scalar and plain-object leaves untouched', () => {
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'id', { unwrapTrailingArray: false })?.safeParse('x').success).toBe(true);
+        expect(getZodSchemaAtSchemaDotPropPath(s, 'profile', { unwrapTrailingArray: false })?.safeParse({ n: 'a' }).success).toBe(true);
+    });
+});
+
 describe('getZodSchemaAtSchemaDotPropPath — inherited-name path segments resolve as absent, never crash', () => {
     // A Zod shape is a plain object, so `constructor`, `toString`, … are reachable through its prototype
     // chain. They are not declared fields — nor even Zod schemas, so reading one as a schema would throw.

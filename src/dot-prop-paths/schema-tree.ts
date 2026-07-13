@@ -249,8 +249,14 @@ export function getZodKindAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPro
  * it returns `undefined` instead of unwrapping the array. This matches `DotPropPathsUnion<T>` (which stops at
  * arrays) and `getProperty` (no array spread) — use it to validate a key that must be a single sortable path,
  * e.g. a `default_ordering_key`.
+ *
+ * Pass `{ unwrapTrailingArray: false }` to receive the array schema itself when the path ends on an array,
+ * instead of its element. The default (element) makes an array leaf indistinguishable from an object leaf —
+ * use this when the caller must tell them apart, e.g. to validate that a path targets an array. Only the
+ * FINAL unwrap changes: intermediate arrays along the path are still crossed (per `crossArrays`), and a
+ * trailing optional wrapper is still removed first, so an optional array yields the array schema.
  */
-export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath, options?: { crossArrays?: boolean }): AnyZodSchema | undefined {
+export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath, options?: { crossArrays?: boolean, unwrapTrailingArray?: boolean }): AnyZodSchema | undefined {
     const keys = path.split('.');
     let currentSchema: AnyZodSchema = schema;
 
@@ -285,9 +291,10 @@ export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotP
 
 
     // A trailing optional unwraps to its inner type; a trailing array resolves to its element (so the
-    // returned schema validates a single element). A trailing nullable is kept so it still accepts null.
+    // returned schema validates a single element) unless the caller asked for the array kept whole.
+    // A trailing nullable is kept so it still accepts null.
     if( getZodKind(currentSchema)==='optional' ) currentSchema = unwrap(currentSchema);
-    if( getZodKind(currentSchema)==='array' ) currentSchema = getArrayElement(currentSchema);
+    if( options?.unwrapTrailingArray !== false && getZodKind(currentSchema)==='array' ) currentSchema = getArrayElement(currentSchema);
 
     return currentSchema;
 

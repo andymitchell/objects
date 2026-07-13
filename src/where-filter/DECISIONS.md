@@ -387,9 +387,12 @@ operator. The gate rejects an object operand for those operators regardless (#8)
 lost: an object element is filtered with a sub-document filter or `$elemMatch`.
 
 **Consequence**: boolean elements became expressible for the first time, which surfaced a latent Postgres
-defect — the element-spreading emission projects elements as text, so a boolean operand was compared against
-text and the statement failed. Boolean element comparisons now bind a jsonb-typed parameter, as `$in`/`$nin`/
-`$all` already did.
+defect. Postgres reads an array element (and a leaf below an array) through a text projection — `#>> '{}'` —
+and has no `text = boolean` operator, so a boolean operand made the statement fail to execute at all. It was
+already known that `$in`/`$nin` had to compare a boolean against the RAW jsonb rather than that projection;
+what was missed is that this is a property of the **operand**, not of the operator, so `$eq` and a bare
+boolean needed it just as much. Postgres now decides *any* boolean-operand comparison against the raw jsonb
+element, on every path that spreads an array.
 
 ---
 
@@ -432,6 +435,10 @@ filters are not; the exported types widen (below) without rejecting anything the
 - **A value operator on a scalar leaf below an array now compiles on the SQL engines.**
   `{ 'items.k': { $ne: 'z' } }` and `{ 'items.v': { $gt: 4 } }` previously could not be expressed there and
   were answered `false` regardless of the data (and a range could fail to compile at all).
+- **Comparing a BOOLEAN against an array element, or against a leaf below an array, now answers on Postgres**
+  rather than failing the statement (`operator does not exist: text = boolean`). `{ flags: { $eq: true } }`,
+  `{ flags: true }`, `{ flags: { $elemMatch: { $eq: true } } }` and `{ 'items.done': true }` were affected;
+  `$in`/`$nin` already answered. JS and SQLite were unaffected throughout (decision 14).
 
 Each of these moves an engine *toward* MongoDB's semantics; none is a new divergence.
 

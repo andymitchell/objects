@@ -87,6 +87,14 @@ export type Regex = z.infer<typeof RegexSchema>;
 export const TagsSchema = z.object({ id: z.string(), tags: z.array(z.string()), nums: z.array(z.number()) }).strict();
 export type Tags = z.infer<typeof TagsSchema>;
 
+/** A boolean array — an element comparison whose operand is neither string nor number. */
+export const BoolFlagsSchema = z.object({ id: z.string(), flags: z.array(z.boolean()) }).strict();
+export type BoolFlags = z.infer<typeof BoolFlagsSchema>;
+
+/** A boolean leaf reached THROUGH an object array — the same boolean comparison, one array level down. */
+export const BoolLeafSchema = z.object({ id: z.string(), items: z.array(z.object({ k: z.string(), done: z.boolean() }).strict()) }).strict();
+export type BoolLeaf = z.infer<typeof BoolLeafSchema>;
+
 /** Array of objects — compound-object filters, $all containment, $size inside $elemMatch. */
 export const ObjArraySchema = z.object({
     id: z.string(),

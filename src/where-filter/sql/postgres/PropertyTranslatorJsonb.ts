@@ -53,6 +53,35 @@ function isSubDocumentBody(body: ElemMatchBody): body is ElemMatchBody & { objec
 }
 
 /**
+ * Whether a predicate compares against a boolean, which only the RAW jsonb value can answer.
+ *
+ * Postgres has no `text = boolean` operator (and `numeric = boolean` errors), so a boolean operand cannot be
+ * compared against a text- or numeric-projected reading of the stored value — the projection that every array
+ * element and every mixed-scalar union is read through. Equality is also type-strict here (matchJavascriptObject's
+ * `===`), so a boolean must match a stored boolean and be inert against a stored `1` or `"true"`, which only a
+ * jsonb-to-jsonb comparison preserves.
+ *
+ * This is a property of the OPERAND, not of the operator or the field: it holds for a homogeneous boolean array's
+ * elements exactly as it does for a `boolean | number | string` union.
+ */
+function hasBooleanOperand(predicate: Predicate): boolean {
+    switch (predicate.kind) {
+        case 'in':
+        case 'nin':
+            return predicate.operand.some(value => typeof value === 'boolean');
+        case 'eq':
+        case 'ne':
+            return typeof predicate.operand === 'boolean';
+        case 'scalar':
+            return typeof predicate.value === 'boolean';
+        default:
+            // A range bound cannot be a boolean, and $regex/$exists/$type/$size/$all take no scalar operand of
+            // their own. `$not` is decided by the predicate it wraps, which is emitted in its own right.
+            return false;
+    }
+}
+
+/**
  * Postgres JSONB implementation of IPropertyTranslator.
  * Generates SQL fragments for a single JSONB column using TreeNodeMap for type-aware casting,
  * array spreading via jsonb_array_elements, and parameterised placeholders.
@@ -244,16 +273,11 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      * @returns The strict comparison, or `undefined` when the field or the predicate is not one it answers.
      */
     private emitMultiScalarLeaf(resolved: ResolvedPath, predicate: Predicate, statementArguments: PreparedStatementArgument[], context: EmitContext): string | undefined {
-        // A boolean `$in`/`$nin` operand must compare type-faithfully even on a HOMOGENEOUS scalar leaf: the
-        // field's text/numeric cast has no `= boolean` operator (and `numeric = boolean` errors), and membership
-        // is type-strict (matchJavascriptObject's `===`), so a boolean matches a boolean field and is inert
-        // against a string/number one. The raw-jsonb reading a multi-scalar union already uses does exactly that.
-        const booleanMembership = (predicate.kind === 'in' || predicate.kind === 'nin')
-            && predicate.operand.some(v => typeof v === 'boolean');
         // The set's keys are enumerated paths, so a hit counts only for a path that resolved to its node; a
         // collision path resolves unknown (no node) and must not borrow the colliding field's multi-scalar
-        // reading. Boolean membership stays independent — it applies to any scalar leaf, including a record value.
-        const applies = ((resolved.node !== undefined && this.multiScalarPaths.has(resolved.lookupPath)) || booleanMembership)
+        // reading. A boolean operand stays independent of the set — it applies to any scalar leaf, including a
+        // record value and an array element (see {@link hasBooleanOperand}).
+        const applies = ((resolved.node !== undefined && this.multiScalarPaths.has(resolved.lookupPath)) || hasBooleanOperand(predicate))
             && (context.customSqlIdentifier === undefined || context.customRawJsonb !== undefined);
         if (!applies) return undefined;
 
@@ -325,14 +349,15 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         const guardedLeafArray = guardedJsonbArray(leafArrayExpr);
         const elements = (alias: string) => `jsonb_array_elements(${guardedLeafArray}) AS ${alias}`;
         // A comparison operator scanning the elements reads each one as text, cast to numeric when the operand is
-        // numeric — otherwise `<`/`>` would compare lexically, where `'-8' < '-9'` is true.
+        // numeric — otherwise `<`/`>` would compare lexically, where `'-8' < '-9'` is true. The element's RAW jsonb
+        // is offered alongside, for the comparisons a text projection cannot express (see {@link hasBooleanOperand}).
         const comparisonElementContext = (alias: string, forPredicate: Predicate): EmitContext => {
             const numeric = (forPredicate.kind === 'eq' || forPredicate.kind === 'ne')
                 ? typeof forPredicate.operand === 'number'
                 : this.elementNeedsNumericCast(forPredicate);
             return {
                 customSqlIdentifier: numeric ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`,
-                customRawJsonb: multiScalarElement ? alias : undefined,
+                customRawJsonb: alias,
             };
         };
 
@@ -344,9 +369,10 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'in': {
                 if (predicate.operand.length === 0) return '1 = 0';
                 const alias = nextAlias();
-                // A boolean element compares as jsonb-of-its-own-type (like the `$all` case below), so a plain
-                // text `#>> '{}' = boolean` — which Postgres has no operator for — never arises.
-                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
+                // A boolean operand compares against the element's own jsonb, never its text projection, which has
+                // no `= boolean` operator (see {@link hasBooleanOperand}) — as does a mixed-scalar element, whose
+                // stored type is not known until it is read.
+                if (multiScalarElement || hasBooleanOperand(predicate)) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
@@ -356,7 +382,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'nin': {
                 if (predicate.operand.length === 0) return '1 = 1';
                 const alias = nextAlias();
-                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
+                if (multiScalarElement || hasBooleanOperand(predicate)) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
@@ -439,7 +465,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`;
                 const body = this.emitPredicate(dotpropPath, resolved, bodyPred, statementArguments, errors, rootFilter, {
                     customSqlIdentifier: elementId,
-                    customRawJsonb: multiScalarElement ? alias : undefined,
+                    customRawJsonb: alias,
                 });
                 return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
             }
@@ -459,7 +485,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 const alias = nextAlias();
                 const body = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, {
                     customSqlIdentifier: `${alias} #>> '{}'`,
-                    customRawJsonb: multiScalarElement ? alias : undefined,
+                    customRawJsonb: alias,
                 });
                 return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
             }
@@ -553,8 +579,9 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
         switch (predicate.kind) {
             case 'in': {
                 if (predicate.operand.length === 0) return '1 = 0';
-                // A boolean element compares as jsonb-of-its-own-type (as `$all` does), never a text `= boolean`.
-                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
+                // A boolean operand compares against the leaf's own jsonb, never its text projection, which has no
+                // `= boolean` operator (see {@link hasBooleanOperand}) — as does a mixed-scalar leaf.
+                if (multiScalarElement || hasBooleanOperand(predicate)) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
                 }
@@ -563,7 +590,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             }
             case 'nin': {
                 if (predicate.operand.length === 0) return '1 = 1';
-                if (multiScalarElement || predicate.operand.some(v => typeof v === 'boolean')) {
+                if (multiScalarElement || hasBooleanOperand(predicate)) {
                     const vals = predicate.operand.map(v => toJsonbParam(v as string | number | boolean, this.binder(statementArguments)));
                     return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
                 }
@@ -604,14 +631,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'eq':
             case 'regex':
             case 'range': {
-                const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                const rawJsonbId = resolvedSpread.output_column;
                 const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
                 return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }
             case 'ne': {
                 // The complement of `$eq` over the whole path: NO element's leaf may equal the operand.
                 const equality: Predicate = { kind: 'eq', operand: predicate.operand };
-                const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                const rawJsonbId = resolvedSpread.output_column;
                 const subClause = this.emitPredicate(dotpropPath, resolved, equality, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
                 return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }
@@ -642,14 +669,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 } else if (predicate.body.scalarPredicate.kind === 'compoundObject') {
                     subClause = '1 = 0';
                 } else {
-                    const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                    const rawJsonbId = resolvedSpread.output_column;
                     subClause = this.emitPredicate(dotpropPath, resolved, predicate.body.scalarPredicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
                 }
                 return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }
             case 'scalar':
             case 'undefinedField': {
-                const rawJsonbId = multiScalarElement ? resolvedSpread.output_column : undefined;
+                const rawJsonbId = resolvedSpread.output_column;
                 const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
                 return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }

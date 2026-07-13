@@ -1,5 +1,5 @@
-import { TagsSchema, ObjArraySchema, NestedItemsSchema, MixedArraySchema, DeepSpread3Schema, ContactSchema, RegexSchema, NullishGridSchema } from "./fixtures.ts";
-import type { Tags } from "./fixtures.ts";
+import { TagsSchema, BoolFlagsSchema, BoolLeafSchema, ObjArraySchema, NestedItemsSchema, MixedArraySchema, DeepSpread3Schema, ContactSchema, RegexSchema, NullishGridSchema } from "./fixtures.ts";
+import type { Tags, BoolFlags, BoolLeaf } from "./fixtures.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { SectionCtx } from "./harness.ts";
 
@@ -308,6 +308,125 @@ export function registerArraySemantics(ctx: SectionCtx): void {
 
             test('$size still describes the array itself rather than an element', async () => {
                 const result = await arrayField(tags(['a', 'b']), { tags: { $not: { $size: 3 } } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+        });
+
+        /**
+         * The element being compared is a BOOLEAN — the one element type an engine cannot reach by comparing
+         * text, and the one an equality operator cannot reach by comparing numbers either. An engine that
+         * projects its elements as text to compare them will compile a statement that has no meaning (or no
+         * answer) for a boolean, so this block separates "reads element-wise" from "reads element-wise, for the
+         * element types that happen to survive the projection".
+         */
+        describe('18.36 an element comparison holds a boolean element to its own type', () => {
+
+            const flags = (values: boolean[]) => ({ id: 'f', flags: values });
+            const boolField = (row: BoolFlags, filter: WhereFilterDefinition<BoolFlags>) =>
+                matchJavascriptObject(row, filter, BoolFlagsSchema);
+
+            test('$eq matches when an element is the operand', async () => {
+                const result = await boolField(flags([true]), { flags: { $eq: true } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('$eq does not match when no element is the operand', async () => {
+                const result = await boolField(flags([false]), { flags: { $eq: true } });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('$eq does not match an empty array, which holds no element to be the operand', async () => {
+                const result = await boolField(flags([]), { flags: { $eq: true } });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('negating $eq excludes an array that holds the operand', async () => {
+                const result = await boolField(flags([true]), { flags: { $not: { $eq: true } } });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('negating $eq matches an array that does not hold the operand', async () => {
+                const result = await boolField(flags([false]), { flags: { $not: { $eq: true } } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('negating $eq matches an empty array', async () => {
+                const result = await boolField(flags([]), { flags: { $not: { $eq: true } } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('a bare boolean asks for containment', async () => {
+                const result = await boolField(flags([true]), { flags: true });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('a bare boolean does not match an array holding only the other value', async () => {
+                const result = await boolField(flags([false]), { flags: true });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('$elemMatch with an $eq body reaches the boolean element', async () => {
+                const result = await boolField(flags([true]), { flags: { $elemMatch: { $eq: true } } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('$elemMatch with a bare boolean body reaches the boolean element', async () => {
+                const result = await boolField(flags([true]), { flags: { $elemMatch: true } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('$elemMatch requires ONE element to satisfy a compound boolean body', async () => {
+                const result = await boolField(flags([true]), { flags: { $elemMatch: { $eq: true, $in: [true] } } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('$elemMatch with a compound body no element satisfies does not match', async () => {
+                const result = await boolField(flags([true]), { flags: { $elemMatch: { $eq: true, $in: [false] } } });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('$in over a boolean array is set intersection (control — already type-faithful)', async () => {
+                const result = await boolField(flags([true]), { flags: { $in: [true] } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('$in does not match when the array holds only the other value (control)', async () => {
+                const result = await boolField(flags([false]), { flags: { $in: [true] } });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            // The same boolean comparison, one array level down: the leaf is read from every spread element, and
+            // that reading is projected out of the element — the projection a boolean cannot survive.
+            //
+            // A dot-prop path THROUGH an array is a filter only the gate admits: the schema-derived type does not
+            // generate one (a separate gap, pinned in types.test.ts), so such a filter reaches the engines only as
+            // JSON — which is exactly why the engines must still agree on it.
+            const items = (done: boolean[]) => ({ id: 'f', items: done.map((d, i) => ({ k: `k${i}`, done: d })) });
+            const boolLeaf = (row: BoolLeaf, filter: unknown) =>
+                matchJavascriptObject(row, filter as WhereFilterDefinition<BoolLeaf>, BoolLeafSchema);
+
+            test('a boolean leaf below an array matches when some element carries it', async () => {
+                const result = await boolLeaf(items([false, true]), { 'items.done': true });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('a boolean leaf below an array does not match when no element carries it', async () => {
+                const result = await boolLeaf(items([false, false]), { 'items.done': true });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('$eq on a boolean leaf below an array reads the element, not its text', async () => {
+                const result = await boolLeaf(items([false, true]), { 'items.done': { $eq: true } });
+                expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
+            });
+
+            test('negating $eq on a boolean leaf below an array denies the whole path', async () => {
+                const result = await boolLeaf(items([false, true]), { 'items.done': { $not: { $eq: true } } });
+                expectOrAcknowledgeUnsupported(result, false, 'comparison operator on an array field');
+            });
+
+            test('$in on a boolean leaf below an array is set intersection', async () => {
+                const result = await boolLeaf(items([false, true]), { 'items.done': { $in: [true] } });
                 expectOrAcknowledgeUnsupported(result, true, 'comparison operator on an array field');
             });
         });

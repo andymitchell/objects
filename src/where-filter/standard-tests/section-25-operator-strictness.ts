@@ -41,7 +41,7 @@ import type { SectionCtx } from "./harness.ts";
  *     so on a missing field as well (`{$not:{$ne:5}}` does NOT match a missing field, because `$ne` does).
  */
 export function registerOperatorStrictness(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     // These payloads are deliberately malformed: the compile-time type rejects each one (TS2353 for unknown /
     // cross-category operators; excess/absent for the carriers). The runtime gate must reject them too. Cast

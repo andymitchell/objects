@@ -12,7 +12,7 @@ import type { SectionCtx } from "./harness.ts";
  * SPEC-INTENT rows are expected RED until the gate is tightened. Genuine-throw controls stay green.
  */
 export function registerMalformedHostile(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     describe('16. Malformed & hostile filters (spec: strict rejection)', () => {
 

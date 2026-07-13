@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * equivalence. Plus the two SPEC-INTENT rejections `$ne null` / `$in [null]` on a nullable field.
  */
 export function registerCoverageGaps(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     describe('23. Coverage gaps', () => {
 

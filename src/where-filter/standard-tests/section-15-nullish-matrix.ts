@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * (`$ne`, `$nin`, `$not`, `$nor`) succeed; `$exists`/`$eq null` distinguish missing from null.
  */
 export function registerNullishMatrix(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     // The nullable field types collapse the value-comparison operators to `never` (the very gap §15
     // exercises at runtime), so the grid filters are the untyped runtime form rather than per-row casts.

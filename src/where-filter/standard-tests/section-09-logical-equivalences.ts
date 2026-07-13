@@ -5,7 +5,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §9. Logical equivalences (property tests) — De Morgan, double negation. */
 export function registerLogicalEquivalences(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectEquivalentOrAcknowledge } = ctx;
+    const { describe, test, matchJavascriptObject, expectEquivalentOrAcknowledge } = ctx;
 
     describe('9. Logical equivalences (property tests)', () => {
 

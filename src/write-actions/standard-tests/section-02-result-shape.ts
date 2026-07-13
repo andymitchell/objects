@@ -4,7 +4,7 @@ import { assertWriteArrayScope } from "../helpers.ts";
 
 /** §2: WriteResult / WriteOutcome / WriteChanges shape guarantees. */
 export function registerResultShape(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('2. Result Shape', () => {
 

@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §3 (part A) Array comparisons — exact-array match, scalar element match, compound object filter, $elemMatch with logic operators. */
 export function registerArrayComparisonsA(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
         describe('Exact array match', () => {
 

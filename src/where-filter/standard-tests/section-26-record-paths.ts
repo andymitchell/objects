@@ -20,7 +20,7 @@ import type { SectionCtx } from "./harness.ts";
  * the row that literally holds that key and no other.
  */
 export function registerRecordPaths(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     const rec = (row: RecordDeep, filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<RecordDeep>, RecordDeepSchema);
     const withData = (data: RecordDeep['data']): RecordDeep => ({ id: 'x', flat: {}, data });

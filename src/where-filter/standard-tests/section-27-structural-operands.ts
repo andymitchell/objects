@@ -22,7 +22,7 @@ import type { SectionCtx } from "./harness.ts";
  * cannot drift unnoticed. See DECISIONS.md, "the equality family's operand domain".
  */
 export function registerStructuralOperands(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectMalformedFilterRejected, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectMalformedFilterRejected, expectOrAcknowledgeUnsupported } = ctx;
 
     const match = (row: StructuralArray, filter: unknown) => matchJavascriptObject(row, filter as WhereFilterDefinition<StructuralArray>, StructuralArraySchema);
     const numeric: StructuralArray = { id: 'x', matrix: [[1, 2]] };

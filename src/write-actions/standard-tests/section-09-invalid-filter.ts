@@ -22,7 +22,7 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
  * the adapter surface, with `age`→`count` for FlatSchema.
  */
 export function registerInvalidFilter(ctx: SectionCtx): void {
-    const { expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, expect, createAdapter, implName, itIfSupported } = ctx;
     const itCorpus = itIfSupported('invalidWhereCorpus');
 
     // Deliberately-invalid wheres/payloads are not type-valid; cast at the single sanctioned boundary.

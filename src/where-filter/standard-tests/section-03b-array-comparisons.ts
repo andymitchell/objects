@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §3 (part B) Array comparisons — $elemMatch, $in/$nin on arrays, $all, $size, array nesting. */
 export function registerArrayComparisonsB(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
         describe('$elemMatch', () => {
 

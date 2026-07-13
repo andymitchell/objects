@@ -4,7 +4,7 @@ import { assertWriteArrayScope, getWriteFailures } from "../helpers.ts";
 
 /** §1.1–§1.4: create / update / delete / array_scope core verbs. */
 export function registerVerbsCrud(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
 
     describe('1.1 Create', () => {
 

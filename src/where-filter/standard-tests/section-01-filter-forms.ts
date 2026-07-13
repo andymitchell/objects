@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §1. Filter forms — bare object filters, logic operators ($and/$or/$nor), and their combinations. */
 export function registerFilterForms(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('1. Filter forms', () => {
 

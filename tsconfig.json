@@ -14,6 +14,13 @@
         "allowImportingTsExtensions": true,
         "lib": [
             "ESNext"
+        ],
+        // The runner's globals (`describe`, `test`, `expect`) come from vitest, matching `globals: true` in
+        // vitest.config.ts. Naming the global type packages explicitly stops TS auto-including every @types/*
+        // package, which is how jest's ambient types once typed this repo's test globals.
+        "types": [
+            "vitest/globals",
+            "node"
         ]
     },
     "include": [

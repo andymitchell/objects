@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §8. Real-world composite patterns. */
 export function registerCompositePatterns(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('8. Real-world composite patterns', () => {
 

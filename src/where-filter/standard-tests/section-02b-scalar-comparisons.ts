@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §2 (part B) Scalar value comparisons — $in, $nin, $not, $exists, $type, exact null, numeric edges. */
 export function registerScalarComparisonsB(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
         describe('$in (scalar)', () => {
             test('$in string: passes when value in list', async () => {

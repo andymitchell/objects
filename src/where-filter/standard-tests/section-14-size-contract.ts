@@ -10,7 +10,7 @@ import type { SectionCtx } from "./harness.ts";
  * and `$size` composes with `$not`, `$elemMatch`, and spread paths.
  */
 export function registerSizeContract(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected } = ctx;
 
     describe('14. $size contract', () => {
 

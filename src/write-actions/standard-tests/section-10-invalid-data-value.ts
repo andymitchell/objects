@@ -13,7 +13,7 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
  * Safe for the validate-where-sync consumer: every `where` here is legitimate; only the *data* is invalid.
  */
 export function registerInvalidDataValue(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     /** Assert the batch was rejected with `invalid_data_value` (reason + optional data_path), unrecoverably, and left state as `checkFinal` expects. */
     const expectRejectedUnchanged = <T extends Record<string, any>>(

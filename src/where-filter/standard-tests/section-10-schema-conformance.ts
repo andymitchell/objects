@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §10. Schema conformance — value-driven JS matcher vs schema-driven SQL emitter. */
 export function registerSchemaConformance(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('10. Schema conformance (value-driven JS vs schema-driven SQL)', () => {
 

@@ -76,6 +76,11 @@ export type {
 export { standardTests } from './standardTests.ts';
 export type { StandardTestConfig, MatchJavascriptObjectInTesting } from './standardTests.ts';
 
+// The battery ships every property expressible against the seam alone. A `FuzzPropertyRegistrar` is the seam for
+// a property needing an independent implementation of the query language to check the reference against — kept
+// injectable so that implementation stays in the caller's test run and never reaches a consumer's bundle.
+export type { FuzzPropertyRegistrar, SectionCtx } from './standardTests.ts';
+
 // A partial implementation answers `undefined` for a filter it cannot express, which the battery records as
 // an acknowledged seam rather than a failure. Collect those acknowledgements and freeze them against a
 // capability manifest, and an implementation's known gaps become a pinned contract: a new gap fails the

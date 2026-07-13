@@ -4,7 +4,7 @@ import type { WhereFilterDefinition } from "../types.ts";
 
 /** §5. Edge cases. */
 export function registerEdgeCases(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     // A field explicitly set to `undefined` is a deliberately-malformed filter value the compile-time type now
     // rejects (see types.test.ts); this states it verbatim to keep the runtime "never matches" behaviour tested.

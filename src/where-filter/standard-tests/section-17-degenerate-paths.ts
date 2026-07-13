@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * only via the dot-prop escape (`a\.b`), never the raw `a.b` (which resolves as nested `a`→`b`).
  */
 export function registerDegeneratePaths(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('17. Degenerate & hostile paths', () => {
 

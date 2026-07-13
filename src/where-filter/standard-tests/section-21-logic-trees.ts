@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * mis-evaluate; and `$nor`'s three-valued behaviour over absent fields.
  */
 export function registerLogicTrees(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('21. Logic-tree torture', () => {
 

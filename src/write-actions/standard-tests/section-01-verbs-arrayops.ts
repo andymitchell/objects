@@ -8,7 +8,7 @@ import { assertWriteArrayScope } from "../helpers.ts";
 
 /** §1.5–§1.9: add_to_set / push / pull / inc / cross-cutting mutations. */
 export function registerVerbsArrayOps(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     // ─────────────────────────────────────────────────────────
     // 1.5 AddToSet

@@ -11,7 +11,7 @@ import { getWriteSuccesses, getWriteErrors } from "../helpers.ts";
  * be rescued by a later batch action that brings the row to convergence. Gated on `duplicateCreateRecovery`.
  */
 export function registerDuplicateCreateEdges(ctx: SectionCtx): void {
-    const { expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, expect, createAdapter, implName, itIfSupported } = ctx;
     const itRecovery = itIfSupported('duplicateCreateRecovery');
 
     describe('16. Duplicate-create recovery edges', () => {

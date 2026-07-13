@@ -21,7 +21,7 @@ import { assertWriteArrayScope, getWriteErrors, getWriteFailures, getWriteSucces
  * no-change for update/array_scope, no-op short-circuit for push/inc/add_to_set, falsy-PK-as-missing).
  */
 export function registerDeepVerbSemantics(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
 
     // Engine-report observability pins (12.12): a value-diff-reconstructing adapter cannot observe a no-op
     // dirty mark, so those pins register as a visible skip there.

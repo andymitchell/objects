@@ -96,9 +96,12 @@ function minimizeDisagreement(row: FuzzRow, filter: unknown): unknown {
  * Disagreements are grouped by filter SHAPE rather than counted individually — a thousand filters that differ
  * only in their operands are one thing to understand, not a thousand.
  *
- * @param ctx - The section context. Runs only when `fuzz.secondaryOracle` is `'mingo'`, which the JS reference
- *   consumer alone sets: the property compares the reference against mingo, so running it per engine would
- *   repeat identical work.
+ * Pass this as `fuzz.secondaryOracle` to register the property (see `FuzzPropertyRegistrar`). Only the JS
+ * reference consumer does so: the property compares the reference against mingo, so running it per engine would
+ * repeat identical work. It is injected rather than wired into the battery because `mingo` is a test-only
+ * dependency — reaching it from a published barrel would ship a MongoDB query engine to every consumer.
+ *
+ * @param ctx - The section context: registers the property via `ctx.test`.
  * @param opts - The seed shared with the rest of §24 so a failure replays. Iterations are NOT shared — see
  *   {@link ORACLE_ITERATIONS}.
  */

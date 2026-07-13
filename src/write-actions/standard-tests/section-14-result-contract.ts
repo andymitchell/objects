@@ -11,7 +11,7 @@ import { assertWriteArrayScope } from "../helpers.ts";
  * fully-successful batch yields exactly one outcome per input action.
  */
 export function registerResultContract(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('14. Result & outcome contract', () => {
 

@@ -12,7 +12,7 @@ import type { SectionCtx } from "./harness.ts";
  * correctly-typed rows of the same field still do.
  */
 export function registerMultiScalarEnums(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('20. Multi-scalar unions & enums', () => {
 

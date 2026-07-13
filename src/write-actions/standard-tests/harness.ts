@@ -1,3 +1,4 @@
+import type { describe, test, expect } from "vitest";
 import { z } from "zod";
 import type { WriteAction, WriteResult } from "../types.ts";
 import type { WriteChanges } from "../writeToItemsArray/types.ts";
@@ -68,6 +69,12 @@ export type WriteTestCapabilities = {
 export type StandardTestConfig = {
     test: typeof test,
     expect: typeof expect,
+    /**
+     * The runner's `describe`. Optional: it defaults to the global one, so a runner with globals enabled
+     * (Vitest: `globals: true`) needs no override. Supply it explicitly to run under a runner without globals —
+     * otherwise the battery has no way to group its sections and throws rather than registering a partial tree.
+     */
+    describe?: typeof describe,
     createAdapter: AdapterFactory,
     implementationName?: string,
     capabilities?: WriteTestCapabilities,
@@ -106,10 +113,18 @@ export function resolveCapability(caps: WriteTestCapabilities | undefined, key: 
 }
 
 /**
+ * A callable that registers exactly one test: `test` itself, or one of its modifiers (`test.skip`, `test.fails`).
+ *
+ * A modifier is narrower than the full `test` API — it registers a test but does not chain further — so any gate
+ * that may hand back either one is typed as the modifier shape, which both satisfy.
+ */
+export type TestRegistrar = StandardTestConfig['test']['skip'];
+
+/**
  * Build the gate used by sections: `itIfSupported('assignMethod')('name', fn)` registers the test
  * normally when the capability is supported, else as a visible `test.skip`.
  */
-export function makeItIfSupported(test: StandardTestConfig['test'], caps: WriteTestCapabilities | undefined) {
+export function makeItIfSupported(test: StandardTestConfig['test'], caps: WriteTestCapabilities | undefined): (key: keyof WriteTestCapabilities) => TestRegistrar {
     return (key: keyof WriteTestCapabilities) => (resolveCapability(caps, key) ? test : test.skip);
 }
 
@@ -120,14 +135,12 @@ export function makeItIfSupported(test: StandardTestConfig['test'], caps: WriteT
  * WHILE it fails as documented, RED the day the engine is fixed (→ remove the marker). Without it — the
  * default, and the right answer for any implementation other than the reference — the test registers as a
  * visible `test.skip`, so an implementation that already meets the ideal contract is never punished for it.
- * Falls back to plain `test` (visibly red) on runners without `.fails`.
+ * Falls back to plain `test` (visibly red) on a runner whose `test` has no `.fails` modifier.
  */
-export function makeExpectedFailToday(test: StandardTestConfig['test'], pinReferenceDefects?: boolean): StandardTestConfig['test'] {
+export function makeExpectedFailToday(test: StandardTestConfig['test'], pinReferenceDefects?: boolean): TestRegistrar {
     if (!pinReferenceDefects) return test.skip;
-    // `.fails` is a runtime vitest modifier absent from the `It` global type; assert the known type
-    // widened with an optional `fails`, then runtime-check it so non-vitest runners degrade to plain `test`.
-    const withFails = test as StandardTestConfig['test'] & { fails?: StandardTestConfig['test'] };
-    return typeof withFails.fails === 'function' ? withFails.fails : test;
+    // Runtime-checked so a runner without `.fails` degrades to a visibly-red plain `test` rather than crashing.
+    return typeof test.fails === 'function' ? test.fails : test;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -141,16 +154,18 @@ export function makeExpectedFailToday(test: StandardTestConfig['test'], pinRefer
  */
 export type SectionCtx = {
     test: StandardTestConfig['test'];
+    /** Groups a section. Threaded rather than taken from the global scope, so a runner without globals still works. */
+    describe: typeof describe;
     expect: StandardTestConfig['expect'];
     createAdapter: AdapterFactory;
     implName: string;
     /** `itIfSupported('capabilityKey')` → `test` when supported, else visible `test.skip`. */
-    itIfSupported: (key: keyof WriteTestCapabilities) => StandardTestConfig['test'];
+    itIfSupported: (key: keyof WriteTestCapabilities) => TestRegistrar;
     /**
      * Wrapper for tests asserting an ideal contract the reference engine does not meet: a `test.fails` ratchet
      * when {@link StandardTestConfig.pinReferenceDefects} is set, otherwise a visible skip.
      */
-    expectedFailToday: StandardTestConfig['test'];
+    expectedFailToday: TestRegistrar;
     capabilities: WriteTestCapabilities | undefined;
     fuzz: StandardTestConfig['fuzz'];
 };

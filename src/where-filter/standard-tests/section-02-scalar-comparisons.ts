@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §2 (part A) Scalar value comparisons — deep object equality, range ops, $regex, $ne, $eq. */
 export function registerScalarComparisonsA(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
         describe('Deep object equality', () => {
 

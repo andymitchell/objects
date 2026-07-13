@@ -18,6 +18,7 @@ import {
  * failure throws with the exact `(seed, propertyIndex, iteration)` triple so it replays deterministically.
  */
 export function runFuzzSection(ctx: SectionCtx): void {
+    const { describe } = ctx;
     const seed = ctx.fuzz?.seed ?? DEFAULT_FUZZ_SEED;
     const iterations = ctx.fuzz?.iterations ?? DEFAULT_FUZZ_ITERATIONS;
     const invalidWhereCorpus = resolveCapability(ctx.capabilities, 'invalidWhereCorpus');

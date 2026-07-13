@@ -1,3 +1,4 @@
+import type { describe, test, expect } from "vitest";
 import type { ZodSchema } from "zod";
 import type { MatchJavascriptObject, WhereFilterDefinition } from "../types.ts";
 import type { AcknowledgementCollector } from "./outcomes.ts";
@@ -10,9 +11,33 @@ import type { AcknowledgementCollector } from "./outcomes.ts";
  */
 export type MatchJavascriptObjectInTesting = <T extends Record<string, any> = Record<string, any>>(obj: T, filter: WhereFilterDefinition<T>, schema: ZodSchema<T>) => Promise<ReturnType<MatchJavascriptObject> | undefined>;
 
+/**
+ * Registers extra fuzz properties into a battery run, using the same seeded generators as the built-in ones.
+ *
+ * The battery ships every property that can be expressed against the seam alone. A registrar is the seam for a
+ * property that needs something the battery deliberately does not depend on — most importantly an *independent*
+ * implementation to check the reference matcher itself against, which would otherwise drag that implementation
+ * into every consumer's bundle.
+ *
+ * @param ctx - The section context: register tests with `ctx.test`, assert with `ctx.expect`, and reach the
+ *              implementation under test via `ctx.matchJavascriptObject`.
+ * @param opts - `seed` is the run's seed; derive from it so a failure reproduces.
+ *
+ * @example
+ * // Check the reference against a real MongoDB implementation, without publishing that dependency:
+ * standardTests({ test, expect, matchJavascriptObject, fuzz: { secondaryOracle: registerSecondaryOracleProperty } });
+ */
+export type FuzzPropertyRegistrar = (ctx: SectionCtx, opts: { seed: number }) => void;
+
 export type StandardTestConfig = {
     test: typeof test,
     expect: typeof expect,
+    /**
+     * The runner's `describe`. Optional: it defaults to the global one, so a runner with globals enabled
+     * (Vitest: `globals: true`) needs no override. Supply it explicitly to run under a runner without globals —
+     * otherwise the battery has no way to group its sections and throws rather than registering a partial tree.
+     */
+    describe?: typeof describe,
     matchJavascriptObject: MatchJavascriptObjectInTesting,
     implementationName?: string,
     /**
@@ -27,11 +52,12 @@ export type StandardTestConfig = {
      * reproducible; `iterations` scales coverage against the harness's wall-clock budget (SQL back-ends run
      * fewer than the pure-JS oracle).
      *
-     * `secondaryOracle` adds an independent MongoDB implementation to the run, checking the reference matcher
-     * against the query language it claims to implement rather than against itself. Only the pure-JS reference
-     * consumer sets it: the check is engine-independent, so running it per back-end would repeat identical work.
+     * `secondaryOracle` injects an extra fuzz property (see {@link FuzzPropertyRegistrar}) — typically one that
+     * checks the reference matcher against an independent implementation of the query language, rather than
+     * against itself. It is injected rather than built in so that the implementation stays a concern of the
+     * caller's test run and never reaches a consumer's bundle.
      */
-    fuzz?: { iterations?: number, seed?: number, secondaryOracle?: 'mingo' },
+    fuzz?: { iterations?: number, seed?: number, secondaryOracle?: FuzzPropertyRegistrar },
     /**
      * Optional sink for acknowledged seams (a filter the engine skipped as unsupported, or answered against
      * spec as a documented divergence). When supplied, the assertion helpers record every acknowledgement here
@@ -50,7 +76,10 @@ export type StandardTestConfig = {
  * config and passes it to each `registerSectionNN(ctx)`. Sections destructure only the fields they use.
  */
 export type SectionCtx = {
+    /** Registers a test AND records its full `describe > … > test` name for acknowledgement keys. */
     test: StandardTestConfig['test'];
+    /** Groups a section AND pushes its name onto the battery's own name stack. */
+    describe: typeof describe;
     expect: StandardTestConfig['expect'];
     matchJavascriptObject: MatchJavascriptObjectInTesting;
     implementationName: string;
@@ -75,13 +104,122 @@ export type SectionCtx = {
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * Build the three assertion helpers a section uses, closed over the caller's `expect`, its
- * `errorsAsValues` contract, and `implementationName` (used in skip/divergence diagnostics).
+ * A modifier that registers a test the battery cannot name, so a seam reported from it could not be attributed.
+ *
+ * `.each`/`.for` derive a distinct name PER CASE from a template the runner expands itself; reproducing that
+ * expansion here would be a guess, and a wrong guess files every case under one key — the very collision an
+ * acknowledgement key exists to prevent. `.concurrent` overlaps bodies, so the name in flight is ambiguous.
+ * Registering through any of them throws rather than silently mis-keying a manifest: build the cases with a loop
+ * of plain `ctx.test(name, fn)` calls instead.
  */
-export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues: boolean, implementationName: string, acknowledgements?: AcknowledgementCollector) {
+const UNNAMEABLE_TEST_MODIFIERS = new Set(['each', 'for', 'concurrent']);
 
-    /** The full `describe > … > test` name of the assertion in flight, so recorded seams stay distinct. */
-    const currentTestName = (): string => (expect as { getState?: () => { currentTestName?: string } }).getState?.()?.currentTestName ?? '';
+/** Modifiers that never execute a body, so they can never report a seam and need no name. */
+const NON_RUNNING_TEST_MODIFIERS = new Set(['skip', 'todo']);
+
+/**
+ * Wrap the runner's `describe`/`test` so the battery owns the name of the test in flight.
+ *
+ * Acknowledgement keys are `kind ::: reason ::: testName`, so a seam recorded under a blank or wrong name
+ * silently collides with every other seam recorded that way. Deriving the name from the runner's ambient state
+ * makes it hostage to whatever else is loaded in the consumer's process — a second copy of the runner, for
+ * instance, answers about a different test. These wrappers read nothing ambient: `describe` maintains a private
+ * stack, `test` captures the full path at REGISTRATION time, and the name is simply recalled while the body runs.
+ *
+ * Names are relative to the battery, not the consumer's suite: an outer `describe` in the caller's own test file
+ * is deliberately absent, so a manifest does not depend on what the caller names their suite.
+ *
+ * @param rawDescribe - The runner's `describe`.
+ * @param rawTest - The runner's `test`.
+ * @returns The wrapped pair to register with, plus `currentTestName()` for the assertion helpers.
+ *
+ * @remarks
+ * **The battery runs its own suites sequentially.** One test is in flight at a time, so a single "name in flight"
+ * is unambiguous. Suites register through `describe.sequential` where the runner offers it, which holds even under
+ * a consumer's `sequence.concurrent: true` — the caller does not have to configure anything. An overlap check
+ * backs this up: if two bodies ever run at once the battery says so, rather than filing seams against whichever
+ * test happened to write the name last.
+ *
+ * Supported registration shapes are `ctx.test(name, fn)` and `ctx.test(name, options, fn)`, plus the modifiers
+ * `.only` / `.fails` / `.sequential` (named the same way) and `.skip` / `.todo` (never run, so never named).
+ * {@link UNNAMEABLE_TEST_MODIFIERS} are refused outright.
+ */
+export function makeSuiteRecorder(rawDescribe: typeof describe, rawTest: typeof test) {
+    let stack: string[] = [];
+    let currentName = '';
+    let inFlight = 0;
+
+    /** Register through `registrar`, naming the test with its full path. Handles `(name, fn)` and `(name, options, fn)`. */
+    const registerNamed = (registrar: object, thisArg: unknown, args: unknown[]): unknown => {
+        const apply = (a: unknown[]) => Reflect.apply(registrar as (...x: unknown[]) => unknown, thisArg, a);
+        const name = args[0];
+        const bodyIndex = args.findIndex(a => typeof a === 'function');
+        // Not a shape we can name (no string name, or no body). Hand it to the runner untouched rather than guess.
+        if (typeof name !== 'string' || bodyIndex < 1) return apply(args);
+
+        const body = args[bodyIndex] as (...a: unknown[]) => unknown;
+        const fullName = [...stack, name].join(' > ');
+        const named = [...args];
+        named[bodyIndex] = async function (this: unknown, ...inner: unknown[]) {
+            if (inFlight > 0) {
+                throw new Error(`standardTests: two tests ran at once, so an acknowledged seam could not be attributed to either ('${fullName}' overlapped another). The battery registers its suites as sequential; this means something forced them concurrent.`);
+            }
+            inFlight++;
+            currentName = fullName;
+            try { return await body.apply(this, inner); } finally { currentName = ''; inFlight--; }
+        };
+        return apply(named);
+    };
+
+    const wrappedDescribe = new Proxy(rawDescribe, {
+        apply(target, thisArg, args: unknown[]) {
+            const [name, fn] = args as [string, (...a: unknown[]) => unknown];
+            if (typeof name !== 'string' || typeof fn !== 'function') return Reflect.apply(target, thisArg, args);
+            // The path is captured where `describe` is CALLED, not where its body runs: a runner may defer the
+            // body until after the enclosing `describe` has returned, so the body's own execution order says
+            // nothing about where the suite sits in the tree. The body then runs against the path it was born with.
+            const path = [...stack, name];
+            const factory = function (this: unknown, ...inner: unknown[]) {
+                const outer = stack;
+                stack = path;
+                try { return fn.apply(this, inner); } finally { stack = outer; }
+            };
+            // Tests inherit `sequential` from their suite, so this pins one-test-at-a-time for the whole battery
+            // even when the consumer has made tests concurrent by default.
+            const sequential = Reflect.get(target, 'sequential');
+            const register = typeof sequential === 'function' ? sequential : target;
+            return Reflect.apply(register as (...x: unknown[]) => unknown, thisArg, [name, factory]);
+        },
+    });
+
+    const wrappedTest = new Proxy(rawTest, {
+        apply(target, thisArg, args: unknown[]) {
+            return registerNamed(target, thisArg, args);
+        },
+        get(target, prop) {
+            // Refused whether or not the runner implements them — the battery's contract, not the runner's.
+            if (typeof prop === 'string' && UNNAMEABLE_TEST_MODIFIERS.has(prop)) {
+                return () => {
+                    throw new Error(`standardTests: \`test.${prop}\` cannot be used inside the battery — a seam reported from it could not be attributed to a specific test, and would silently merge with others in the capability manifest. Register each case with its own \`ctx.test(name, fn)\` call.`);
+                };
+            }
+            const value = Reflect.get(target, prop);
+            if (typeof prop !== 'string' || typeof value !== 'function') return value;
+            if (NON_RUNNING_TEST_MODIFIERS.has(prop)) return value;
+            // A running modifier shaped like `test` itself (`.only`, `.fails`, `.sequential`): name it the same way.
+            return new Proxy(value, { apply: (t, thisA, a: unknown[]) => registerNamed(t, thisA, a) });
+        },
+    });
+
+    return { describe: wrappedDescribe, test: wrappedTest, currentTestName: () => currentName };
+}
+
+/**
+ * Build the three assertion helpers a section uses, closed over the caller's `expect`, its
+ * `errorsAsValues` contract, `implementationName` (used in skip/divergence diagnostics), and the
+ * `currentTestName` reader from {@link makeSuiteRecorder}.
+ */
+export function makeHelpers(expect: StandardTestConfig['expect'], errorsAsValues: boolean, implementationName: string, currentTestName: () => string, acknowledgements?: AcknowledgementCollector) {
 
     /** Replaces scattered `if (result === undefined) return` with explicit acknowledgement. */
     function expectOrAcknowledgeUnsupported(

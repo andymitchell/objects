@@ -7,7 +7,6 @@ import {
     genRow, genFilter, genComboPair, genElemMatchCombo, genLeafScopeOps,
     leafScopeFilterPayload, slowLeafScopeEval, REJECTING_FILTERS, invariant, repro,
 } from "./fuzz-internals.ts";
-import { registerSecondaryOracleProperty } from "./mingo/index.ts";
 
 /**
  * §24: seeded differential + metamorphic fuzz.
@@ -28,6 +27,7 @@ import { registerSecondaryOracleProperty } from "./mingo/index.ts";
  * engines — a WF-P1 red means a NEW divergence the profile missed: tighten the generator, never the assertion.
  */
 export function runFuzzSection(ctx: SectionCtx): void {
+    const { describe } = ctx;
     const seed = ctx.fuzz?.seed ?? DEFAULT_FUZZ_SEED;
     const iterations = ctx.fuzz?.iterations ?? DEFAULT_FUZZ_ITERATIONS;
 
@@ -72,9 +72,10 @@ export function runFuzzSection(ctx: SectionCtx): void {
             return 'ok';
         });
 
-        // WF-P14 — the reference itself against MongoDB. Every property above compares an engine to the
-        // reference, so none of them can see a mistake the reference makes about Mongo; this one can.
-        if (ctx.fuzz?.secondaryOracle === 'mingo') registerSecondaryOracleProperty(ctx, { seed });
+        // WF-P14 — the reference itself against an independent implementation. Every property above compares an
+        // engine to the reference, so none of them can see a mistake the reference makes; this one can. Injected,
+        // because the independent implementation must not reach a consumer's bundle.
+        if (ctx.fuzz?.secondaryOracle) ctx.fuzz.secondaryOracle(ctx, { seed });
 
         // WF-P2 — De Morgan: ¬(A∧B) ≡ (¬A)∨(¬B)
         property(2, 'De Morgan', async (rng, iter) => {

@@ -36,8 +36,17 @@ import { runFuzzSection } from "./fuzz.ts";
  * standardTests({ test, expect, createAdapter, implementationName: 'my-store' });
  */
 export function standardTests(config: StandardTestConfig): void {
+    // Resolved from the runner's globals rather than imported: importing the runner here would vendor a second
+    // copy of it into the published bundle, which overwrites the consumer's expect-global state.
+    const globalDescribe: unknown = Reflect.get(globalThis, 'describe');
+    const describe = config.describe ?? (typeof globalDescribe === 'function' ? globalDescribe as StandardTestConfig['describe'] : undefined);
+    if (typeof describe !== 'function') {
+        throw new Error("standardTests: no `describe` available. Enable your test runner's globals (Vitest: `globals: true`), or pass `describe` explicitly in the config.");
+    }
+
     const ctx: SectionCtx = {
         test: config.test,
+        describe,
         expect: config.expect,
         createAdapter: config.createAdapter,
         implName: config.implementationName ?? 'unknown',

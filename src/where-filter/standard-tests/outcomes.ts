@@ -120,7 +120,16 @@ export type AcknowledgementEvent = {
 export class AcknowledgementCollector {
     private readonly events: AcknowledgementEvent[] = [];
 
+    /**
+     * @throws If `testName` is blank. The name is a third of the key, so a blank one silently merges seams that
+     *   are meant to be distinct and freezes a manifest that cannot tell them apart. The battery owns the name
+     *   (it captures it at registration rather than reading the runner's ambient state), so a blank one means the
+     *   helper was called outside a test the battery registered — a wiring fault, never a legitimate seam.
+     */
     record(event: AcknowledgementEvent): void {
+        if (event.testName.trim() === '') {
+            throw new Error(`AcknowledgementCollector: refusing to record a seam with a blank test name (kind='${event.kind}', reason='${event.reason}'). A seam must be attributable to one test, or it merges with every other unnamed seam in the manifest. The helper was called from somewhere the battery cannot name: either outside a test body, or from a test registered by a form it does not name — use \`ctx.test(name, fn)\` rather than a chainable such as \`test.each\`.`);
+        }
         this.events.push(event);
     }
 

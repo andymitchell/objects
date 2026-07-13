@@ -20,7 +20,7 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
  *    present-but-empty array — it is schema-valid data, not an error and not a crash.
  */
 export function registerInvalidScope(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
     const itCorpus = itIfSupported('invalidWhereCorpus');
 
     // A deliberately-bad scope is not type-valid; cast at the single sanctioned boundary.

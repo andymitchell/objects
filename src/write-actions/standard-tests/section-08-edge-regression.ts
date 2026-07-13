@@ -4,7 +4,7 @@ import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./h
 
 /** §8: cross-verb regression scenarios — PK re-use, same-batch create+update, large batches. */
 export function registerEdgeRegression(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('8. Edge Cases & Regression', () => {
 

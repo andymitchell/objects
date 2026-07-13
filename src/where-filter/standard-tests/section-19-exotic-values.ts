@@ -11,7 +11,7 @@ import type { SectionCtx } from "./harness.ts";
  * Non-JSON operands (Date/bigint/Symbol) are malformed and rejected.
  */
 export function registerExoticValues(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence } = ctx;
 
     // Explicit code points so the source stays byte-unambiguous (all ASCII in this file).
     const CAFE_NFC = 'caf\u00e9';         // NFC: e-acute as one code point U+00E9

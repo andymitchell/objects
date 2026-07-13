@@ -4,7 +4,7 @@ import { getWriteErrors } from "../helpers.ts";
 
 /** §6: attempt_recover_duplicate_create modes — never / if-convergent / always-update. */
 export function registerDuplicateCreate(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
 
     describe('6. Duplicate Create Recovery', () => {
 

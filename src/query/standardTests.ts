@@ -1,4 +1,4 @@
-import { describe as vitestDescribe } from 'vitest';
+import type { describe, expect, it } from 'vitest';
 
 import type { DDL } from '../ddl/types.ts';
 import type { SortAndSlice, SortDefinition } from './types.ts';
@@ -32,8 +32,8 @@ export type Execute<T extends Record<string, any>> = (
 ) => Promise<T[] | undefined>;
 
 type StandardTestConfig<T extends Record<string, any> = StandardTestItem> = {
-    it: typeof import('vitest').it;
-    expect: typeof import('vitest').expect;
+    it: typeof it;
+    expect: typeof expect;
     execute: Execute<T>;
     implementationName?: string;
     /**
@@ -47,12 +47,15 @@ type StandardTestConfig<T extends Record<string, any> = StandardTestItem> = {
      */
     ddl?: DDL<T> | undefined;
     /**
-     * Optional `describe` override. Defaults to vitest's `describe`. Useful for
-     * meta-tests that want to inspect what `standardTests` registers without
-     * polluting the real test tree (pass a stub that invokes the callback but
-     * doesn't register a group).
+     * Optional `describe` override. Defaults to the runner's global `describe`, so a runner with
+     * globals enabled (Vitest: `globals: true`) needs no override; without one available, the call
+     * throws rather than registering a partial tree.
+     *
+     * Supply it to run under a runner without globals, or for a meta-test that wants to inspect what
+     * `standardTests` registers without polluting the real test tree (pass a stub that invokes the
+     * callback but doesn't register a group).
      */
-    describe?: typeof import('vitest').describe;
+    describe?: typeof describe;
 };
 
 /**
@@ -71,7 +74,13 @@ type StandardTestConfig<T extends Record<string, any> = StandardTestItem> = {
  */
 export function standardTests<T extends Record<string, any> = StandardTestItem>(config: StandardTestConfig<T>) {
     const { it, expect, execute } = config;
-    const describe = config.describe ?? vitestDescribe;
+    // Resolved from the runner's globals rather than imported: importing vitest here would vendor a second
+    // copy of the runner into the published bundle, which overwrites the consumer's expect-global state.
+    const globalDescribe: unknown = Reflect.get(globalThis, 'describe');
+    const describe = config.describe ?? (typeof globalDescribe === 'function' ? globalDescribe as StandardTestConfig<T>['describe'] : undefined);
+    if (typeof describe !== 'function') {
+        throw new Error("standardTests: no `describe` available. Enable your test runner's globals (Vitest: `globals: true`), or pass `describe` explicitly in the config.");
+    }
     const implementationName = config.implementationName ?? 'unknown';
 
     const sortableKeys = (config.ddl ?? (STANDARD_TEST_DDL as unknown as DDL<T>)).lists['.'].sortable_keys;

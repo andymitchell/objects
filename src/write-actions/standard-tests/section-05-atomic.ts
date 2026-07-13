@@ -4,7 +4,7 @@ import { assertWriteArrayScope, getWriteSuccesses } from "../helpers.ts";
 
 /** §5: atomic vs non-atomic commit semantics, including array_scope rollback. */
 export function registerAtomic(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('5. Atomic vs Non-Atomic', () => {
 

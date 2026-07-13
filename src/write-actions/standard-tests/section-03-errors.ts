@@ -4,7 +4,7 @@ import { getWriteFailures, getWriteSuccesses, getWriteErrors } from "../helpers.
 
 /** §3: schema validation, primary-key integrity, and the getWrite* helpers. */
 export function registerErrors(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('3. Error Handling', () => {
 

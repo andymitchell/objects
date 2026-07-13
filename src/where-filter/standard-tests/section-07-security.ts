@@ -4,7 +4,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §7. Security — disallowed / prototype-pollution property paths. */
 export function registerSecurity(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('7. Security', () => {
 

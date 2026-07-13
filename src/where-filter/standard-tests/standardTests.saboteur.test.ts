@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import matchJavascriptObjectReference from "../matchJavascriptObject.ts";
 import type { WhereFilterDefinition } from "../types.ts";
 import type { MatchJavascriptObjectInTesting, SectionCtx } from "./harness.ts";
-import { makeHelpers } from "./harness.ts";
+import { makeHelpers, makeSuiteRecorder } from "./harness.ts";
 import { runFuzzSection } from "./fuzz.ts";
 import { DEFAULT_FUZZ_SEED, NESTED_ARRAY_PATH } from "./fuzz-internals.ts";
 
@@ -185,8 +185,18 @@ async function collectFuzzResults(matcher: MatchJavascriptObjectInTesting): Prom
     const fakeTest = fake as any;
     const realExpect = expect as any;
     /* eslint-enable @typescript-eslint/no-explicit-any */
+    // A `describe` that invokes its body inline, so the section's registrations land in `collected` instead of
+    // reaching the real runner. Injected through the ctx — the battery takes its `describe` from there, so this
+    // probe needs no global to be mutated.
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- a synchronous invoker cannot structurally match vitest's SuiteAPI */
+    const fakeDescribe = ((_name: string, fn: () => void) => { fn(); }) as any;
+
+    // Run the fakes through the REAL recorder, so this probe exercises the same name-stack the battery uses.
+    const { describe, test, currentTestName } = makeSuiteRecorder(fakeDescribe, fakeTest);
+
     const ctx: SectionCtx = {
-        test: fakeTest,
+        test,
+        describe,
         expect: realExpect,
         matchJavascriptObject: matcher,
         implementationName: 'saboteur-probe',
@@ -198,17 +208,10 @@ async function collectFuzzResults(matcher: MatchJavascriptObjectInTesting): Prom
         // seed); the honest matcher still passes every property, and more iterations only ADD catches, so every
         // declared-trip subset holds.
         fuzz: { iterations: 120, seed: DEFAULT_FUZZ_SEED },
-        ...makeHelpers(realExpect, false, 'saboteur-probe'),
+        ...makeHelpers(realExpect, false, 'saboteur-probe', currentTestName),
     };
 
-    const g: { describe: unknown } = globalThis;
-    const original = g.describe;
-    g.describe = (_name: string, fn: () => void) => { fn(); };
-    try {
-        runFuzzSection(ctx);
-    } finally {
-        g.describe = original;
-    }
+    runFuzzSection(ctx);
 
     const results: Collected[] = [];
     for (const { name, fn } of collected) {

@@ -9,7 +9,7 @@ import type { SectionCtx } from "./harness.ts";
  * error — so these pin the guard and its asymmetry. `$all:[]` is the documented match-everything divergence.
  */
 export function registerEmptyLists(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('13. Empty-list operands', () => {
 

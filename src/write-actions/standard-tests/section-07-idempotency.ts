@@ -15,7 +15,7 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
  * expected-fail-today; they turn green the day the engine implements in-batch conflict detection.
  */
 export function registerIdempotency(ctx: SectionCtx): void {
-    const { expect, createAdapter, implName, itIfSupported, expectedFailToday } = ctx;
+    const { describe, expect, createAdapter, implName, itIfSupported, expectedFailToday } = ctx;
 
     // T-7.1/T-7.2 drive a NON-ATOMIC multi-action batch. An impl that cannot express one acknowledges-unsupported,
     // which would VACUOUSLY pass the body and invert the test.fails ratchet — so they register as a visible skip instead.

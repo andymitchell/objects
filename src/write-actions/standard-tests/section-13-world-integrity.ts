@@ -10,7 +10,7 @@ import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./h
  * row is caught, not just the targeted row.
  */
 export function registerWorldIntegrity(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
 
     // T-13.11 drives a NON-ATOMIC multi-action batch, so it only runs for an impl that can express one.
     const itNonAtomicMulti = itIfSupported('nonAtomicMultiAction');

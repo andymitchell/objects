@@ -62,7 +62,8 @@
     "build_release": "npm run build_prepare && np",
     "build": "tsup",
     "pkglint": "./build/publint_pipeable.sh",
-    "build_prepare": "npm run build && npm run pkglint",
+    "assert-no-devdep-leak": "node build/assert-no-devdep-leak.mjs",
+    "build_prepare": "npm run build && npm run assert-no-devdep-leak && rm -f dist/metafile-*.json && npm run pkglint",
     "prepublishOnly": "npm run build_prepare",
     "test": "vitest",
     "test:watch": "vitest --watch",
@@ -73,13 +74,10 @@
   "license": "MIT",
   "sideEffects": false,
   "devDependencies": {
-    "@andymitchell/clone-to-json-safe": "^0.1.1",
     "@andyrmitchell/pg-testable": "^0.5.2",
-    "@andyrmitchell/utils": "^0.30.0",
     "@electric-sql/pglite": "^0.1.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/deep-eql": "^4.0.2",
-    "@types/jest": "^29.5.12",
     "@types/lodash-es": "^4.17.12",
     "better-sqlite3": "^12.6.2",
     "mingo": "^7.2.2",
@@ -93,13 +91,21 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
+    "@andymitchell/clone-to-json-safe": "^0.1.1",
     "@andyrmitchell/composite-timestamps": "^0.5.1",
+    "@andyrmitchell/utils": "^0.30.0",
     "deep-eql": "^5.0.2",
     "dot-prop": "^9.0.0",
     "immer": "^10.1.1",
     "lodash-es": "^4.17.21"
   },
   "peerDependencies": {
+    "vitest": "^3 || ^4",
     "zod": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   }
 }

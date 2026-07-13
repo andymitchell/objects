@@ -4,7 +4,7 @@ import { getWriteFailures, getWriteSuccesses } from "../helpers.ts";
 
 /** §4: first failure halts the batch; later actions are blocked; prior successes stand (non-atomic). */
 export function registerHaltBlocking(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('4. Sequential Halt & Blocking', () => {
 

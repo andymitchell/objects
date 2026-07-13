@@ -16,7 +16,7 @@ import type { SectionCtx } from "./harness.ts";
  * unreachable while leaving any un-rejected key just as exposed.
  */
 export function registerPathInjection(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     describe('12. Path integrity & injection', () => {
 

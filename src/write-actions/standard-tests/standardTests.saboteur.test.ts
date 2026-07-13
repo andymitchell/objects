@@ -148,8 +148,15 @@ async function collectFuzzResults(factory: AdapterFactory): Promise<Collected[]>
     const fakeTest = fake as any;
     const fakeExpect = expect as any;
     /* eslint-enable @typescript-eslint/no-explicit-any */
+    // A `describe` that invokes its body inline, so the property registrations land in `collected` instead of
+    // reaching the real runner. Injected through the ctx — the battery takes its `describe` from there, so this
+    // probe needs no global to be mutated.
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- a synchronous invoker cannot structurally match vitest's SuiteAPI */
+    const fakeDescribe = ((_name: string, fn: () => void) => { fn(); }) as any;
+
     const ctx: SectionCtx = {
         test: fakeTest,
+        describe: fakeDescribe,
         expect: fakeExpect,
         createAdapter: factory,
         implName: 'saboteur-probe',
@@ -159,16 +166,7 @@ async function collectFuzzResults(factory: AdapterFactory): Promise<Collected[]>
         fuzz: { iterations: 40, seed: DEFAULT_FUZZ_SEED },
     };
 
-    // Swap the ambient global `describe` (which the section files call) for a synchronous invoker, so the
-    // property registrations run inline into `collected` instead of registering with the real runner.
-    const g: { describe: unknown } = globalThis;
-    const original = g.describe;
-    g.describe = (_name: string, fn: () => void) => { fn(); };
-    try {
-        runFuzzSection(ctx);
-    } finally {
-        g.describe = original;
-    }
+    runFuzzSection(ctx);
 
     const results: Collected[] = [];
     for (const { name, fn } of collected) {

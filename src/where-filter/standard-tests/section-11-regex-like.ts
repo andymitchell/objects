@@ -10,7 +10,7 @@ import type { SectionCtx } from "./harness.ts";
  * `$options`) and the rejection surface for invalid flags/patterns.
  */
 export function registerRegexFidelity(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectMalformedFilterRejected, expectOrAcknowledgeDivergence } = ctx;
 
     describe('11. $regex engine fidelity', () => {
 

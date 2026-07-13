@@ -18,7 +18,7 @@ import { getWriteErrors } from "../helpers.ts";
  * scenario — a test cannot discriminate, so none is written.)
  */
 export function registerMultiMatchPartialFailure(ctx: SectionCtx): void {
-    const { expect, createAdapter, implName, expectedFailToday } = ctx;
+    const { describe, expect, createAdapter, implName, expectedFailToday } = ctx;
 
     // An impl guaranteeing per-action atomicity satisfies the ideal contract; run it as a plain test there,
     // keep the expected-fail ratchet for the reference engine.

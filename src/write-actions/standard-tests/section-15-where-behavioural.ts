@@ -11,7 +11,7 @@ import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./h
  * legitimate (nothing is invalid_filter) — safe for the validate-where-sync consumer.
  */
 export function registerWhereBehavioural(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('15. Where-filter behaviour (write targeting)', () => {
 

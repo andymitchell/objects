@@ -1,5 +1,5 @@
 import type { StandardTestConfig, SectionCtx } from "./harness.ts";
-import { makeHelpers } from "./harness.ts";
+import { makeHelpers, makeSuiteRecorder } from "./harness.ts";
 import { registerFilterForms } from "./section-01-filter-forms.ts";
 import { registerScalarComparisonsA } from "./section-02-scalar-comparisons.ts";
 import { registerScalarComparisonsB } from "./section-02b-scalar-comparisons.ts";
@@ -45,18 +45,29 @@ import { runFuzzSection } from "./fuzz.ts";
  * standardTests({ test, expect, matchJavascriptObject, implementationName: 'my-store' });
  */
 export function standardTests(testConfig: StandardTestConfig): void {
-    const { test, expect, matchJavascriptObject } = testConfig;
+    const { test: rawTest, expect, matchJavascriptObject } = testConfig;
     const implementationName = testConfig.implementationName ?? 'unknown';
     const errorsAsValues = testConfig.errorsAsValues ?? false;
 
+    // Resolved from the runner's globals rather than imported: importing the runner here would vendor a second
+    // copy of it into the published bundle, which overwrites the consumer's expect-global state.
+    const globalDescribe: unknown = Reflect.get(globalThis, 'describe');
+    const rawDescribe = testConfig.describe ?? (typeof globalDescribe === 'function' ? globalDescribe as StandardTestConfig['describe'] : undefined);
+    if (typeof rawDescribe !== 'function') {
+        throw new Error("standardTests: no `describe` available. Enable your test runner's globals (Vitest: `globals: true`), or pass `describe` explicitly in the config.");
+    }
+
+    const { describe, test, currentTestName } = makeSuiteRecorder(rawDescribe, rawTest);
+
     const ctx: SectionCtx = {
         test,
+        describe,
         expect,
         matchJavascriptObject,
         implementationName,
         errorsAsValues,
         fuzz: testConfig.fuzz,
-        ...makeHelpers(expect, errorsAsValues, implementationName, testConfig.acknowledgements),
+        ...makeHelpers(expect, errorsAsValues, implementationName, currentTestName, testConfig.acknowledgements),
     };
 
     registerFilterForms(ctx);
@@ -94,4 +105,4 @@ export function standardTests(testConfig: StandardTestConfig): void {
     runFuzzSection(ctx);
 }
 
-export type { StandardTestConfig, MatchJavascriptObjectInTesting } from "./harness.ts";
+export type { StandardTestConfig, MatchJavascriptObjectInTesting, FuzzPropertyRegistrar, SectionCtx } from "./harness.ts";

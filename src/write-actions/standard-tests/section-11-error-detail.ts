@@ -11,7 +11,7 @@ import { getWriteErrors, getWriteFailures, getWriteSuccesses } from "../helpers.
  * item body, successes carry only the PK). All `where` clauses are legitimate — safe for both consumers.
  */
 export function registerErrorDetail(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName } = ctx;
 
     describe('11. Error detail', () => {
 

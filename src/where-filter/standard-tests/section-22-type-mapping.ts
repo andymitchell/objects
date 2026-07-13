@@ -12,7 +12,7 @@ import type { SectionCtx } from "./harness.ts";
  * documented divergence (#5). `$type` composes with nested paths, spreading, and $elemMatch.
  */
 export function registerTypeMapping(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported, expectOrAcknowledgeDivergence } = ctx;
 
     describe('22. $type mapping', () => {
 

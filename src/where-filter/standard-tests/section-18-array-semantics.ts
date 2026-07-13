@@ -12,7 +12,7 @@ import type { SectionCtx } from "./harness.ts";
  * fields. Dot-prop spreading reaches arbitrarily deep leaves.
  */
 export function registerArraySemantics(ctx: SectionCtx): void {
-    const { test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
+    const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
     // Nested spreading-array fixtures (three and four array levels).
     const spread3 = (leaf: string) => ({ a: [{ b: [{ c: [{ leaf }] }] }] });

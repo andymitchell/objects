@@ -19,7 +19,7 @@ import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./h
  * implementation keyed by a `Map`, a null-prototype object, or own-property checks passes without noticing.
  */
 export function registerPrototypeNamedKeys(ctx: SectionCtx): void {
-    const { test, expect, createAdapter, implName, itIfSupported } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
 
     const itNonAtomicMulti = itIfSupported('nonAtomicMultiAction');
 

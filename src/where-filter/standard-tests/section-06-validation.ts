@@ -3,7 +3,7 @@ import type { SectionCtx } from "./harness.ts";
 
 /** §6. Validation and error handling. */
 export function registerValidation(ctx: SectionCtx): void {
-    const { test, expect, matchJavascriptObject, expectMalformedFilterRejected } = ctx;
+    const { describe, test, expect, matchJavascriptObject, expectMalformedFilterRejected } = ctx;
 
     describe('6. Validation and error handling', () => {
 

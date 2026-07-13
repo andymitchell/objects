@@ -4,6 +4,7 @@ import matchJavascriptObjectReal, { compileMatchJavascriptObject, type ObjOrDraf
 import { type WhereFilterDefinition } from "./types.js";
 import { standardTests, AcknowledgementCollector, assertNoCapabilityDrift } from "./standardTests.js";
 import { JS_MANIFEST } from "./standard-tests/manifests/js.manifest.ts";
+import { registerSecondaryOracleProperty } from "./standard-tests/mingo/index.ts";
 
 
 async function matchJavascriptObject<T extends Record<string, any>>(object: ObjOrDraft<T>, filter: WhereFilterDefinition<T>):Promise<ReturnType<typeof matchJavascriptObjectReal>> {
@@ -22,7 +23,7 @@ describe('testMatchJavascriptObject', () => {
         expect,
         matchJavascriptObject,
         implementationName: 'javascript',
-        fuzz: { iterations: 300, secondaryOracle: 'mingo' },
+        fuzz: { iterations: 300, secondaryOracle: registerSecondaryOracleProperty },
         acknowledgements,
     })
 

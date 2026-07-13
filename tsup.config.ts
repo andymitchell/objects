@@ -21,8 +21,17 @@ export default defineConfig([
         minify: false,
         dts: true,
         format: ['esm'], // When this changes, update 'type' in package.json
+        // esbuild's post-resolution, post-tree-shake input graph. `build/assert-no-devdep-leak.mjs`
+        // reads it to prove no devDependency reached a published bundle.
+        metafile: true,
+        // tsup auto-externalises `dependencies` and `peerDependencies`, but BUNDLES every devDependency
+        // an entry can reach. The test runner must never be vendored: a second copy of vitest overwrites
+        // `globalThis[Symbol.for('expect-global')]` and silently steals the consumer runner's per-test state.
         external: [
-            'zod'
+            'zod',
+            /^vitest(\/|$)/,
+            /^@vitest\//,
+            'chai',
         ],
     },
 ]);

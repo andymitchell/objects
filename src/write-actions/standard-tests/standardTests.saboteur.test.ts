@@ -81,7 +81,10 @@ const GROUP_A: Saboteur[] = [
         ops: { mutateInput: (cfg) => ({ ...cfg, writeActions: cloneActions(cfg).map(a => { const p = payloadOf(a); if (p.type === 'inc' && typeof p.amount === 'number') p.amount += 1; return a; }) }) },
     },
     {
-        name: 'S7 addToSetPushesDuplicates', trips: [1],
+        // P3 (add_to_set idempotence) manufactures the duplicate-add case on every generated add_to_set, so it
+        // is the property that guards dedupe semantics by construction — the differential oracle only sees this
+        // saboteur when the generated corpus happens to contain a duplicate add.
+        name: 'S7 addToSetPushesDuplicates', trips: [3],
         ops: { mutateInput: (cfg) => ({ ...cfg, writeActions: cloneActions(cfg).map(a => { const p = payloadOf(a); if (p.type === 'add_to_set') { p.type = 'push'; delete p.unique_by; } return a; }) }) },
     },
     {

@@ -97,14 +97,16 @@ export function genWorld(rng: Rng): FuzzItem[] {
         if (rng.bool(0.7)) item.text = rng.pick(TEXT_POOL);
         if (rng.bool(0.6)) item.count = rng.intRange(-10, 10);
         if (rng.bool(0.5)) item.tags = Array.from({ length: rng.int(5) }, () => rng.pick(TAG_POOL));
-        // sub_items is ALWAYS an array (possibly empty): array_scope into an undefined field throws in the
-        // engine ("array_scope paths must be to an array"), which would crash the harness. Missing-object-array
-        // handling for the other verbs is covered by the targeted §1.6/§1.7/§12 tests instead.
-        item.sub_items = Array.from({ length: rng.int(5) }, (_, j) => {
-            const si: SubItem = { sid: 's' + j };
-            if (rng.bool(0.7)) si.val = rng.intRange(-10, 10);
-            return si;
-        });
+        // sub_items is sometimes ABSENT: it is optional in the schema, and every verb (array_scope included)
+        // must treat a missing object-array as zero targets — worlds with the field omitted keep the whole
+        // property set honest about that.
+        if (rng.bool(0.8)) {
+            item.sub_items = Array.from({ length: rng.int(5) }, (_, j) => {
+                const si: SubItem = { sid: 's' + j };
+                if (rng.bool(0.7)) si.val = rng.intRange(-10, 10);
+                return si;
+            });
+        }
         items.push(item);
     }
     return items;

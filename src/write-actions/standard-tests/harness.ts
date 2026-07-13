@@ -48,9 +48,9 @@ export type WriteTestCapabilities = {
     /** Impl supports replacing a scalar array wholesale via update data. DEFAULT true. */
     scalarArrayUpdate?: boolean;
     /**
-     * Impl accepts the deliberately-INVALID where corpus (§9 + fuzz P10 where-variant) — i.e. produces
-     * invalid_filter outcomes rather than throwing/pre-rejecting. DEFAULT false so the
-     * validate-where-sync consumer (which throws on any invalid_filter) runs UNCHANGED.
+     * Impl accepts the deliberately-INVALID where/scope corpus (§9, §20.1 + fuzz P10 where-variant) — i.e.
+     * produces invalid_filter/invalid_scope outcomes rather than throwing/pre-rejecting. DEFAULT false so
+     * the validate-where-sync consumer (which throws on any invalid_filter) runs UNCHANGED.
      */
     invalidWhereCorpus?: boolean;
     /** Impl can express a multi-action batch WITHOUT the all-or-nothing option (sequential-halt / partial-success). DEFAULT true. */

@@ -325,18 +325,21 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
             }
         } else {
-            // Preflight the action's `where` filters before touching any item: static schema validation across
-            // the whole action tree (own `where`, nested `array_scope` `action.where`, `pull` object
-            // `items_where`) plus a runtime throw-safety dry-run. An invalid filter matches nothing and can
-            // never succeed on retry, so it is reported as an unrecoverable `invalid_filter` and the action
-            // mutates nothing — which keeps a throw-prone filter from committing a partial change. Validating
-            // the nested wheres up-front is essential: the per-item recursion only runs for parents matching the
-            // outer `where`, so an outer `where` matching nothing would otherwise let a nested invalid `where`
-            // slip through as a silent no-op.
+            // Preflight the action's `where` filters and `array_scope` scopes before touching any item: static
+            // schema validation across the whole action tree (own `where`, every `array_scope` scope and nested
+            // `action.where`, `pull` object `items_where`) plus a runtime throw-safety dry-run. An invalid
+            // filter matches nothing and an unwritable scope can never reach its target — neither can succeed on
+            // retry — so the action is rejected unrecoverably (`invalid_filter`/`invalid_scope`) and mutates
+            // nothing, which keeps a throw-prone filter or scope from committing a partial change. Validating
+            // the nested levels up-front is essential: the per-item recursion only runs for parents matching the
+            // outer `where`, so an outer `where` matching nothing would otherwise let a nested fault slip
+            // through as a silent no-op.
             const whereIssues = preflightActionWhere(action.payload as WritePayload<any>, schema, validateWhere, { requireSerialisableJsonSubset: true }, wipItems);
             if( whereIssues.length>0 ) {
                 const issue = whereIssues[0]!;
-                failureTracker.reportActionError(action, { type: 'invalid_filter', where_path: issue.path, reason: issue.reason });
+                failureTracker.reportActionError(action, issue.kind==='scope'
+                    ? { type: 'invalid_scope', scope: issue.scope, reason: issue.reason }
+                    : { type: 'invalid_filter', where_path: issue.path, reason: issue.reason });
                 continue;
             }
             for( let i = 0; i < wipItems.length; i++) {

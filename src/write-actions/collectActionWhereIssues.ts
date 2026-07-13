@@ -8,13 +8,23 @@ import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.t
 import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
 import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
+import { resolveArrayScope, type ArrayScopeRejectionReason } from "./arrayScopeResolution.ts";
 
 /**
- * Collect every static invalid-`where` issue across an action's WHOLE filter tree, against the right schema at
- * each level: the payload's own `where`, an `array_scope`'s nested `action.where` at any depth (validated
- * against the scoped element schema), and a `pull`'s object-form `items_where` (against the array element
- * schema). Pure and data-independent, so it runs once up-front — the only way to catch a nested invalid `where`
- * when the outer `where` matches no items (the per-item recursion never runs then).
+ * A static fault found in an action's filter/scope tree, discriminated by `kind`: a `where`-clause fault
+ * (carrying the `WhereFilterValidationIssue` fields) or an unwritable `array_scope.scope`. Callers map these
+ * onto the `invalid_filter` / `invalid_scope` `WriteError` variants respectively.
+ */
+export type ActionValidationIssue =
+    | ({ kind: "where" } & WhereFilterValidationIssue)
+    | { kind: "scope"; scope: string; reason: ArrayScopeRejectionReason };
+
+/**
+ * Collect every static invalid-`where` and invalid-scope issue across an action's WHOLE filter tree, against
+ * the right schema at each level: the payload's own `where`, an `array_scope`'s scope and nested `action.where`
+ * at any depth (validated against the scoped element schema), and a `pull`'s object-form `items_where` (against
+ * the array element schema). Pure and data-independent, so it runs once up-front — the only way to catch a
+ * nested invalid `where` when the outer `where` matches no items (the per-item recursion never runs then).
  *
  * Single-sourced: BOTH the write engine's preflight (`preflightActionWhere`, which adds a runtime throw-safety
  * dry-run on top) and a store's up-front gate (`validateWriteAction`) call this, so the engine and a stacking
@@ -31,7 +41,8 @@ import type { WhereFilterDefinition } from "../where-filter/types.ts";
  * @example
  * const validate = compileValidateWhereFilter(schema, options);
  * const issues = collectActionWhereIssues(payload, schema, validate, options);
- * // e.g. [{ reason: 'malformed', path: 'children.$ne', message: "Non-JSON operand on 'children.$ne' ..." }]
+ * // e.g. [{ kind: 'scope', scope: 'children.nope', reason: 'unknown_path' },
+ * //       { kind: 'where', reason: 'malformed', path: 'children.$ne', message: "Non-JSON operand ..." }]
  */
 export function collectActionWhereIssues(
     payload: WritePayload<any>,
@@ -39,28 +50,38 @@ export function collectActionWhereIssues(
     validate: (filter: WhereFilterDefinition<any>) => WhereFilterValidationIssue[],
     options: { requireSerialisableJsonSubset?: boolean } | undefined,
     prefix = "",
-): WhereFilterValidationIssue[] {
-    const issues: WhereFilterValidationIssue[] = [];
+): ActionValidationIssue[] {
+    const issues: ActionValidationIssue[] = [];
 
     // Every non-create payload carries `where`; a create has none to validate.
     if (payload.type !== "create") {
-        for (const issue of validate(payload.where)) issues.push(prefixIssue(issue, prefix));
+        for (const issue of validate(payload.where)) issues.push({ kind: "where", ...prefixIssue(issue, prefix) });
     }
 
     if (payload.type === "array_scope") {
-        // Recurse into the nested action against the scoped element schema. An unresolved scope falls back to a
+        const scopePath = joinDotpropPath(prefix, payload.scope);
+        // Judge the scope itself ahead of anything beneath it: an unwritable scope is its own fault class
+        // (it names the write TARGET, not a match condition), so it is reported before this level's nested
+        // `where` issues.
+        const resolution = schema ? resolveArrayScope(schema, payload.scope) : undefined;
+        if (resolution && !resolution.ok) {
+            issues.push({ kind: "scope", scope: scopePath, reason: resolution.reason });
+        }
+        // Recurse into the nested action against the scoped element schema. An unwritable scope falls back to a
         // subset-only validator so a non-JSON nested operand is still caught (schema-aware checks need a schema;
         // the SerialisableJsonSubset walk does not). The recursion keeps descending either way.
-        const elementSchema = schema ? getZodSchemaAtSchemaDotPropPath(schema, payload.scope) : undefined;
+        const elementSchema = resolution?.ok ? resolution.elementSchema : undefined;
         issues.push(...collectActionWhereIssues(
             payload.action as WritePayload<any>,
             elementSchema,
             compileValidateWhereFilter(elementSchema, options),
             options,
-            joinDotpropPath(prefix, payload.scope),
+            scopePath,
         ));
     } else if (payload.type === "pull") {
-        issues.push(...validatePullItemsWhere(payload.items_where, schema, payload.path as string, options, prefix));
+        for (const issue of validatePullItemsWhere(payload.items_where, schema, payload.path as string, options, prefix)) {
+            issues.push({ kind: "where", ...issue });
+        }
     }
 
     return issues;

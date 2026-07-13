@@ -347,6 +347,8 @@ describe("4. WriteError discriminated union", () => {
           break;
         case "invalid_filter":
           break;
+        case "invalid_scope":
+          break;
         case "invalid_data_value":
           break;
         default: {

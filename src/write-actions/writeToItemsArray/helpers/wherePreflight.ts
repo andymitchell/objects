@@ -4,15 +4,16 @@ import { type WhereFilterValidationIssue } from "../../../where-filter/validateW
 import matchJavascriptObject from "../../../where-filter/matchJavascriptObject.ts";
 import { ValueComparisonRangeOperators } from "../../../where-filter/consts.ts";
 import type { WhereFilterDefinition } from "../../../where-filter/types.ts";
-import { collectActionWhereIssues } from "../../collectActionWhereIssues.ts";
+import { collectActionWhereIssues, type ActionValidationIssue } from "../../collectActionWhereIssues.ts";
 
 /**
- * Validate an action's `where` filters BEFORE the action mutates anything, so an invalid filter rejects the
- * action cleanly with zero mutation. Two layers, both required by `writeToItemsArray`'s `invalid_filter`
- * contract:
+ * Validate an action's `where` filters and `array_scope` scopes BEFORE the action mutates anything, so an
+ * invalid filter or unwritable scope rejects the action cleanly with zero mutation. Two layers, both required
+ * by `writeToItemsArray`'s `invalid_filter`/`invalid_scope` contract:
  *  1. **Static** (`collectActionWhereIssues`, shared with `validateWriteAction` so the engine and a stacking
- *     proxy reject identically) — schema-aware structural validation (unknown field, type mismatch, non-finite,
- *     malformed) across the whole action tree, data-independent.
+ *     proxy reject identically) — schema-aware structural validation of every `where` (unknown field, type
+ *     mismatch, non-finite, malformed) and every `array_scope.scope` across the whole action tree,
+ *     data-independent.
  *  2. **Runtime throw-safety** (`actionMatchThrows`) — a `$regex`/range operand can make `matchJavascriptObject`
  *     throw on certain rows; a dry-run over the items catches that up-front, so the mutation pass that follows
  *     is throw-free and never commits a partial change.
@@ -24,7 +25,7 @@ import { collectActionWhereIssues } from "../../collectActionWhereIssues.ts";
  * @example
  * const validate = compileValidateWhereFilter(schema, { requireSerialisableJsonSubset: true });
  * const issues = preflightActionWhere(payload, schema, validate, { requireSerialisableJsonSubset: true }, items);
- * if (issues.length) reject(); // e.g. [{ reason: 'unknown_field', path: 'children.ghost' }]
+ * if (issues.length) reject(); // e.g. [{ kind: 'where', reason: 'unknown_field', path: 'children.ghost' }]
  */
 export function preflightActionWhere(
     payload: WritePayload<any>,
@@ -32,11 +33,11 @@ export function preflightActionWhere(
     validate: (filter: WhereFilterDefinition<any>) => WhereFilterValidationIssue[],
     options: { requireSerialisableJsonSubset?: boolean } | undefined,
     items: Record<string, any>[],
-): WhereFilterValidationIssue[] {
+): ActionValidationIssue[] {
     const issues = collectActionWhereIssues(payload, schema, validate, options, "");
     if (issues.length > 0) return issues;
     if (whereMightThrow(payload) && actionMatchThrows(payload, items)) {
-        return [{ reason: "malformed", message: "Filter operand makes the matcher throw at runtime." }];
+        return [{ kind: "where", reason: "malformed", message: "Filter operand makes the matcher throw at runtime." }];
     }
     return [];
 }

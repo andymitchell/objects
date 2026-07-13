@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.ts";
+import type { AnyZodSchema } from "../zod/introspection.ts";
 
 /**
  * Why a scope cannot be written through:
@@ -14,7 +15,7 @@ export type ArrayScopeRejectionReason = 'disallowed_segment' | 'unknown_path' | 
  * or the reason the scope can never be a valid write target.
  */
 export type ArrayScopeResolution =
-    | { ok: true; elementSchema: z.ZodType }
+    | { ok: true; elementSchema: AnyZodSchema }
     | { ok: false; reason: ArrayScopeRejectionReason };
 
 const DISALLOWED_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -51,7 +52,7 @@ const DISALLOWED_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
  * nullable/default/catch wrapper is not: the schema walker keeps those wrappers on the leaf, so the
  * engine's scoped element schema would be the wrapper itself and could never validate an element.
  */
-export function resolveArrayScope(schema: z.ZodType, scope: string): ArrayScopeResolution {
+export function resolveArrayScope(schema: AnyZodSchema, scope: string): ArrayScopeResolution {
     if (scope.split('.').some(segment => DISALLOWED_SEGMENTS.has(segment))) {
         return { ok: false, reason: 'disallowed_segment' };
     }

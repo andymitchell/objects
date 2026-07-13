@@ -182,6 +182,11 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
     reason: z.enum(["unknown_field", "type_mismatch", "non_finite", "malformed"]),
   }),
   z.object({
+    type: z.literal("invalid_scope"),
+    scope: z.string(),
+    reason: z.enum(["disallowed_segment", "unknown_path", "not_an_object_array"]),
+  }),
+  z.object({
     type: z.literal("invalid_data_value"),
     data_path: z.string().optional(),
     reason: z.enum(["non_finite", "malformed"]),

@@ -112,23 +112,33 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
     });
 
     // A scope is attacker-suppliable payload data, and an inherited name (`constructor`, `toString`, …) is
-    // reachable through a plain object's prototype chain rather than a declared field. The gate must treat it
-    // exactly like any other scope that doesn't resolve — errors as values, never a crash.
+    // reachable through a plain object's prototype chain rather than a declared field. The gate must reject
+    // any unwritable scope as a value (`invalid_scope`) — never a crash — and report a hostile inherited name
+    // no differently from an equivalent benign failure.
     describe("a hostile array_scope.scope naming an inherited member never crashes the gate", () => {
         const scopedAction = (scope: string) =>
             wn({ type: "array_scope", scope, where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { cid: "c1" } } });
 
-        it("treats an inherited-name scope exactly like a genuinely absent scope", () => {
-            const absent = validateWriteAction(scopedAction("nonexistent"), NestedSchema, SUBSET);
-            for (const scope of ["constructor", "toString", "children.constructor"]) {
+        it("reports an undeclared inherited-name scope with the same error as a genuinely absent scope", () => {
+            for (const scope of ["toString", "nonexistent"]) {
                 expect(() => validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).not.toThrow();
-                expect(validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).toEqual(absent);
+                expect(validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).toEqual([{ type: "invalid_scope", scope, reason: "unknown_path" }]);
+            }
+        });
+
+        it("rejects a scope containing a segment the runtime reader can never traverse, at any depth", () => {
+            for (const scope of ["constructor", "children.constructor"]) {
+                expect(() => validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).not.toThrow();
+                expect(validateWriteAction(scopedAction(scope), NestedSchema, SUBSET)).toEqual([{ type: "invalid_scope", scope, reason: "disallowed_segment" }]);
             }
         });
 
         it("still catches a non-JSON nested operand under a hostile scope — the subset fallback keeps running", () => {
             const a = wn({ type: "array_scope", scope: "constructor", where: { id: "1" }, action: { type: "update", data: { score: 1 }, where: { cid: { $ne: 5n } } } });
-            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "constructor.cid.$ne" }]);
+            expect(validateWriteAction(a, NestedSchema, SUBSET)).toMatchObject([
+                { type: "invalid_scope", scope: "constructor", reason: "disallowed_segment" },
+                { type: "invalid_filter", reason: "malformed", where_path: "constructor.cid.$ne" },
+            ]);
         });
     });
 

@@ -13,6 +13,7 @@ import type {
 } from "../where-filter/types.js";
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
 import type { JsonValueCapped } from "@andymitchell/clone-to-json-safe";
+import type { ArrayScopeRejectionReason } from "./arrayScopeResolution.ts";
 
 export type WritePayloadCreate<W extends Record<string, any>> = {
   type: "create";
@@ -192,6 +193,21 @@ export type WriteError =
       where_path?: string | undefined;
       /** Why the `where` was rejected. */
       reason: "unknown_field" | "type_mismatch" | "non_finite" | "malformed";
+    }
+  | {
+      /**
+       * The action's `array_scope.scope` can never be a valid write target: a segment is
+       * `__proto__`/`prototype`/`constructor` (which the runtime property reader refuses to traverse),
+       * the schema declares no field at the path, or the path resolves to something other than an array
+       * of objects. Caught before any mutation; the action is rejected unrecoverably and state is left
+       * unchanged. Distinct from `invalid_filter` (a `where`-clause fault): the scope names the write
+       * TARGET, not a match condition.
+       */
+      type: "invalid_scope";
+      /** The rejected scope, prefix-joined from the action root when the fault is in a nested `array_scope` (e.g. `children.nope`). */
+      scope: string;
+      /** Why the scope cannot be written through. */
+      reason: ArrayScopeRejectionReason;
     }
   | {
       /**

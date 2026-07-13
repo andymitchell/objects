@@ -15,11 +15,12 @@ import { collectActionWhereIssues } from "./collectActionWhereIssues.ts";
  * un-round-trippable operand corrupts a stacking forward and spuriously breaks an honest replay's equivalence.
  *
  * Returns canonical `WriteError`s tagged by source — a written-value fault is `invalid_data_value`, a `where`
- * fault is `invalid_filter` — both reusing the existing `non_finite`/`malformed`/… reasons (no new vocabulary).
- * An empty array means the action is valid. The `where` check spans the WHOLE filter tree — the top-level
- * `where` AND nested `array_scope.action.where` / `pull.items_where` at any depth (via `collectActionWhereIssues`,
- * shared with the write engine's preflight so both reject identically) — so the gate is complete: a store can
- * rely on the cleared action's entire `payload` being JSON-roundtrippable, every nested operand included.
+ * fault is `invalid_filter`, and an `array_scope.scope` that can never be a valid write target is
+ * `invalid_scope`. An empty array means the action is valid. The `where`/scope check spans the WHOLE action
+ * tree — the top-level `where` AND every `array_scope` scope, nested `action.where` and `pull.items_where` at
+ * any depth (via `collectActionWhereIssues`, shared with the write engine's preflight so both reject
+ * identically) — so the gate is complete: a store can rely on the cleared action's entire `payload` being
+ * JSON-roundtrippable, every nested operand included.
  *
  * @example
  * const errs = validateWriteAction(action, schema, { requireSerialisableJsonSubset: true });
@@ -41,11 +42,14 @@ export function validateWriteAction<T extends Record<string, any>>(
     errors.push({ type: "invalid_data_value", reason: issue.reason, data_path: issue.path });
   }
 
-  // 2. `where` across the whole tree — the top-level `where` plus nested `array_scope.action.where` /
-  //    `pull.items_where` — sharing the engine's recursion. The root validator is compiled once and reused down
-  //    the tree; a create carries no `where`, so this is a no-op for it.
+  // 2. `where` and `array_scope` scopes across the whole tree — the top-level `where` plus every scope,
+  //    nested `array_scope.action.where` and `pull.items_where` — sharing the engine's recursion. The root
+  //    validator is compiled once and reused down the tree; a create carries no `where`, so this is a no-op
+  //    for it.
   for (const issue of collectActionWhereIssues(payload, schema, compileValidateWhereFilter(schema, options), options)) {
-    errors.push({ type: "invalid_filter", reason: issue.reason, where_path: issue.path });
+    errors.push(issue.kind === "scope"
+      ? { type: "invalid_scope", scope: issue.scope, reason: issue.reason }
+      : { type: "invalid_filter", reason: issue.reason, where_path: issue.path });
   }
 
   return errors;

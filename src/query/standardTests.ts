@@ -1,6 +1,7 @@
 import type { describe, expect, it } from 'vitest';
 
 import type { DDL } from '../ddl/types.ts';
+import { registerAfterBoundaryTests } from './standardTests.boundary.ts';
 import type { SortAndSlice, SortDefinition } from './types.ts';
 import {
     type BooleanItem,
@@ -532,4 +533,8 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
             expect(result).toEqual(single);
         });
     });
+
+    // Value-based keyset (after_boundary) tests live in their own module to keep this file under the
+    // size cap; they run through the same gate and execute wrapper, so every adapter gets them.
+    registerAfterBoundaryTests({ describe, itIfSupported, run, expect, implementationName });
 }

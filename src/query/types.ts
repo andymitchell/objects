@@ -1,9 +1,10 @@
 import type { z } from "zod";
 import type { DotPropPathsUnion } from "../dot-prop-paths/types.ts";
 import type { PrimaryKeyValue } from '../utils/getKeyValue.ts';
-import type { PreparedStatementArgument } from '../utils/sql/types.ts';
+import type { PreparedStatementArgument, SortValueKind } from '../utils/sql/types.ts';
 import type { PreparedWhereClauseStatement } from '../where-filter/sql/types.ts';
-import type { SortAndSliceSchema, SortAndSliceBaseSchema, SortAndSliceCursorSchema, SortDefinitionSchema, SortEntrySchema } from './schemas.ts';
+import type { EncodedSortValue } from './sortCompare.ts';
+import type { SortAndSliceSchema, SortAndSliceBaseSchema, SortAndSliceCursorSchema, SortBoundarySchema, EncodedSortValueSchema, SortDefinitionSchema, SortEntrySchema } from './schemas.ts';
 import { isTypeEqual } from "@andyrmitchell/utils";
 
 // Re-export for consumer convenience
@@ -53,16 +54,43 @@ export type SortAndSliceBase<T> = {
 }
 
 /**
+ * A pagination boundary captured by value: the encoded sort-key values of the last row on a
+ * page, plus that row's primary key. Feeding it back as `after_boundary` resumes the walk
+ * strictly after this position.
+ *
+ * Unlike `after_pk` (which re-finds the boundary row by identity), a boundary carries the
+ * position itself, so the next page is correct even if the boundary row has since been deleted —
+ * the walk stays complete. `values` are the {@link EncodedSortValue}s of the user's `sort` keys,
+ * in the same order, and are safe to serialise inside an opaque cursor.
+ *
+ * @example
+ * // Mint a boundary from the last row of a page, then request the next page
+ * const last = page[page.length - 1];
+ * const boundary: SortBoundary = { values: [encodeSortValue(last.date)], pk: last.id };
+ * const next: SortAndSlice<Email> = { sort: [{ key: 'date', direction: -1 }], limit: 20, after_boundary: boundary };
+ *
+ * @remarks `values.length` must equal the user's `sort.length` (aligned 1:1, before the automatic
+ * primary-key tiebreaker is appended).
+ */
+export type SortBoundary = {
+    values: EncodedSortValue[];
+    pk: PrimaryKeyValue;
+};
+
+/**
  * Unified query configuration for sorting and paginating a collection. Accepted by all query
  * functions — `sortAndSliceObjects` (JS runtime), `prepareObjectTableQuery` (JSON-column SQL),
  * and `prepareColumnTableQuery` (relational SQL) — so the same config produces identical
  * ordering whether applied in-memory or in a database.
  *
- * Supports three independent capabilities, all optional:
+ * Supports these independent capabilities, all optional:
  * - **Sorting:** Multi-key sort via `sort` (Mongo-style: `1` = ASC, `-1` = DESC).
- * - **Pagination:** Either cursor-based (`after_pk` — the PK of the last item on the previous
- *   page) or offset-based (`offset`). These are mutually exclusive, enforced at the type level.
- *   `after_pk` requires a non-empty `sort`.
+ * - **Pagination:** One of three mutually-exclusive modes (enforced at the type level):
+ *   - `after_boundary` — value-based keyset: resume after the last row's encoded sort values.
+ *     The walk stays complete even if the boundary row is deleted mid-walk. Requires a non-empty `sort`.
+ *   - `after_pk` — identity-anchor keyset: resume after the row with this PK. Cheaper to express
+ *     but truncates the walk if the anchor row is deleted. Requires a non-empty `sort`.
+ *   - `offset` — skip a fixed number of rows.
  * - **Limiting:** `limit` caps the number of returned items.
  *
  * All query functions automatically append a primary key tiebreaker to the sort, ensuring
@@ -73,26 +101,30 @@ export type SortAndSliceBase<T> = {
  * const page1: SortAndSlice<Email> = { sort: [{ key: 'date', direction: -1 }], limit: 20 };
  *
  * @example
- * // Next page using cursor (pass the PK of the last item from page 1)
- * const page2: SortAndSlice<Email> = { sort: [{ key: 'date', direction: -1 }], limit: 20, after_pk: 'email_abc' };
+ * // Next page, walk-complete: resume after the last row's values (survives deletion of that row)
+ * const boundary: SortBoundary = { values: [encodeSortValue(last.date)], pk: last.id };
+ * const page2: SortAndSlice<Email> = { sort: [{ key: 'date', direction: -1 }], limit: 20, after_boundary: boundary };
+ *
+ * @example
+ * // Next page, identity-anchor: resume after the PK of the last item from page 1
+ * const page2b: SortAndSlice<Email> = { sort: [{ key: 'date', direction: -1 }], limit: 20, after_pk: 'email_abc' };
  *
  * @example
  * // Offset-based pagination
  * const page3: SortAndSlice<Email> = { sort: [{ key: 'date', direction: -1 }], limit: 20, offset: 40 };
  *
- * @example
- * // Limit only, no sorting
- * const limited: SortAndSlice<Email> = { limit: 100 };
- *
  * @note When using `after_pk` cursor pagination in SQL, the generated subquery count grows
- * O(N²) with the number of sort keys. Recommend ≤3 sort keys with `after_pk`.
+ * O(N²) with the number of sort keys. Recommend ≤3 sort keys with `after_pk`. `after_boundary`
+ * has no subqueries — it binds the boundary values directly — and scales linearly.
  *
+ * @see SortBoundary — the value-based boundary passed as `after_boundary`
  * @see SortAndSliceBase — shared sort + limit fields (constraint for ICollection's 5th generic)
  * @see SortAndSliceCursor — opaque cursor mode for API bridges
  */
 export type SortAndSlice<T> = SortAndSliceBase<T> & (
-    | { offset?: number; after_pk?: never }
-    | { offset?: never; after_pk?: PrimaryKeyValue }
+    | { offset?: number; after_pk?: never; after_boundary?: never }
+    | { offset?: never; after_pk?: PrimaryKeyValue; after_boundary?: never }
+    | { offset?: never; after_pk?: never; after_boundary?: SortBoundary }
 );
 
 /**
@@ -194,16 +226,27 @@ export type ObjectTableInfo<T extends Record<string, any>> = TableInfo & {
  * this list, and any key not present causes a `QueryError`. The PK column must be included
  * in `allowedColumns` since it is used as an automatic tiebreaker.
  *
+ * `columnKinds` declares each column's comparison family (see {@link SortValueKind}). Unlike an
+ * object table — whose Zod schema lets the converter infer each leaf's kind — a relational table
+ * has no schema to introspect, so the kind must be declared. It drives text-collation pinning
+ * (`'text'` → `COLLATE "C"`), boundary-value binding (`'boolean'` → dialect-correct `1`/`0` vs a
+ * real boolean), and boundary-value validation (`'numeric'`/`'bigint'`). A column left undeclared
+ * is bound raw and left unpinned — correct only when its natural ordering already matches the
+ * comparator (which does not hold for text on a non-`C` database, nor for booleans on SQLite),
+ * so declare every column you sort or paginate on. An empty object (`{}`) is valid.
+ *
  * @example
  * const table: ColumnTableInfo = {
  *   tableName: 'users',
  *   pkColumnName: 'id',
  *   allowedColumns: ['id', 'created_at', 'name', 'email'],
+ *   columnKinds: { id: 'text', created_at: 'text', name: 'text', email: 'text' },
  * };
  */
 export type ColumnTableInfo = TableInfo & {
     pkColumnName: string;
     allowedColumns: string[];
+    columnKinds: Partial<Record<string, SortValueKind>>;
 };
 
 /**
@@ -231,14 +274,21 @@ isTypeEqual<z.infer<typeof SortEntrySchema>, { key: string; direction: 1 | -1 }>
 // Verify the non-generic structural shape matches.
 isTypeEqual<z.infer<typeof SortDefinitionSchema>, Array<{ key: string; direction: 1 | -1 }>>(true);
 
-// SortAndSlice: the manual type has a discriminated union for offset/after_pk that z.infer cannot express.
-// We verify the schema's flat inferred shape matches the base fields.
+// EncodedSortValue: schema is the runtime witness of the string | number | null contract.
+isTypeEqual<z.infer<typeof EncodedSortValueSchema>, EncodedSortValue>(true);
+
+// SortBoundary: manual type and schema must stay in lockstep (values + pk).
+isTypeEqual<z.infer<typeof SortBoundarySchema>, SortBoundary>(true);
+
+// SortAndSlice: the manual type has a discriminated union for offset/after_pk/after_boundary that
+// z.infer cannot express. We verify the schema's flat inferred shape matches the base fields.
 type SortAndSliceSchemaInferred = z.infer<typeof SortAndSliceSchema>;
 isTypeEqual<SortAndSliceSchemaInferred, {
     sort?: Array<{ key: string; direction: 1 | -1 }> | undefined;
     limit?: number | undefined;
     offset?: number | undefined;
     after_pk?: string | number | undefined;
+    after_boundary?: SortBoundary | undefined;
 }>(true);
 
 // SortAndSliceBase: schema infers the shared base fields (sort + limit).

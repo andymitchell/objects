@@ -390,4 +390,84 @@ describe('prepareObjectTableQuery', () => {
             expect(r1).toEqual(r2);
         });
     });
+
+    describe('Text Collation Pinning (Postgres)', () => {
+        // Postgres orders text by the database's default collation (en_US/ICU in production), but the
+        // ordering contract is code-point order. `COLLATE "C"` pins it. PGlite defaults to C, so the
+        // real-engine suites cannot observe this — these string pins are the only guard for production.
+        it('pins COLLATE "C" on a text ORDER BY expression', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, { sort: [{ key: 'date', direction: -1 }] });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.order_by_statement).toContain('::text COLLATE "C"');
+        });
+
+        it('does not pin COLLATE on a numeric ORDER BY expression', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, { sort: [{ key: 'priority', direction: 1 }] });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.order_by_statement).toContain('::numeric ASC');
+            expect(result.order_by_statement).not.toContain('::numeric COLLATE');
+        });
+
+        it('pins COLLATE "C" on the text after_pk cursor comparison', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_pk: 'e1',
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement!.where_clause_statement).toContain('::text COLLATE "C"');
+        });
+
+        it('omits COLLATE entirely for the SQLite dialect', () => {
+            const result = prepareObjectTableQuery('sqlite', table, undefined, { sort: [{ key: 'date', direction: -1 }] });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.order_by_statement).not.toContain('COLLATE');
+        });
+    });
+
+    describe('After-Boundary Cursor', () => {
+        it('emits a value-based boundary predicate that binds the value directly (no subquery)', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_boundary: { values: ['2024-01-01'], pk: 'e1' },
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement).not.toBeNull();
+            expect(result.where_statement!.where_clause_statement).not.toContain('SELECT');
+            expect(result.where_statement!.statement_arguments).toContain('2024-01-01');
+        });
+
+        it('pins COLLATE "C" inside the boundary predicate on a text key (Postgres)', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_boundary: { values: ['2024-01-01'], pk: 'e1' },
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement!.where_clause_statement).toContain('::text COLLATE "C"');
+        });
+
+        it('uses ? placeholders and no COLLATE for the boundary predicate on SQLite', () => {
+            const result = prepareObjectTableQuery('sqlite', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_boundary: { values: ['2024-01-01'], pk: 'e1' },
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement).not.toBeNull();
+            expect(result.where_statement!.where_clause_statement).not.toContain('COLLATE');
+        });
+
+        it('rejects a numeric-key boundary value that is not a number', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'priority', direction: 1 }],
+                after_boundary: { values: ['-Infinity'], pk: 'e1' },
+            });
+            expect(result.success).toBe(false);
+        });
+    });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import { z } from 'zod';
-import { SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema } from './schemas.ts';
-import type { SortAndSlice, SortAndSliceBase, SortAndSliceCursor } from './types.ts';
+import { SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema, SortBoundarySchema } from './schemas.ts';
+import type { SortAndSlice, SortAndSliceBase, SortAndSliceCursor, SortBoundary } from './types.ts';
 
 describe('SortAndSliceSchema', () => {
 
@@ -153,6 +153,126 @@ describe('SortAndSliceSchema', () => {
         it('rejects after_pk with no sort field', () => {
             const result = SortAndSliceSchema.safeParse({ after_pk: 'abc' });
             expect(result.success).toBe(false);
+        });
+    });
+
+    describe('After-Boundary (after_boundary)', () => {
+        const boundary: SortBoundary = { values: ['2024-01-01'], pk: 'row_9' };
+
+        describe('Valid Inputs', () => {
+            it('accepts after_boundary whose values align 1:1 with a single-key sort', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'date', direction: -1 }],
+                    limit: 20,
+                    after_boundary: boundary,
+                });
+                expect(result.success).toBe(true);
+            });
+
+            it('accepts a two-key sort with two boundary values', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'category', direction: 1 }, { key: 'date', direction: -1 }],
+                    after_boundary: { values: ['A', '2024-01-01'], pk: 'row_9' },
+                });
+                expect(result.success).toBe(true);
+            });
+
+            it('accepts null and numeric boundary values', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'score', direction: 1 }],
+                    after_boundary: { values: [null], pk: 7 },
+                });
+                expect(result.success).toBe(true);
+            });
+        });
+
+        describe('Boundary shape', () => {
+            it('rejects a boolean boundary value (values are string|number|null)', () => {
+                const result = SortBoundarySchema.safeParse({ values: [true], pk: 'x' });
+                expect(result.success).toBe(false);
+            });
+
+            it('rejects a boundary pk that is neither string nor number', () => {
+                const result = SortBoundarySchema.safeParse({ values: ['x'], pk: null });
+                expect(result.success).toBe(false);
+            });
+        });
+
+        describe('Mutual exclusion and sort requirement', () => {
+            it('rejects after_boundary together with offset', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'date', direction: -1 }],
+                    offset: 10,
+                    after_boundary: boundary,
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.error.issues.some(i => i.message.includes('mutually exclusive'))).toBe(true);
+            });
+
+            it('rejects after_boundary together with after_pk', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'date', direction: -1 }],
+                    after_pk: 'abc',
+                    after_boundary: boundary,
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.error.issues.some(i => i.message.includes('mutually exclusive'))).toBe(true);
+            });
+
+            it('rejects after_boundary with no sort field', () => {
+                const result = SortAndSliceSchema.safeParse({ after_boundary: boundary });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.error.issues.some(i => i.message.includes('sort'))).toBe(true);
+            });
+
+            it('rejects after_boundary with an empty sort array', () => {
+                const result = SortAndSliceSchema.safeParse({ sort: [], after_boundary: boundary });
+                expect(result.success).toBe(false);
+            });
+        });
+
+        describe('Values / sort length alignment', () => {
+            it('rejects when there are fewer boundary values than sort keys', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'category', direction: 1 }, { key: 'date', direction: -1 }],
+                    after_boundary: { values: ['A'], pk: 'row_9' },
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.error.issues.some(i => i.message.includes('align'))).toBe(true);
+            });
+
+            it('rejects when there are more boundary values than sort keys', () => {
+                const result = SortAndSliceSchema.safeParse({
+                    sort: [{ key: 'date', direction: -1 }],
+                    after_boundary: { values: ['A', 'B'], pk: 'row_9' },
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.error.issues.some(i => i.message.includes('align'))).toBe(true);
+            });
+        });
+
+        describe('Type-level exclusivity', () => {
+            const b: SortBoundary = { values: ['x'], pk: '1' };
+
+            it('SortAndSlice rejects after_boundary combined with offset', () => {
+                // @ts-expect-error — after_boundary and offset are mutually exclusive
+                const _invalid: SortAndSlice<any> = { sort: [{ key: 'x', direction: 1 }], after_boundary: b, offset: 5 };
+            });
+
+            it('SortAndSlice rejects after_boundary combined with after_pk', () => {
+                // @ts-expect-error — after_boundary and after_pk are mutually exclusive
+                const _invalid: SortAndSlice<any> = { sort: [{ key: 'x', direction: 1 }], after_boundary: b, after_pk: 'y' };
+            });
+
+            it('SortAndSlice accepts after_boundary alone', () => {
+                const _valid: SortAndSlice<any> = { sort: [{ key: 'x', direction: 1 }], after_boundary: b };
+                expect(_valid.after_boundary).toBe(b);
+            });
         });
     });
 

@@ -5,6 +5,7 @@ export type {
     SortAndSliceBase,
     SortAndSlice,
     SortAndSliceCursor,
+    SortBoundary,
     QueryError,
     SortAndSliceObjectsResult,
     PrimaryKeyValue,
@@ -16,15 +17,18 @@ export type {
     FlattenedQuerySql,
 } from './types.ts';
 
+// The comparison family a sort key resolves to — needed to declare `ColumnTableInfo.columnKinds`.
+export type { SortValueKind } from '../utils/sql/types.ts';
+
 // Schemas
-export { SortEntrySchema, SortDefinitionSchema, SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema } from './schemas.ts';
+export { SortEntrySchema, SortDefinitionSchema, SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema, SortBoundarySchema, EncodedSortValueSchema } from './schemas.ts';
 
 // JS Runtime
 export { sortAndSliceObjects } from './sortAndSliceObjects.ts';
 
 // Ordering contract — the single JS statement of the sort-value/null/pk-tiebreak rules.
 export type { EncodedSortValue } from './sortCompare.ts';
-export { encodeSortValue, compareValues, resolveSort, buildSortComparator } from './sortCompare.ts';
+export { encodeSortValue, compareValues, resolveSort, buildSortComparator, compareToBoundary } from './sortCompare.ts';
 
 // SQL
 export type { SqlDialect, SqlFragment } from './sql/index.ts';

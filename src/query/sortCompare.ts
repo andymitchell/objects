@@ -1,5 +1,5 @@
 import { getProperty } from "../dot-prop-paths/getPropertySimpleDot.ts";
-import type { SortDefinition, SortEntry } from './types.ts';
+import type { SortBoundary, SortDefinition, SortEntry } from './types.ts';
 
 /**
  * The normalised form of a sort-key value: what a value looks like once it enters the
@@ -156,6 +156,38 @@ export function resolveSort<T extends Record<string, any>>(
     // prove `keyof T & string` narrows into the recursive path union for an unresolved T.
     const pkEntry = { key: primaryKey, direction: 1 } as SortEntry<T>;
     return [...sort, pkEntry];
+}
+
+/**
+ * Three-way comparison of an item against a pagination {@link SortBoundary} under a sort
+ * definition. Returns a negative number if the item orders before the boundary, positive if
+ * after, and `0` if it *is* the boundary position.
+ *
+ * This is the in-memory statement of the value-based keyset seek: to resume a walk strictly
+ * after the boundary, keep the items for which this returns a positive number. It reads each of
+ * the user's `sort` keys as a dot-prop path and compares it to the aligned boundary value with
+ * {@link compareValues}; the first non-tie wins. If every sort key ties, the primary key breaks
+ * the tie — always ascending, and only when the sort does not already end on the primary key
+ * (the same rule {@link resolveSort} applies). When the pk arm does not apply, all-tied yields `0`.
+ *
+ * @param item - The candidate row.
+ * @param boundary - The boundary: encoded sort-key values (aligned 1:1 with `sort`) plus the pk.
+ * @param sort - The user's sort definition (before the automatic pk tiebreaker is appended).
+ * @param primaryKey - The property that uniquely identifies each item.
+ * @returns Negative if `item` is before the boundary, positive if strictly after, `0` if equal.
+ *
+ * @example
+ * // Keep only rows strictly after the boundary
+ * const next = sorted.filter(i => compareToBoundary(i, boundary, sort, 'id') > 0);
+ */
+export function compareToBoundary<T extends Record<string, any>>(
+    item: T,
+    boundary: SortBoundary,
+    sort: SortDefinition<T>,
+    primaryKey: keyof T & string
+): number {
+    void item; void boundary; void sort; void primaryKey;
+    return 0; // placeholder verdict
 }
 
 /**

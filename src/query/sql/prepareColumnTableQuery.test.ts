@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { prepareColumnTableQuery } from './prepareColumnTableQuery.ts';
+import { encodeSortValue } from '../sortCompare.ts';
 import type { ColumnTableInfo } from '../types.ts';
 
 const table: ColumnTableInfo = {
     tableName: 'users',
     pkColumnName: 'id',
     allowedColumns: ['id', 'created_at', 'name', 'email'],
+    columnKinds: {},
 };
 
 describe('prepareColumnTableQuery', () => {
@@ -41,6 +43,7 @@ describe('prepareColumnTableQuery', () => {
                     tableName: 'bad',
                     pkColumnName: 'pk_not_allowed',
                     allowedColumns: ['name'],
+                    columnKinds: {},
                 };
                 const result = prepareColumnTableQuery('pg', badTable, {
                     sort: [{ key: 'name', direction: 1 }],
@@ -146,6 +149,7 @@ describe('prepareColumnTableQuery', () => {
                     tableName: 'items',
                     pkColumnName: 'id',
                     allowedColumns: ['id', 'order'],
+                    columnKinds: {},
                 };
                 const result = prepareColumnTableQuery('pg', reservedTable, {
                     sort: [{ key: 'order', direction: 1 }],
@@ -160,6 +164,7 @@ describe('prepareColumnTableQuery', () => {
                     tableName: 'items',
                     pkColumnName: 'id',
                     allowedColumns: ['id', 'user-name'],
+                    columnKinds: {},
                 };
                 const result = prepareColumnTableQuery('pg', specialTable, {
                     sort: [{ key: 'user-name', direction: 1 }],
@@ -294,6 +299,81 @@ describe('prepareColumnTableQuery', () => {
                 sort: [{ key: 'created_at', direction: -1 }], limit: 10
             });
             expect(r1).toEqual(r2);
+        });
+    });
+
+    describe('Column Kinds', () => {
+        const kindTable: ColumnTableInfo = {
+            tableName: 'users',
+            pkColumnName: 'id',
+            allowedColumns: ['id', 'name', 'age', 'flag'],
+            columnKinds: { id: 'text', name: 'text', age: 'numeric', flag: 'boolean' },
+        };
+
+        describe('Text collation pinning (Postgres)', () => {
+            // PGlite defaults to C collation, so the real-engine suites cannot observe the pin — these
+            // string pins are the only guard that production Postgres orders text by code point.
+            it('pins COLLATE "C" on a text-declared column ORDER BY', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, { sort: [{ key: 'name', direction: 1 }] });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).toContain('"name" COLLATE "C"');
+            });
+
+            it('leaves a numeric-declared column unpinned while still pinning the text pk tiebreaker', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, { sort: [{ key: 'age', direction: 1 }] });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).toContain('"age" ASC');
+                expect(result.order_by_statement).not.toContain('"age" COLLATE');
+                expect(result.order_by_statement).toContain('"id" COLLATE "C"');
+            });
+
+            it('leaves an undeclared column unpinned (empty columnKinds)', () => {
+                // `table` declares columnKinds: {} — nothing is text, so nothing is pinned.
+                const result = prepareColumnTableQuery('pg', table, { sort: [{ key: 'name', direction: 1 }] });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).not.toContain('COLLATE');
+            });
+        });
+
+        describe('Boolean boundary translation', () => {
+            it('binds a boolean-column boundary as a real boolean for Postgres', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, {
+                    sort: [{ key: 'flag', direction: 1 }],
+                    after_boundary: { values: [encodeSortValue(true)], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement).not.toBeNull();
+                expect(result.where_statement!.statement_arguments).toContain(true);
+            });
+
+            it('binds a boolean-column boundary as 1/0 for SQLite', () => {
+                const result = prepareColumnTableQuery('sqlite', kindTable, {
+                    sort: [{ key: 'flag', direction: 1 }],
+                    after_boundary: { values: [encodeSortValue(false)], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement).not.toBeNull();
+                expect(result.where_statement!.statement_arguments).toContain(0);
+            });
+        });
+
+        describe('After-boundary predicate', () => {
+            it('binds the boundary values directly, with no correlated subquery', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, {
+                    sort: [{ key: 'name', direction: 1 }],
+                    after_boundary: { values: ['Bob'], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement).not.toBeNull();
+                expect(result.where_statement!.where_clause_statement).not.toContain('SELECT');
+                expect(result.where_statement!.statement_arguments).toContain('Bob');
+            });
         });
     });
 });

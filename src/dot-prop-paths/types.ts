@@ -2,8 +2,7 @@
 
 
 import type { EnsureRecord } from "../types.js";
-
-type PrimaryKeyValue = string | number;
+import type { PrimaryKeyValue } from "../utils/getKeyValue.ts";
 
 
 export type DotPropPathsRecord<T extends Record<string, any>> = {

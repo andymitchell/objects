@@ -30,8 +30,30 @@ export const SortAndSliceBaseSchema = z.object({
 });
 
 /**
- * Zod schema for SortAndSlice — offset/after_pk pagination.
- * Composes SortAndSliceBaseSchema with offset/after_pk fields.
+ * Zod schema for EncodedSortValue — the normalised form of a sort-key value: `string | number | null`.
+ * Runtime source of truth for the {@link EncodedSortValue} contract, used to validate boundary values.
+ */
+export const EncodedSortValueSchema = z.union([z.string(), z.number(), z.null()]);
+
+/**
+ * Zod schema for SortBoundary — a value-based pagination boundary: the encoded sort-key values
+ * of the last row on a page, plus that row's primary key.
+ *
+ * Validates only structure (each value is `string | number | null`, pk is a valid primary key).
+ * The 1:1 alignment of `values` with the user's `sort` is enforced by `SortAndSliceSchema`, which
+ * has the sort in context.
+ *
+ * @example
+ * const boundary = SortBoundarySchema.parse({ values: ['2024-01-01', 42], pk: 'row_9' });
+ */
+export const SortBoundarySchema = z.object({
+    values: z.array(EncodedSortValueSchema),
+    pk: PrimaryKeyValueSchema,
+});
+
+/**
+ * Zod schema for SortAndSlice — offset / after_pk / after_boundary pagination.
+ * Composes SortAndSliceBaseSchema with the three pagination fields.
  * Enforces: offset/after_pk mutual exclusion, after_pk requires non-empty sort.
  *
  * @example
@@ -40,6 +62,7 @@ export const SortAndSliceBaseSchema = z.object({
 export const SortAndSliceSchema = SortAndSliceBaseSchema.extend({
     offset: z.number().int().nonnegative().optional(),
     after_pk: PrimaryKeyValueSchema.optional(),
+    after_boundary: SortBoundarySchema.optional(),
 }).superRefine((data, ctx) => {
     if (data.offset !== undefined && data.after_pk !== undefined) {
         ctx.addIssue({ code: "custom", message: 'offset and after_pk are mutually exclusive' });

@@ -54,6 +54,17 @@ export const COLUMN_TABLE: ColumnTableInfo = {
     tableName: 'items',
     pkColumnName: 'id',
     allowedColumns: [...COLUMN_TABLE_COLUMNS],
+    // Kinds mirror StandardTestRowSchema: string leaves → text, number leaves → numeric, flag → boolean.
+    columnKinds: {
+        id: 'text',
+        age: 'numeric',
+        name: 'text',
+        category: 'text',
+        date: 'text',
+        value: 'numeric',
+        score: 'numeric',
+        flag: 'boolean',
+    },
 };
 
 /**

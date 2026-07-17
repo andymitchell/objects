@@ -12,15 +12,19 @@ import type { DDL } from '../ddl/types.ts';
  *  - `NumericItem` — multi-field with mixed types (numeric, string, category, date)
  *  - `NullableItem` — nullable values for null-last sort assertions
  *  - `UndefinedItem` — undefined values for absent-last sort assertions
+ *  - `NullishItem` — null and absent values together, for null-group ordering assertions
  *  - `NestedItem` — nested object for dot-prop sort key
  *  - `TiedItem` — duplicate sort values for PK tiebreaker
+ *  - `MultiTiedItem` — rows tied on every key of a multi-key sort, for PK tiebreaker assertions
  */
 
 export type NumericItem = { id: string; age: number; name: string; category: string; date: string };
 export type NullableItem = { id: string; value: number | null };
 export type UndefinedItem = { id: string; value?: number };
+export type NullishItem = { id: string; value?: number | null };
 export type NestedItem = { id: string; sender: { name: string } };
 export type TiedItem = { id: string; score: number };
+export type MultiTiedItem = { id: string; score: number; date: string };
 
 export const NumericItemSchema = z.object({
     id: z.string(),
@@ -40,6 +44,11 @@ export const UndefinedItemSchema = z.object({
     value: z.number().optional(),
 });
 
+export const NullishItemSchema = z.object({
+    id: z.string(),
+    value: z.number().nullish(),
+});
+
 export const NestedItemSchema = z.object({
     id: z.string(),
     sender: z.object({ name: z.string() }),
@@ -50,16 +59,24 @@ export const TiedItemSchema = z.object({
     score: z.number(),
 });
 
-/** Union covering every shape used in the standard sort/slice tests. All branches share `id: string`. */
-export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NestedItem | TiedItem;
+export const MultiTiedItemSchema = z.object({
+    id: z.string(),
+    score: z.number(),
+    date: z.string(),
+});
 
-/** Zod union mirroring `StandardTestItem`. First-match wins; branches with overlapping shapes (NullableItem/UndefinedItem) accept either. */
+/** Union covering every shape used in the standard sort/slice tests. All branches share `id: string`. */
+export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem;
+
+/** Zod union mirroring `StandardTestItem`. First-match wins; branches with overlapping shapes (NullableItem/UndefinedItem/NullishItem) accept either. */
 export const StandardTestItemSchema = z.union([
     NumericItemSchema,
     NullableItemSchema,
     UndefinedItemSchema,
+    NullishItemSchema,
     NestedItemSchema,
     TiedItemSchema,
+    MultiTiedItemSchema,
 ]);
 
 export const numericItems: NumericItem[] = [
@@ -84,6 +101,14 @@ export const undefinedItems: UndefinedItem[] = [
     { id: '4' },
 ];
 
+export const nullishItems: NullishItem[] = [
+    { id: '1', value: 5 },
+    { id: '2', value: null },
+    { id: '3' },
+    { id: '4', value: 3 },
+    { id: '5', value: null },
+];
+
 export const nestedItems: NestedItem[] = [
     { id: 'x', sender: { name: 'Zara' } },
     { id: 'y', sender: { name: 'Alice' } },
@@ -94,6 +119,15 @@ export const tiedItems: TiedItem[] = [
     { id: 'c', score: 10 },
     { id: 'a', score: 10 },
     { id: 'b', score: 10 },
+];
+
+// e/a carry distinct scores; c and d tie on BOTH score and date, so only the pk ASC tiebreaker orders c before d.
+export const multiTiedItems: MultiTiedItem[] = [
+    { id: 'b', score: 20, date: '2024-01-01' },
+    { id: 'd', score: 20, date: '2024-01-02' },
+    { id: 'a', score: 10, date: '2024-01-05' },
+    { id: 'c', score: 20, date: '2024-01-02' },
+    { id: 'e', score: 5, date: '2024-01-09' },
 ];
 
 /** 10 items for limit/offset/cursor tests, using PK ASC as default sort. */

@@ -4,13 +4,16 @@ import type { DDL } from '../ddl/types.ts';
 import type { SortAndSlice, SortDefinition } from './types.ts';
 import {
     type NullableItem,
+    type NullishItem,
     type NumericItem,
     type StandardTestItem,
     type TiedItem,
     type UndefinedItem,
     STANDARD_TEST_DDL,
+    multiTiedItems,
     nestedItems,
     nullableItems,
+    nullishItems,
     numericItems,
     tenItems,
     tiedItems,
@@ -116,11 +119,14 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
     const defaultSort = { sort: [{ key: 'id' as const, direction: 1 as const }] };
     const sortAge: SortDefinition<any> = [{ key: 'age', direction: 1 }];
     const sortName: SortDefinition<any> = [{ key: 'name', direction: -1 }];
+    const sortNameAsc: SortDefinition<any> = [{ key: 'name', direction: 1 }];
     const sortCategoryName: SortDefinition<any> = [{ key: 'category', direction: 1 }, { key: 'name', direction: 1 }];
     const sortCategoryDate: SortDefinition<any> = [{ key: 'category', direction: 1 }, { key: 'date', direction: -1 }];
     const sortValue: SortDefinition<any> = [{ key: 'value', direction: 1 }];
     const sortValueDesc: SortDefinition<any> = [{ key: 'value', direction: -1 }];
     const sortScore: SortDefinition<any> = [{ key: 'score', direction: 1 }];
+    const sortScoreDesc: SortDefinition<any> = [{ key: 'score', direction: -1 }];
+    const sortScoreDate: SortDefinition<any> = [{ key: 'score', direction: 1 }, { key: 'date', direction: -1 }];
     const sortNested: SortDefinition<any> = [{ key: 'sender.name', direction: 1 }];
     const sortId: SortDefinition<any> = defaultSort.sort;
 
@@ -156,6 +162,10 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
             });
         });
 
+        // Mixed-type sort values (e.g. a number and a string under one key) are deliberately not
+        // exercised here: typed SQL implementations rightly refuse rows that violate their schema,
+        // so cross-type ordering cannot be a shared black-box contract. It is pinned by unit tests
+        // on the comparator instead.
         describe('Null / Undefined Values', () => {
             itIfSupported(sortValue)('places null sort values after all non-null (ascending)', async () => {
                 const result = await run(
@@ -191,6 +201,37 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
                 if (result === 'skipped') return;
                 expect(result.map(i => i.value)).toEqual([5, 3, null, null]);
             });
+
+            itIfSupported(sortValueDesc)('places undefined sort values after all non-null regardless of sort direction', async () => {
+                const result = await run(
+                    undefinedItems,
+                    { sort: sortValueDesc } as SortAndSlice<UndefinedItem>,
+                    'id'
+                );
+                if (result === 'skipped') return;
+                // Present values descending (5 → '1', 3 → '3'), then the undefined rows in pk ASC order
+                expect(result.map(i => i.id)).toEqual(['1', '3', '2', '4']);
+            });
+
+            itIfSupported(sortValue)('null and undefined sort as one group, ordered within by the pk tiebreaker', async () => {
+                const ascending = await run(
+                    nullishItems,
+                    { sort: sortValue } as SortAndSlice<NullishItem>,
+                    'id'
+                );
+                if (ascending === 'skipped') return;
+                // Present values ascending (3 → '4', 5 → '1'), then the null/absent rows in pk ASC order
+                expect(ascending.map(i => i.id)).toEqual(['4', '1', '2', '3', '5']);
+
+                const descending = await run(
+                    nullishItems,
+                    { sort: sortValueDesc } as SortAndSlice<NullishItem>,
+                    'id'
+                );
+                if (descending === 'skipped') return;
+                // Present values descending (5 → '1', 3 → '4'); the null/absent group stays last, still pk ASC
+                expect(descending.map(i => i.id)).toEqual(['1', '4', '2', '3', '5']);
+            });
         });
 
         describe('PK Tiebreaker', () => {
@@ -199,6 +240,21 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
                 if (result === 'skipped') return;
                 // All score=10, PK tiebreaker ASC: a, b, c
                 expect(result.map(i => i.id)).toEqual(['a', 'b', 'c']);
+            });
+
+            itIfSupported(sortScoreDesc)('pk tiebreaker stays ascending when the sort direction is descending', async () => {
+                const result = await run(tiedItems, { sort: sortScoreDesc }, 'id');
+                if (result === 'skipped') return;
+                // All score=10; the appended pk tiebreaker is ASC even though the requested sort is DESC
+                expect(result.map(i => i.id)).toEqual(['a', 'b', 'c']);
+            });
+
+            itIfSupported(sortScoreDate)('pk tiebreaker resolves rows tied on every key of a multi-key sort', async () => {
+                const result = await run(multiTiedItems, { sort: sortScoreDate }, 'id');
+                if (result === 'skipped') return;
+                // score ASC: e(5), a(10), then the score-20 rows by date DESC: c/d (01-02) before b (01-01);
+                // c before d only via the pk ASC tiebreaker — they tie on both score and date
+                expect(result.map(i => i.id)).toEqual(['e', 'a', 'c', 'd', 'b']);
             });
         });
 
@@ -407,6 +463,14 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
             const combined = await run(tenItems, { ...defaultSort, limit: 7 }, 'id');
             if (page1 === 'skipped' || page2 === 'skipped' || combined === 'skipped') return;
             expect([...page1, ...page2]).toEqual(combined);
+        });
+
+        itIfSupported(sortNameAsc)('reversing the direction of a sort over distinct values reverses the row order', async () => {
+            const ascending = await run(tenItems, { sort: sortNameAsc }, 'id');
+            const descending = await run(tenItems, { sort: sortName }, 'id');
+            if (ascending === 'skipped' || descending === 'skipped') return;
+            // Every name is distinct, so no tiebreaker can mask a direction bug
+            expect(descending.map(i => i.id)).toEqual(ascending.map(i => i.id).reverse());
         });
     });
 

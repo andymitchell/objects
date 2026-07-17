@@ -4,7 +4,7 @@ import { isWhereFilterDefinition, WhereFilterSchema } from './schemas.ts';
 import { isLogicFilter, isPartialObjectFilter } from './typeguards.ts';
 import { validateWhereFilter, compileValidateWhereFilter } from './validateWhereFilter.ts';
 import type { WhereFilterValidationIssue } from './validateWhereFilter.ts';
-import type { MatchJavascriptObject, LogicFilter, PartialObjectFilter, PartialObjectFilterStrict, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep } from './types.ts';
+import type { MatchJavascriptObject, MatchJavascriptObjectOptions, UniversalSchemaConformance, LogicFilter, PartialObjectFilter, PartialObjectFilterStrict, ValueComparisonFlexi, WhereFilterDefinition, WhereFilterDefinitionDeep } from './types.ts';
 
 // SQL re-exports
 import {
@@ -54,6 +54,10 @@ export {
 
 export type {
     MatchJavascriptObject,
+    // The options bag `matchJavascriptObject` and `compileMatchJavascriptObject` take, and the conformance mode
+    // it carries — exported so a caller can name the argument it passes.
+    MatchJavascriptObjectOptions,
+    UniversalSchemaConformance,
     WhereFilterDefinition,
     WhereFilterDefinitionDeep,
     LogicFilter,

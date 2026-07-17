@@ -2,7 +2,7 @@ import { getProperty, getPropertySpreadingArrays } from "../dot-prop-paths/getPr
 import isPlainObject from "../utils/isPlainObject.js";
 import { findShapeAmbiguousPaths } from "../dot-prop-paths/shape-ambiguity.ts";
 import { findNormalizingPaths } from "../dot-prop-paths/schema-normalization.ts";
-import type { MatchJavascriptObject, MatchJavascriptObjectOptions, MatchJavascriptObjectWithFilter, ObjOrDraft, WhereFilterDefinition } from "./types.js";
+import type { MatchJavascriptObject, MatchJavascriptObjectOptions, MatchJavascriptObjectWithFilter, ObjOrDraft, UniversalSchemaConformance, WhereFilterDefinition } from "./types.js";
 import { isWhereFilterDefinition } from "./schemas.ts";
 import { isLogicFilter } from "./typeguards.ts";
 import { evaluatePredicate, negationCore, parseFieldPredicate, partitionNegations } from "./ast/index.ts";
@@ -33,6 +33,57 @@ A criteria of {'children.grandchildren': {name: 'Bob'}} is valid. It'll analyse 
 */
 
 export type { ObjOrDraft };
+
+// ─── Entry gates ───
+// Each gate refuses one class of bad input, and each is grouped by what it depends on: the filter, the schema,
+// or the object. That split is what lets a matcher be compiled — the filter and schema gates can run as soon as
+// those are known, while the object gates can only ever run per object. Both entry points share these, so a
+// refusal reads the same wherever it is met.
+
+/** Refuse a filter outside the query language. Depends on the filter alone. */
+function assertFilterIsWellDefined(filter: unknown): void {
+    if( !isWhereFilterDefinition(filter) ) {
+        throw new Error("matchJavascriptObject filter was not well-defined. Received: "+safeJson(filter));
+    }
+}
+
+/**
+ * Refuse a schema the schema-driven SQL contract cannot represent. Depends on the schema alone.
+ *
+ * A scalar|array schema is unrepresentable downstream. A value-normalizing schema (coerce/transform/pipe) is
+ * matched here against the ORIGINAL value while a schema-driven backend casts, so the two would disagree even on
+ * conforming data. Reject both up-front, consistent with the matcher already throwing on invalid input.
+ */
+function assertSchemaIsRepresentable(conformance: UniversalSchemaConformance<any>): void {
+    const ambiguous = findShapeAmbiguousPaths(conformance.schema);
+    if( ambiguous.length>0 ) {
+        throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a shape-ambiguous schema (a schema-driven backend cannot represent a scalar|array field): ${ambiguous.map(a => a.dotprop_path).join(', ')}`);
+    }
+    const normalizing = findNormalizingPaths(conformance.schema);
+    if( normalizing.length>0 ) {
+        throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a value-normalizing schema (a schema-driven backend compares the raw stored value, not the coerced/transformed one): ${normalizing.map(n => n.dotprop_path).join(', ')}`);
+    }
+}
+
+/** Refuse anything but a plain object. Depends on the object alone. */
+function assertIsPlainObject(object: unknown): void {
+    if( !isPlainObject(object) ) {
+        let json: string = process.env.NODE_ENV==='test'? safeJson(object) : 'redacted';
+        throw new Error("matchJavascriptObject requires plain object. Received: "+json);
+    }
+}
+
+/**
+ * Refuse an object the schema does not describe. Depends on the object (and the schema).
+ *
+ * Non-conforming data would be duck-typed to a result a schema-driven backend cannot reproduce.
+ * `objectValidatedAgainstSchema` asserts the caller has already checked, and skips it as a perf bypass.
+ */
+function assertObjectConformsToSchema(object: unknown, conformance: UniversalSchemaConformance<any>): void {
+    if( !conformance.objectValidatedAgainstSchema && !conformance.schema.safeParse(object).success ) {
+        throw new Error("matchJavascriptObject: object does not conform to the universalSchemaConformance schema");
+    }
+}
 
 /**
  * Checks whether a single plain JavaScript object matches a Mongo-style `WhereFilterDefinition`.
@@ -73,33 +124,15 @@ export type { ObjOrDraft };
  * matchJavascriptObject({ owner: ['a','b'] }, { owner: 'a' }, { universalSchemaConformance: { schema } }); // throws — array under a scalar field
  */
 const matchJavascriptObject:MatchJavascriptObjectWithFilter = <T extends Record<string, any> = Record<string, any>, F extends Record<string, any> = T>(object:ObjOrDraft<T>, filter:WhereFilterDefinition<F>, options?:MatchJavascriptObjectOptions<T>):boolean => {
-    if( !isPlainObject(object) ) {
-        let json: string = process.env.NODE_ENV==='test'? safeJson(object) : 'redacted';
-        throw new Error("matchJavascriptObject requires plain object. Received: "+json)
-    }
-
-    if( !isWhereFilterDefinition(filter) ) {
-        throw new Error("matchJavascriptObject filter was not well-defined. Received: "+safeJson(filter));
-    }
+    // The gate order is part of this function's contract: a bad object is reported ahead of a bad filter, a bad
+    // filter ahead of an unrepresentable schema, and that ahead of a non-conforming object. Keep the sequence.
+    assertIsPlainObject(object);
+    assertFilterIsWellDefined(filter);
 
     const conformance = options?.universalSchemaConformance;
     if( conformance ) {
-        // Hold the value-driven matcher to the schema-driven SQL contract: a scalar|array schema is
-        // unrepresentable downstream, and a non-conforming object would be duck-typed to a result SQL cannot
-        // reproduce. Reject both up-front (consistent with the matcher already throwing on invalid input).
-        const ambiguous = findShapeAmbiguousPaths(conformance.schema);
-        if( ambiguous.length>0 ) {
-            throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a shape-ambiguous schema (a schema-driven backend cannot represent a scalar|array field): ${ambiguous.map(a => a.dotprop_path).join(', ')}`);
-        }
-        // A value-normalizing schema (coerce/transform/pipe) is matched here against the ORIGINAL value, while a
-        // schema-driven backend casts — so they would disagree even on conforming data. Reject it like ambiguity.
-        const normalizing = findNormalizingPaths(conformance.schema);
-        if( normalizing.length>0 ) {
-            throw new Error(`matchJavascriptObject: universalSchemaConformance rejects a value-normalizing schema (a schema-driven backend compares the raw stored value, not the coerced/transformed one): ${normalizing.map(n => n.dotprop_path).join(', ')}`);
-        }
-        if( !conformance.objectValidatedAgainstSchema && !conformance.schema.safeParse(object).success ) {
-            throw new Error("matchJavascriptObject: object does not conform to the universalSchemaConformance schema");
-        }
+        assertSchemaIsRepresentable(conformance);
+        assertObjectConformsToSchema(object, conformance);
     }
 
     return _matchJavascriptObject(object, filter, [filter]);
@@ -110,34 +143,56 @@ export default matchJavascriptObject;
 
 
 /**
- * Compiles a reusable matcher function from a filter definition.
+ * Compiles a reusable predicate from a filter definition, ready to test many objects against it.
  *
- * This allows you to create a function once and reuse it to test multiple objects
- * against the same filter criteria, improving readability and performance when filtering many items.
+ * 101: a `WhereFilterDefinition` is data, not code — before it can answer anything about an object, it has to be
+ * understood. That work depends only on the filter, so compiling does it once here instead of on every object.
+ * The predicate handed back then does only what genuinely varies: reading the object and comparing values.
  *
- * @template T - The type of object the filter will match.
- * @param {WhereFilterDefinition<T>} filter - The filter definition describing the match criteria.
- * @returns {BasicMatchJavascriptObject<T>} - A function that takes an object and returns true if it matches the filter.
+ * Prefer this to {@link matchJavascriptObject} whenever one filter meets more than one object — filtering an
+ * array, answering a query row by row. For a single object the two are equivalent.
+ *
+ * @param filter The filter definition describing the match criteria.
+ * @param options Optional; see `universalSchemaConformance` on {@link matchJavascriptObject}. The schema's own
+ *   checks belong to compiling; whether an OBJECT conforms is settled per call, since only the object answers that.
+ * @returns A predicate reporting whether an object matches the filter. It throws if the object is not a plain
+ *   object, or — in conformance mode — does not conform to the schema.
+ * @throws If the filter is malformed, or — in conformance mode — the schema is shape-ambiguous or
+ *   value-normalizing. These are faults in the arguments supplied here, so they surface here rather than being
+ *   deferred to whichever object happens to arrive first.
  *
  * @example
- * const filter = { age: { $gte: 18 } };
- * const isAdult = compileMatchJavascriptObject(filter);
+ * const isAdult = compileMatchJavascriptObject({ age: { $gte: 18 } });
  *
  * isAdult({ name: 'Alice', age: 30 }); // true
  * isAdult({ name: 'Bob', age: 15 });   // false
  */
-export const compileMatchJavascriptObject = <T extends Record<string, any>, F extends Record<string, any> = T>(filter:WhereFilterDefinition<F>):MatchJavascriptObject<T> => {
-    return (object:ObjOrDraft<T>) => matchJavascriptObject(object, filter);
+export const compileMatchJavascriptObject = <T extends Record<string, any>, F extends Record<string, any> = T>(filter:WhereFilterDefinition<F>, options?:MatchJavascriptObjectOptions<T>):MatchJavascriptObject<T> => {
+    assertFilterIsWellDefined(filter);
+
+    const conformance = options?.universalSchemaConformance;
+    if( conformance ) assertSchemaIsRepresentable(conformance);
+
+    return (object:ObjOrDraft<T>) => {
+        assertIsPlainObject(object);
+        if( conformance ) assertObjectConformsToSchema(object, conformance);
+
+        return _matchJavascriptObject(object, filter, [filter]);
+    }
 }
 
 
 /**
  * Filters an array of JavaScript objects, returning only those that match the given filter.
  *
- * @template T - The type of objects in the array.
- * @param {ObjOrDraft<T>[]} objects - An array of plain JavaScript objects to filter.
- * @param {WhereFilterDefinition<T>} filter - The filter definition used to test each object.
- * @returns {ObjOrDraft<T>[]} - An array containing only the objects that match the filter.
+ * The filter is compiled once and applied to every element, so the cost of understanding it is paid once for the
+ * whole array rather than once per object.
+ *
+ * @param objects An array of plain JavaScript objects to filter.
+ * @param filter The filter definition used to test each object.
+ * @returns A new array holding only the matching objects, in their original order.
+ * @throws If the filter is malformed — including for an empty array, where no object would surface the fault —
+ *   or if any object is not a plain object.
  *
  * @example
  * const users = [{ name: 'Alice', age: 30 }, { name: 'Bob', age: 16 }];
@@ -145,7 +200,7 @@ export const compileMatchJavascriptObject = <T extends Record<string, any>, F ex
  * filterJavascriptObjects(users, filter); // [{ name: 'Alice', age: 30 }]
  */
 export function filterJavascriptObjects<T extends {} = {}, F extends Record<string, any> = T extends Record<string, any> ? T : Record<string, any>>(objects:ObjOrDraft<T>[], filter:WhereFilterDefinition<F>):ObjOrDraft<T>[] {
-    return objects.filter(x => matchJavascriptObject<T, F>(x, filter));
+    return objects.filter(compileMatchJavascriptObject<T, F>(filter));
 }
 
 

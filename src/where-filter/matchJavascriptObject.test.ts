@@ -1,6 +1,6 @@
 import { createDraft } from "immer";
 import { z } from "zod";
-import matchJavascriptObjectReal, { compileMatchJavascriptObject, type ObjOrDraft } from "./matchJavascriptObject.js";
+import matchJavascriptObjectReal, { compileMatchJavascriptObject, filterJavascriptObjects, type ObjOrDraft } from "./matchJavascriptObject.js";
 import { type WhereFilterDefinition } from "./types.js";
 import { standardTests, AcknowledgementCollector, assertNoCapabilityDrift } from "./standardTests.js";
 import { JS_MANIFEST } from "./standard-tests/manifests/js.manifest.ts";
@@ -125,6 +125,107 @@ describe('testMatchJavascriptObject', () => {
     });
 
 })
+
+/**
+ * The same reference matcher, reached through `compileMatchJavascriptObject`.
+ *
+ * Compiling understands the filter once and hands back a predicate, so running the whole battery through it is a
+ * differential: every verdict the direct matcher gives, the compiled one must give too — across all 27 sections
+ * and the seeded fuzz, not just the handful of filters anyone would think to write by hand here.
+ */
+async function matchJavascriptObjectCompiled<T extends Record<string, any>>(object: ObjOrDraft<T>, filter: WhereFilterDefinition<T>): Promise<boolean> {
+    return compileMatchJavascriptObject<T>(filter)(object);
+}
+
+describe('testMatchJavascriptObject — reached through the compiled matcher', () => {
+
+    const acknowledgements = new AcknowledgementCollector();
+
+    standardTests({
+        test,
+        expect,
+        matchJavascriptObject: matchJavascriptObjectCompiled,
+        implementationName: 'javascript-compiled',
+        // The secondary oracle is deliberately absent. It checks the reference against an independent
+        // implementation of the query language, which the direct run above already does; repeating it here would
+        // say nothing about compiling. The seeded fuzz itself stays, because it reaches filters no hand-written
+        // case would.
+        fuzz: { iterations: 300 },
+        acknowledgements,
+    })
+
+    test('capability manifest — compiling introduces no seam of its own', () => {
+        assertNoCapabilityDrift(acknowledgements, JS_MANIFEST, expect);
+    });
+});
+
+describe('compileMatchJavascriptObject — understands the filter once, then answers about many objects', () => {
+
+    test('refuses a malformed filter as it compiles, before any object has been supplied', () => {
+        expect(() =>
+            // @ts-expect-error — undefined is not a filter; the type system rejects it, and so must the runtime
+            compileMatchJavascriptObject(undefined),
+        ).toThrow('filter was not well-defined');
+    });
+
+    test('the compiled predicate still refuses a non-plain object, which no filter can rule on in advance', () => {
+        const isAdult = compileMatchJavascriptObject<{ age: number }>({ age: { $gte: 18 } });
+        // @ts-expect-error — a string is not a plain object; the type system rejects it, and so must the runtime
+        expect(() => isAdult('nineteen')).toThrow('requires plain object');
+    });
+
+    describe('universalSchemaConformance — the schema is settled at compile, the object at each call', () => {
+        const ScalarOwner = z.object({ id: z.string(), owner: z.string() });
+        const AmbiguousOwner = z.object({ id: z.string(), owner: z.union([z.string(), z.array(z.string())]) });
+        const CoerceNumber = z.object({ id: z.string(), n: z.coerce.number() });
+
+        test('a conforming object matches exactly as the direct matcher would', () => {
+            const ownedByAlice = compileMatchJavascriptObject<z.infer<typeof ScalarOwner>>({ owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner } });
+            expect(ownedByAlice({ id: '1', owner: 'alice' })).toBe(true);
+            expect(ownedByAlice({ id: '2', owner: 'bob' })).toBe(false);
+        });
+
+        test('rejects a shape-ambiguous (scalar | array) schema as it compiles — no object could redeem it', () => {
+            expect(() =>
+                compileMatchJavascriptObject<z.infer<typeof AmbiguousOwner>>({ owner: 'alice' }, { universalSchemaConformance: { schema: AmbiguousOwner } }),
+            ).toThrow(/shape-ambiguous/i);
+        });
+
+        test('rejects a value-normalizing (z.coerce.*) schema as it compiles', () => {
+            expect(() =>
+                compileMatchJavascriptObject<z.infer<typeof CoerceNumber>>({ n: 1 }, { universalSchemaConformance: { schema: CoerceNumber } }),
+            ).toThrow(/value-normalizing/i);
+        });
+
+        test('refuses a non-conforming object per call — conformance is a property of the object, not the filter', () => {
+            const ownedByAlice = compileMatchJavascriptObject<z.infer<typeof ScalarOwner>>({ owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner } });
+            // @ts-expect-error — array data deliberately violates the scalar schema; the runtime must reject it too
+            expect(() => ownedByAlice({ id: '1', owner: ['alice', 'bob'] })).toThrow(/does not conform/i);
+        });
+
+        test('objectValidatedAgainstSchema:true skips the per-object check, so the compiled predicate duck-types again', () => {
+            const ownedByAlice = compileMatchJavascriptObject<z.infer<typeof ScalarOwner>>({ owner: 'alice' }, { universalSchemaConformance: { schema: ScalarOwner, objectValidatedAgainstSchema: true } });
+            // @ts-expect-error — array data deliberately violates the scalar schema; the bypass skips validation, so it duck-types rather than being rejected
+            expect(ownedByAlice({ id: '1', owner: ['alice', 'bob'] })).toBe(true);
+        });
+    });
+});
+
+describe('filterJavascriptObjects — keeps the objects a filter matches', () => {
+
+    test('keeps only the matching objects, in the order they were given', () => {
+        const users = [{ name: 'Alice', age: 30 }, { name: 'Bob', age: 16 }, { name: 'Cara', age: 44 }];
+
+        expect(filterJavascriptObjects(users, { age: { $gte: 18 } })).toEqual([{ name: 'Alice', age: 30 }, { name: 'Cara', age: 44 }]);
+    });
+
+    test('refuses a malformed filter even when there is nothing to filter', () => {
+        expect(() =>
+            // @ts-expect-error — undefined is not a filter; the type system rejects it, and so must the runtime
+            filterJavascriptObjects([], undefined),
+        ).toThrow('filter was not well-defined');
+    });
+});
 
 describe('inherited-name paths never match, at both the primary read and the array-spreading fallback', () => {
     // Both readers must agree an inherited member is absent: if only the primary read treated it as

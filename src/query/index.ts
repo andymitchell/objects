@@ -22,6 +22,10 @@ export { SortEntrySchema, SortDefinitionSchema, SortAndSliceBaseSchema, SortAndS
 // JS Runtime
 export { sortAndSliceObjects } from './sortAndSliceObjects.ts';
 
+// Ordering contract — the single JS statement of the sort-value/null/pk-tiebreak rules.
+export type { EncodedSortValue } from './sortCompare.ts';
+export { encodeSortValue, compareValues, resolveSort, buildSortComparator } from './sortCompare.ts';
+
 // SQL
 export type { SqlDialect, SqlFragment } from './sql/index.ts';
 export { prepareObjectTableQuery } from './sql/index.ts';

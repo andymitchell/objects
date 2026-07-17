@@ -61,6 +61,9 @@ export function flattenQueryClausesToSql(
         );
         sqlParts.push(`LIMIT ${appended.sql}`);
         parameters = appended.allParameters;
+    } else if (result.offset_statement && dialect === 'sqlite') {
+        // SQLite cannot express OFFSET without LIMIT; LIMIT -1 is its documented "no limit" idiom.
+        sqlParts.push('LIMIT -1');
     }
 
     if (result.offset_statement) {

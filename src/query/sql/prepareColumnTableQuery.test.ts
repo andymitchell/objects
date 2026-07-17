@@ -11,9 +11,9 @@ const table: ColumnTableInfo = {
 
 describe('prepareColumnTableQuery', () => {
 
-    // NOTE: standardTests are NOT called here — they belong in the per-dialect
-    // adapter test files (prepareColumnTableQuery.sqlite.test.ts / .pg.test.ts)
-    // which create an in-memory DB, insert items, execute clauses, and return objects.
+    // standardTests run in the per-dialect adapter files (prepareColumnTableQuery.pg.test.ts /
+    // prepareColumnTableQuery.sqlite.test.ts), which execute the prepared clauses against real
+    // engines. This file inspects the emitted SQL strings themselves.
 
     // --- Per-file only ---
 

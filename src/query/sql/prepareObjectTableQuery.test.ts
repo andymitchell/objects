@@ -25,9 +25,9 @@ const table: ObjectTableInfo<Email> = {
 
 describe('prepareObjectTableQuery', () => {
 
-    // NOTE: standardTests are NOT called here — they belong in the per-dialect
-    // adapter test files (prepareObjectTableQuery.sqlite.test.ts / .pg.test.ts)
-    // which create an in-memory DB, insert items, execute clauses, and return objects.
+    // standardTests run in the per-dialect adapter files (prepareObjectTableQuery.pg.test.ts /
+    // prepareObjectTableQuery.sqlite.test.ts), which execute the prepared clauses against real
+    // engines. This file inspects the emitted SQL strings themselves.
 
     // --- Per-file only (SQL output inspection) ---
 

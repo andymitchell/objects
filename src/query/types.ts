@@ -235,6 +235,11 @@ export type ObjectTableInfo<T extends Record<string, any>> = TableInfo & {
  * comparator (which does not hold for text on a non-`C` database, nor for booleans on SQLite),
  * so declare every column you sort or paginate on. An empty object (`{}`) is valid.
  *
+ * A `'text'` column's ORDER BY and cursor comparisons are emitted as `col COLLATE "C"`, so any index
+ * meant to serve them must be built on that same pinned expression (e.g. `CREATE INDEX ... ON t (col
+ * COLLATE "C")`) — a plain index on `col` will not be used. An undeclared column carries no pin, so a
+ * plain index serves it, at the cost of the code-point ordering guarantee above.
+ *
  * @example
  * const table: ColumnTableInfo = {
  *   tableName: 'users',

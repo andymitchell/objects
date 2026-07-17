@@ -7,12 +7,13 @@ import type { ZodKind } from '../../dot-prop-paths/schema-tree.ts';
 import { convertDotPropPathToPostgresJsonPath } from '../../utils/sql/postgres/convertDotPropPathToPostgresJsonPath.ts';
 import { convertDotPropPathToSqliteJsonPath } from '../../utils/sql/sqlite/convertDotPropPathToSqliteJsonPath.ts';
 import { SortAndSliceSchema } from '../schemas.ts';
-import { resolveSort } from '../sortCompare.ts';
+import { encodeSortValue, resolveSort } from '../sortCompare.ts';
 import type { ObjectTableInfo, PreparedQueryClausesResult, QueryError, SortAndSlice } from '../types.ts';
 import type { SqlDialect, SqlFragment } from './types.ts';
 import { _buildOrderByClause } from './internals/buildOrderByClause.ts';
 import { _buildLimitClause, _buildOffsetClause } from './internals/buildLimitOffset.ts';
 import { _buildAfterPkWhereClause } from './internals/buildAfterPkWhere.ts';
+import { _buildAfterBoundaryWhereClause, type BoundaryEntry } from './internals/buildAfterBoundaryWhere.ts';
 import { concatSqlParameters } from './internals/sqlParameterUtils.ts';
 
 /** Converts internal SqlFragment to public PreparedWhereClauseStatement. */
@@ -96,6 +97,11 @@ const SORTABLE_LEAF_KINDS = Object.getOwnPropertyNames(SORTABLE_LEAF_KIND_MAP) a
  * @note Sort keys must address scalar leaves. A key whose schema type is an object or array is
  *   refused (`unexpected_kind`): structural values have no ordering the JS comparator and both
  *   SQL dialects agree on.
+ * @note `after_boundary` pages by value (the previous page's encoded sort values plus its pk), binding
+ *   those values directly with no correlated subquery, so the walk stays complete even if the boundary
+ *   row has since been deleted. See `SortAndSlice`.
+ * @note Postgres text sort and cursor comparisons are pinned with `COLLATE "C"` (code-point order), so
+ *   ORDER BY and keyset predicates match `compareValues` regardless of the database's default locale.
  */
 export function prepareObjectTableQuery<T extends Record<string, any>>(
     dialect: SqlDialect,
@@ -136,6 +142,13 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
         if (!result.success) {
             // Name the offending key: a multi-key sort otherwise yields errors a caller cannot attribute.
             return { success: false, error: { ...result.error, message: `Sort key '${dotPropPath}': ${result.error.message}` } };
+        }
+        // Pin Postgres text ordering to code-point (C) collation so the engine's ORDER BY and
+        // cursor comparisons match compareValues regardless of the database's locale. Every clause
+        // that reads a sort key flows through this closure, so the pin applies uniformly. SQLite
+        // BINARY is already code-point, and non-text kinds order identically under any collation.
+        if (dialect === 'pg' && result.kind === 'text') {
+            return { success: true, expression: `${result.expression} COLLATE "C"`, kind: result.kind };
         }
         return result;
     };
@@ -192,6 +205,28 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
         cursorStatement = cursorResult.statement;
     }
 
+    // 5b. Build value-based keyset WHERE (if after_boundary present). Binds the boundary's values
+    // directly — no correlated subquery — so a deleted boundary row does not truncate the walk.
+    let boundaryStatement: SqlFragment | null = null;
+    if (sortAndSlice?.after_boundary !== undefined && resolvedSort) {
+        const boundary = sortAndSlice.after_boundary;
+        const userSort = sortAndSlice.sort ?? [];
+        const entries: BoundaryEntry[] = userSort.map((e, i) => ({
+            key: e.key as string,
+            direction: e.direction,
+            value: boundary.values[i]!,
+        }));
+        // Append the synthetic pk tiebreaker entry exactly when resolveSort appended one.
+        if (resolvedSort.length > userSort.length) {
+            entries.push({ key: table.ddl.primary_key, direction: 1, value: encodeSortValue(boundary.pk) });
+        }
+        const boundaryResult = _buildAfterBoundaryWhereClause(entries, pathToSqlExpression, dialect);
+        if (!boundaryResult.success) {
+            return { success: false, errors: boundaryResult.errors };
+        }
+        boundaryStatement = boundaryResult.statement;
+    }
+
     // 6. Compose WHERE clauses
     const whereFragments: SqlFragment[] = [];
     if (filterStatement) {
@@ -199,6 +234,9 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
     }
     if (cursorStatement) {
         whereFragments.push(cursorStatement);
+    }
+    if (boundaryStatement) {
+        whereFragments.push(boundaryStatement);
     }
     if (additionalWhereClauses) {
         for (const clause of additionalWhereClauses) {

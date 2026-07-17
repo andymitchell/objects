@@ -77,7 +77,9 @@ export function encodeSortValue(v: unknown): EncodedSortValue {
  * requires that any two values, however malformed, order consistently. String comparison
  * is by Unicode code point — equal to UTF-8 byte order (SQLite BINARY collation, Postgres
  * C collation), not to JavaScript's native UTF-16 code-unit order, which differs for
- * supplementary-plane characters. Mixed-type pairs
+ * supplementary-plane characters. The SQL builders hold Postgres to this by pinning text sort and cursor
+ * expressions with `COLLATE "C"`, so a database whose default collation is locale-aware (e.g. `en_US`,
+ * where `'a' < 'B'`) still orders exactly as this comparator does. Mixed-type pairs
  * resolve by bracket (numbers before strings, direction-scaled) rather than by string
  * coercion, which was not transitive (`10 < '30' < 5 < 10` cycles). Structural values
  * (objects, arrays) take their string form and so mutually tie; ordering them is outside
@@ -186,8 +188,17 @@ export function compareToBoundary<T extends Record<string, any>>(
     sort: SortDefinition<T>,
     primaryKey: keyof T & string
 ): number {
-    void item; void boundary; void sort; void primaryKey;
-    return 0; // placeholder verdict
+    for (let i = 0; i < sort.length; i++) {
+        const entry = sort[i]!;
+        const cmp = compareValues(getProperty(item, entry.key), boundary.values[i], entry.direction);
+        if (cmp !== 0) return cmp;
+    }
+    // Every user sort key tied. Break by the primary key — always ascending — unless the sort
+    // already ends on the pk (then the tiebreak arm is unreachable and none is appended), the
+    // same rule resolveSort applies. An empty sort has no tiebreak either.
+    const lastEntry = sort[sort.length - 1];
+    if (sort.length === 0 || lastEntry!.key === primaryKey) return 0;
+    return compareValues(item[primaryKey], boundary.pk, 1);
 }
 
 /**

@@ -3,7 +3,7 @@ import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "
 import { isUnspreadableRecordPath, resolvePath } from "../../../dot-prop-paths/resolvePath.ts";
 import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
-import type { DotPropPathConversionResult } from "../types.ts";
+import type { DotPropPathConversionResult, SortValueKind } from "../types.ts";
 import { pgJsonbAccessor } from "./pgJsonbAccessor.ts";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
@@ -77,7 +77,26 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
 
     const accessor = pgJsonbAccessor(columnName, resolved.segments, { asText: !STRUCTURAL_KINDS.includes(zodKind) });
     const cast = noCasting? '' : mappedCast;
-    return { success: true, expression: `${accessor}${cast}` };
+    const expression = `${accessor}${cast}`;
+    // Surface the comparison family so the sort/cursor builders can pin text collation and bind
+    // boundary values correctly. Derived from the cast the leaf actually orders by (which stands
+    // even when `noCasting` drops it from the emitted expression).
+    const kind = sortValueKindFromPgCast(mappedCast);
+    return kind === undefined ? { success: true, expression } : { success: true, expression, kind };
+}
+
+/**
+ * Maps a Postgres cast to the {@link SortValueKind} it produces. Structural (`::jsonb`) and
+ * cast-less leaves have no scalar family and yield `undefined`, so their boundary values bind raw.
+ */
+function sortValueKindFromPgCast(cast: string | undefined): SortValueKind | undefined {
+    switch (cast) {
+        case '::text': return 'text';
+        case '::numeric': return 'numeric';
+        case '::boolean': return 'boolean';
+        case '::bigint': return 'bigint';
+        default: return undefined;
+    }
 }
 
 /**

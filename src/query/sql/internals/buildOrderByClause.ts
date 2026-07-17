@@ -8,9 +8,19 @@ type BuildOrderByClauseResult =
     | { success: false; errors: QueryError[] };
 
 /**
- * Generates an ORDER BY expression string from a SortDefinition.
- * No 'ORDER BY' keyword — just the column list with directions.
- * Appends NULLS LAST to match JS runtime null-sorting behaviour.
+ * Builds the ORDER BY expression list (no `ORDER BY` keyword) from a resolved sort definition:
+ * one `expr DIR` fragment per key, comma-joined, with nulls forced last to match the in-memory
+ * comparator, which sorts null/undefined last in both directions (see {@link compareValues}).
+ *
+ * Postgres uses native `NULLS LAST`; SQLite has no such syntax and simulates it with a leading
+ * `expr IS NULL ASC` term. Each key's expression comes from `pathToSqlExpression`, so when that
+ * converter pins a text key with `COLLATE "C"` the emitted ordering inherits the pin and matches
+ * the comparator regardless of the database's default collation.
+ *
+ * @param sort - The resolved sort definition (primary-key tiebreaker already appended).
+ * @param pathToSqlExpression - Resolves each key to its SQL expression, carrying any collation pin.
+ * @param dialect - `'pg'` (native `NULLS LAST`) or `'sqlite'` (`IS NULL` prefix).
+ * @returns `{ success: true, orderBy }` with the comma-joined expression list, or `{ success: false, errors }`. Never throws.
  *
  * @example
  * _buildOrderByClause([{ key: 'date', direction: -1 }], k => ({ success: true, expression: `data->>'${k}'` }), 'pg')

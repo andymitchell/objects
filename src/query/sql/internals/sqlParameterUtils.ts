@@ -33,12 +33,18 @@ export function appendSqlParameters(
 /**
  * Combines multiple parameterised SQL fragments, renumbering placeholders for safe concatenation.
  *
+ * Each fragment is wrapped in parentheses before joining, because a fragment may itself be an
+ * OR chain — a keyset cursor predicate, a `$or` filter — and the join operator (`AND`) binds
+ * tighter than `OR`. Without the grouping, a later OR arm would escape the join and ignore its
+ * sibling fragments, so a cursor arm could return rows an access-control filter meant to exclude.
+ * A single fragment is returned ungrouped: there is no sibling operator for it to bind against.
+ *
  * @example
  * concatSqlParameters([
  *   { sql: 'age > $1', parameters: [5] },
  *   { sql: 'name = $1', parameters: ['Bob'] }
  * ], 'pg', ' AND ')
- * // { sql: 'age > $1 AND name = $2', parameters: [5, 'Bob'] }
+ * // { sql: '(age > $1) AND (name = $2)', parameters: [5, 'Bob'] }
  */
 export function concatSqlParameters(
     fragments: SqlFragment[],
@@ -54,5 +60,9 @@ export function concatSqlParameters(
         allParameters.push(...fragment.parameters);
     }
 
-    return { sql: sqlParts.join(join), parameters: allParameters as SqlFragment['parameters'] };
+    const sql = sqlParts.length > 1
+        ? sqlParts.map(part => `(${part})`).join(join)
+        : (sqlParts[0] ?? '');
+
+    return { sql, parameters: allParameters as SqlFragment['parameters'] };
 }

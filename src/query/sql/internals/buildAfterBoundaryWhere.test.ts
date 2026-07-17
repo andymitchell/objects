@@ -64,6 +64,20 @@ describe('buildAfterBoundaryWhere', () => {
             expect(result.statement.sql).toBe('(a IS NULL AND (id > $1 OR id IS NULL))');
             expect(result.statement.parameters).toEqual(['Z']);
         });
+
+        it('emits an explicitly-false predicate when every boundary value is null', () => {
+            // An all-null boundary sits at the NULLS-LAST end: no row is ordered strictly after it.
+            // The predicate must be well-formed false (not an empty string) so it composes safely.
+            const entries: BoundaryEntry[] = [
+                { key: 'a', direction: 1, value: null },
+                { key: 'id', direction: 1, value: null },
+            ];
+            const result = _buildAfterBoundaryWhereClause(entries, identity, 'pg');
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.statement.sql).toBe('1=0');
+            expect(result.statement.parameters).toEqual([]);
+        });
     });
 
     describe('SQLite placeholders', () => {

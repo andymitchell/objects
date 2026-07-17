@@ -100,6 +100,13 @@ export function _buildAfterBoundaryWhereClause(
         orBranches.push(`(${parts.join(' AND ')})`);
     }
 
+    // Every boundary value was null → the boundary sits at the NULLS-LAST end, so no row is ordered
+    // strictly after it (matching compareToBoundary, which returns ≤ 0 for every row here). Emit an
+    // explicitly-false predicate rather than an empty string, which would be malformed once composed.
+    if (orBranches.length === 0) {
+        return { success: true, statement: { sql: '1=0', parameters: [] } };
+    }
+
     return { success: true, statement: { sql: orBranches.join(' OR '), parameters } };
 }
 

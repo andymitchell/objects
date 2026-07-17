@@ -31,6 +31,7 @@ export const StandardTestRowSchema = z.object({
     value: z.number().nullish(),
     score: z.number().optional(),
     sender: z.object({ name: z.string() }).optional(),
+    flag: z.boolean().optional(),
 });
 export type StandardTestRow = z.infer<typeof StandardTestRowSchema>;
 
@@ -46,7 +47,7 @@ export const OBJECT_TABLE: ObjectTableInfo<StandardTestRow> = {
  * The flat columns of the relational (column-table) variant. `sender` is absent: a nested
  * object has no relational column, so the dot-prop test is gated off via `COLUMN_TABLE_DDL`.
  */
-export const COLUMN_TABLE_COLUMNS = ['id', 'age', 'name', 'category', 'date', 'value', 'score'] as const;
+export const COLUMN_TABLE_COLUMNS = ['id', 'age', 'name', 'category', 'date', 'value', 'score', 'flag'] as const;
 
 /** Table descriptor for the relational (column-table) suites. */
 export const COLUMN_TABLE: ColumnTableInfo = {
@@ -78,7 +79,18 @@ export const COLUMN_TABLE_DDL: DDL<StandardTestItem> = {
  * Rows are selected back via `payload` and `JSON.parse`d, so the round-trip reproduces the
  * exact item regardless of how each driver types its column values; the typed columns exist
  * purely for the engine to ORDER BY.
+ *
+ * @param dialect Booleans bind as-is for Postgres (a real `BOOLEAN` column), but
+ *   better-sqlite3 cannot bind a JS boolean, so for SQLite they become `1`/`0` into the
+ *   `INTEGER` flag column — SQLite's own boolean representation.
  */
-export function toColumnRowParams(item: Record<string, unknown>): unknown[] {
-    return [...COLUMN_TABLE_COLUMNS.map(column => item[column] ?? null), JSON.stringify(item)];
+export function toColumnRowParams(item: Record<string, unknown>, dialect: 'pg' | 'sqlite'): unknown[] {
+    return [
+        ...COLUMN_TABLE_COLUMNS.map(column => {
+            const value = item[column] ?? null;
+            if (dialect === 'sqlite' && typeof value === 'boolean') return value ? 1 : 0;
+            return value;
+        }),
+        JSON.stringify(item),
+    ];
 }

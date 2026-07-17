@@ -3,13 +3,16 @@ import type { describe, expect, it } from 'vitest';
 import type { DDL } from '../ddl/types.ts';
 import type { SortAndSlice, SortDefinition } from './types.ts';
 import {
+    type BooleanItem,
     type NullableItem,
     type NullishItem,
     type NumericItem,
     type StandardTestItem,
     type TiedItem,
     type UndefinedItem,
+    type UnicodeItem,
     STANDARD_TEST_DDL,
+    booleanItems,
     multiTiedItems,
     nestedItems,
     nullableItems,
@@ -18,6 +21,7 @@ import {
     tenItems,
     tiedItems,
     undefinedItems,
+    unicodeItems,
 } from './standardTestFixtures.ts';
 
 /**
@@ -128,6 +132,8 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
     const sortScoreDesc: SortDefinition<any> = [{ key: 'score', direction: -1 }];
     const sortScoreDate: SortDefinition<any> = [{ key: 'score', direction: 1 }, { key: 'date', direction: -1 }];
     const sortNested: SortDefinition<any> = [{ key: 'sender.name', direction: 1 }];
+    const sortFlag: SortDefinition<any> = [{ key: 'flag', direction: 1 }];
+    const sortFlagDesc: SortDefinition<any> = [{ key: 'flag', direction: -1 }];
     const sortId: SortDefinition<any> = defaultSort.sort;
 
     describe('Sorting', () => {
@@ -143,6 +149,44 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
                 const result = await run(numericItems, { sort: sortName }, 'id');
                 if (result === 'skipped') return;
                 expect(result.map(i => i.name)).toEqual(['Eve', 'Diana', 'Charlie', 'Bob', 'Alice']);
+            });
+
+            itIfSupported(sortNameAsc)('orders strings by Unicode code point', async () => {
+                // Code-point order: '' (b) < 'zz' (d) < U+E000 (a) < U+10000 (c). An implementation
+                // comparing by UTF-16 code unit would place the surrogate-pair U+10000 before U+E000.
+                const ascending = await run(
+                    unicodeItems,
+                    { sort: sortNameAsc } as SortAndSlice<UnicodeItem>,
+                    'id'
+                );
+                if (ascending === 'skipped') return;
+                expect(ascending.map(i => i.id)).toEqual(['b', 'd', 'a', 'c']);
+
+                const descending = await run(
+                    unicodeItems,
+                    { sort: sortName } as SortAndSlice<UnicodeItem>,
+                    'id'
+                );
+                if (descending === 'skipped') return;
+                expect(descending.map(i => i.id)).toEqual(['c', 'a', 'd', 'b']);
+            });
+
+            itIfSupported(sortFlag)('orders boolean sort values false before true with pk tiebreak', async () => {
+                const ascending = await run(
+                    booleanItems,
+                    { sort: sortFlag } as SortAndSlice<BooleanItem>,
+                    'id'
+                );
+                if (ascending === 'skipped') return;
+                expect(ascending.map(i => i.id)).toEqual(['a', 'd', 'b', 'c']);
+
+                const descending = await run(
+                    booleanItems,
+                    { sort: sortFlagDesc } as SortAndSlice<BooleanItem>,
+                    'id'
+                );
+                if (descending === 'skipped') return;
+                expect(descending.map(i => i.id)).toEqual(['b', 'c', 'a', 'd']);
             });
         });
 

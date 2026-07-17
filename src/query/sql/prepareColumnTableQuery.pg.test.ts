@@ -28,6 +28,7 @@ describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
             date TEXT,
             value DOUBLE PRECISION,
             score DOUBLE PRECISION,
+            flag BOOLEAN,
             payload TEXT NOT NULL
         )`);
     });
@@ -36,8 +37,8 @@ describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
         await db.exec('DELETE FROM items');
         for (const item of items) {
             await db.query(
-                'INSERT INTO items (id, age, name, category, date, value, score, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-                toColumnRowParams(item)
+                'INSERT INTO items (id, age, name, category, date, value, score, flag, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+                toColumnRowParams(item, 'pg')
             );
         }
 

@@ -13,9 +13,18 @@ import type { SortDefinition } from './types.ts';
  * (including extremes), non-finite numbers, strings (including numeric-looking and
  * collision-prone ones), booleans, objects, arrays, dates and bigints.
  */
+// Non-ASCII strings are built with String.fromCodePoint so the source holds no invisible characters.
+const PRIVATE_USE_BMP = String.fromCodePoint(0xE000);        // BMP, above every ASCII code point
+const BMP_MAX = String.fromCodePoint(0xFFFF);                // highest BMP code point
+const FIRST_SUPPLEMENTARY = String.fromCodePoint(0x10000);   // a UTF-16 surrogate pair
+const MAX_CODE_POINT = String.fromCodePoint(0x10FFFF);       // highest Unicode code point
+const LONE_HIGH_SURROGATE = String.fromCharCode(0xD800);     // not a code point pair — JS-only value
+
 const CORPUS: unknown[] = [null, undefined, 0, 1, -1, 10, 9.5, 1e308, -1e308, Infinity, -Infinity, NaN,
     '', '0', '1', '10', '9', 'a', 'Z', 'abc', 'NaN', '[object Object]',
-    true, false, {}, { a: 1 }, [], [1, 2], new Date('2024-01-02T00:00:00Z'), 10n];
+    PRIVATE_USE_BMP, BMP_MAX, FIRST_SUPPLEMENTARY, MAX_CODE_POINT,
+    true, false, {}, { a: 1 }, [], [1, 2], new Date('2024-01-02T00:00:00Z'), 10n,
+    Object.create(null), { toString() { throw new Error('no string form'); } }, Symbol('x')];
 
 const DIRECTIONS = [1, -1] as const;
 
@@ -175,6 +184,54 @@ describe('compareValues', () => {
 
     });
 
+    describe('code-point string ordering', () => {
+
+        it('orders a BMP character before a supplementary-plane character, in both directions', () => {
+            // In UTF-16, U+10000 begins with the surrogate 0xD800, which is below 0xE000 — a
+            // code-unit comparison would invert this pair. Code-point order (= UTF-8 byte order,
+            // which SQLite BINARY and Postgres C collation use) puts U+E000 first.
+            expect(compareValues(PRIVATE_USE_BMP, FIRST_SUPPLEMENTARY, 1)).toBe(-1);
+            expect(compareValues(PRIVATE_USE_BMP, FIRST_SUPPLEMENTARY, -1)).toBe(1);
+        });
+
+        it('orders ASCII before every character above it', () => {
+            expect(compareValues('z', PRIVATE_USE_BMP, 1)).toBe(-1);
+        });
+
+        it('orders a lone surrogate totally, by its code-unit value', () => {
+            // Lone surrogates cannot survive UTF-8 or JSON, so engines never see them; the JS
+            // comparator must still place them somewhere consistent to stay total.
+            expect(compareValues(LONE_HIGH_SURROGATE, PRIVATE_USE_BMP, 1)).toBe(-1);
+        });
+
+    });
+
+});
+
+describe('Totality', () => {
+
+    it('encodes an object with no prototype to the plain object form instead of throwing', () => {
+        expect(encodeSortValue(Object.create(null))).toBe('[object Object]');
+    });
+
+    it('encodes an object whose toString throws to the plain object form instead of throwing', () => {
+        const hostile = { toString() { throw new Error('no string form'); } };
+        expect(encodeSortValue(hostile)).toBe('[object Object]');
+    });
+
+    it('encodes an object whose Symbol.toPrimitive throws to the plain object form instead of throwing', () => {
+        const hostile = { [Symbol.toPrimitive]() { throw new Error('no primitive form'); } };
+        expect(encodeSortValue(hostile)).toBe('[object Object]');
+    });
+
+    it('encodes an array containing an uncoercible element to the plain object form instead of throwing', () => {
+        expect(encodeSortValue([Object.create(null)])).toBe('[object Object]');
+    });
+
+    it('encodes a symbol by its string form without throwing', () => {
+        expect(encodeSortValue(Symbol('x'))).toBe('Symbol(x)');
+    });
+
 });
 
 describe('resolveSort', () => {
@@ -262,6 +319,19 @@ describe('buildSortComparator', () => {
         ];
         const sorted = [...items].sort(buildSortComparator<Message>([{ key: 'score', direction: -1 }], 'id'));
         expect(sorted.map(i => i.id)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('object-valued sort keys tie on their shared string form, so the pk decides', () => {
+        // Structural values all encode to '[object Object]'; ordering them is outside the
+        // cross-backend contract (the SQL builders refuse such sort keys), but the runtime
+        // comparator stays total and resolves them deterministically via the pk tiebreak.
+        type Row = { id: string; meta: Record<string, number> };
+        const items: Row[] = [
+            { id: 'b', meta: { a: 1 } },
+            { id: 'a', meta: { b: 1 } },
+        ];
+        const sorted = [...items].sort(buildSortComparator<Row>([{ key: 'meta', direction: 1 }], 'id'));
+        expect(sorted.map(i => i.id)).toEqual(['a', 'b']);
     });
 
     it('returns 0 when rows tie on every sort key including the pk', () => {

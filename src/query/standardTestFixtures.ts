@@ -16,6 +16,8 @@ import type { DDL } from '../ddl/types.ts';
  *  - `NestedItem` — nested object for dot-prop sort key
  *  - `TiedItem` — duplicate sort values for PK tiebreaker
  *  - `MultiTiedItem` — rows tied on every key of a multi-key sort, for PK tiebreaker assertions
+ *  - `UnicodeItem` — strings beyond the Basic Multilingual Plane, for code-point ordering assertions
+ *  - `BooleanItem` — boolean sort values, for false-before-true ordering assertions
  */
 
 export type NumericItem = { id: string; age: number; name: string; category: string; date: string };
@@ -25,8 +27,13 @@ export type NullishItem = { id: string; value?: number | null };
 export type NestedItem = { id: string; sender: { name: string } };
 export type TiedItem = { id: string; score: number };
 export type MultiTiedItem = { id: string; score: number; date: string };
+export type UnicodeItem = { id: string; name: string };
+export type BooleanItem = { id: string; flag: boolean };
 
-export const NumericItemSchema = z.object({
+// Every member schema is strict: within the union, a branch must reject items carrying keys it
+// does not declare, so parsing resolves to the branch that fully describes the item and never
+// strips fields (a loose branch like {id, value?} would otherwise swallow richer shapes to `{id}`).
+export const NumericItemSchema = z.strictObject({
     id: z.string(),
     age: z.number(),
     name: z.string(),
@@ -34,41 +41,56 @@ export const NumericItemSchema = z.object({
     date: z.string(),
 });
 
-export const NullableItemSchema = z.object({
+export const NullableItemSchema = z.strictObject({
     id: z.string(),
     value: z.number().nullable(),
 });
 
-export const UndefinedItemSchema = z.object({
+export const UndefinedItemSchema = z.strictObject({
     id: z.string(),
     value: z.number().optional(),
 });
 
-export const NullishItemSchema = z.object({
+export const NullishItemSchema = z.strictObject({
     id: z.string(),
     value: z.number().nullish(),
 });
 
-export const NestedItemSchema = z.object({
+export const NestedItemSchema = z.strictObject({
     id: z.string(),
-    sender: z.object({ name: z.string() }),
+    sender: z.strictObject({ name: z.string() }),
 });
 
-export const TiedItemSchema = z.object({
+export const TiedItemSchema = z.strictObject({
     id: z.string(),
     score: z.number(),
 });
 
-export const MultiTiedItemSchema = z.object({
+export const MultiTiedItemSchema = z.strictObject({
     id: z.string(),
     score: z.number(),
     date: z.string(),
 });
 
-/** Union covering every shape used in the standard sort/slice tests. All branches share `id: string`. */
-export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem;
+export const UnicodeItemSchema = z.strictObject({
+    id: z.string(),
+    name: z.string(),
+});
 
-/** Zod union mirroring `StandardTestItem`. First-match wins; branches with overlapping shapes (NullableItem/UndefinedItem/NullishItem) accept either. */
+export const BooleanItemSchema = z.strictObject({
+    id: z.string(),
+    flag: z.boolean(),
+});
+
+/** Union covering every shape used in the standard sort/slice tests. All branches share `id: string`. */
+export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem | UnicodeItem | BooleanItem;
+
+/**
+ * Zod union mirroring `StandardTestItem`. First-match wins; because every member is strict,
+ * a branch can only win for items it fully describes, so parsing never strips fields.
+ * Overlapping value shapes (NullableItem/UndefinedItem/NullishItem) may resolve to an earlier
+ * branch, which is harmless: the accepted keys and values are identical.
+ */
 export const StandardTestItemSchema = z.union([
     NumericItemSchema,
     NullableItemSchema,
@@ -77,6 +99,8 @@ export const StandardTestItemSchema = z.union([
     NestedItemSchema,
     TiedItemSchema,
     MultiTiedItemSchema,
+    UnicodeItemSchema,
+    BooleanItemSchema,
 ]);
 
 export const numericItems: NumericItem[] = [
@@ -128,6 +152,27 @@ export const multiTiedItems: MultiTiedItem[] = [
     { id: 'a', score: 10, date: '2024-01-05' },
     { id: 'c', score: 20, date: '2024-01-02' },
     { id: 'e', score: 5, date: '2024-01-09' },
+];
+
+// Names span the empty string, ASCII, a private-use BMP character (U+E000) and a
+// supplementary-plane character (U+10000, a UTF-16 surrogate pair). Code-point order is
+// '' < 'zz' < U+E000 < U+10000, so name ASC yields b,d,a,c — neither direction matches pk
+// order, and an implementation comparing by UTF-16 code unit swaps a and c.
+// Built with String.fromCodePoint so the source holds no invisible characters.
+export const unicodeItems: UnicodeItem[] = [
+    { id: 'a', name: String.fromCodePoint(0xE000) },
+    { id: 'b', name: '' },
+    { id: 'c', name: String.fromCodePoint(0x10000) },
+    { id: 'd', name: 'zz' },
+];
+
+// a/d false, b/c true: flag ASC yields a,d,b,c and DESC yields b,c,a,d — neither is pk order,
+// so an implementation ignoring the flag cannot pass by accident.
+export const booleanItems: BooleanItem[] = [
+    { id: 'a', flag: false },
+    { id: 'b', flag: true },
+    { id: 'c', flag: true },
+    { id: 'd', flag: false },
 ];
 
 /** 10 items for limit/offset/cursor tests, using PK ASC as default sort. */

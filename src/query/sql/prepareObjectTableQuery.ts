@@ -3,6 +3,7 @@ import { prepareWhereClauseForPg, PropertyTranslatorPgJsonbSchema } from '../../
 import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from '../../where-filter/sql/sqlite/index.ts';
 import type { PreparedWhereClauseStatement } from '../../where-filter/sql/types.ts';
 import type { DotPropPathConversionResult } from '../../utils/sql/types.ts';
+import type { ZodKind } from '../../dot-prop-paths/schema-tree.ts';
 import { convertDotPropPathToPostgresJsonPath } from '../../utils/sql/postgres/convertDotPropPathToPostgresJsonPath.ts';
 import { convertDotPropPathToSqliteJsonPath } from '../../utils/sql/sqlite/convertDotPropPathToSqliteJsonPath.ts';
 import { SortAndSliceSchema } from '../schemas.ts';
@@ -18,6 +19,26 @@ import { concatSqlParameters } from './internals/sqlParameterUtils.ts';
 function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseStatement {
     return { where_clause_statement: fragment.sql, statement_arguments: fragment.parameters };
 }
+
+/**
+ * The leaf kinds a sort key may address: everything except `object` and `array`. Structural
+ * values have no cross-backend ordering — Postgres would order jsonb by its btree rules,
+ * SQLite by raw JSON text, and the runtime comparator by string form — so the sort/cursor
+ * path converters refuse them rather than let the three orderings silently diverge.
+ *
+ * Declared as an exhaustive record over `Exclude<ZodKind, 'object' | 'array'>` so a Zod
+ * upgrade that introduces a new kind fails compilation here instead of silently refusing it.
+ */
+const SORTABLE_LEAF_KIND_MAP: Record<Exclude<ZodKind, 'object' | 'array'>, true> = {
+    any: true, bigint: true, boolean: true, catch: true, custom: true, date: true,
+    default: true, enum: true, file: true, function: true, int: true, intersection: true,
+    lazy: true, literal: true, map: true, nan: true, never: true, nonoptional: true,
+    null: true, nullable: true, number: true, optional: true, pipe: true, prefault: true,
+    promise: true, readonly: true, record: true, set: true, string: true, success: true,
+    symbol: true, template_literal: true, transform: true, tuple: true, undefined: true,
+    union: true, unknown: true, void: true,
+};
+const SORTABLE_LEAF_KINDS = Object.getOwnPropertyNames(SORTABLE_LEAF_KIND_MAP) as ZodKind[];
 
 /**
  * Builds parameterised SQL clauses (WHERE, ORDER BY, LIMIT, OFFSET) for a table that stores
@@ -72,6 +93,9 @@ function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseState
  *   unless the sort already ends on the primary key.
  * @note Null values sort last (Postgres `NULLS LAST`; SQLite simulated). The per-dialect standard
  *   test suites verify parity with `sortAndSliceObjects`.
+ * @note Sort keys must address scalar leaves. A key whose schema type is an object or array is
+ *   refused (`unexpected_kind`): structural values have no ordering the JS comparator and both
+ *   SQL dialects agree on.
  */
 export function prepareObjectTableQuery<T extends Record<string, any>>(
     dialect: SqlDialect,
@@ -102,13 +126,18 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
         );
     }
 
-    // Path-to-SQL converter for this table's JSON column
+    // Path-to-SQL converter for this table's JSON column. Serves only ORDER BY and the
+    // after_pk cursor (where-filters translate via PropertyTranslator*), so it restricts
+    // leaves to sortable kinds — see SORTABLE_LEAF_KIND_MAP.
     const pathToSqlExpression = (dotPropPath: string): DotPropPathConversionResult => {
-        if (dialect === 'pg') {
-            return convertDotPropPathToPostgresJsonPath(table.objectColumnName, dotPropPath, table.schema);
-        } else {
-            return convertDotPropPathToSqliteJsonPath(table.objectColumnName, dotPropPath, table.schema);
+        const result = dialect === 'pg'
+            ? convertDotPropPathToPostgresJsonPath(table.objectColumnName, dotPropPath, table.schema, SORTABLE_LEAF_KINDS)
+            : convertDotPropPathToSqliteJsonPath(table.objectColumnName, dotPropPath, table.schema, SORTABLE_LEAF_KINDS);
+        if (!result.success) {
+            // Name the offending key: a multi-key sort otherwise yields errors a caller cannot attribute.
+            return { success: false, error: { ...result.error, message: `Sort key '${dotPropPath}': ${result.error.message}` } };
         }
+        return result;
     };
 
     // 3. Build WHERE from filter
@@ -146,7 +175,7 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
     if (sortAndSlice?.after_pk !== undefined && resolvedSort) {
         const pkResult = pathToSqlExpression(table.ddl.primary_key);
         if (!pkResult.success) {
-            return { success: false, errors: [{ type: 'path_conversion', message: pkResult.error.message }] };
+            return { success: false, errors: [{ type: pkResult.error.type, message: pkResult.error.message }] };
         }
         const pkExpression = pkResult.expression;
         const cursorResult = _buildAfterPkWhereClause(

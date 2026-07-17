@@ -27,11 +27,12 @@ describe('prepareColumnTableQuery against SQLite (better-sqlite3)', () => {
                 date TEXT,
                 value REAL,
                 score REAL,
+                flag INTEGER,
                 payload TEXT NOT NULL
             )`);
-            const insert = db.prepare('INSERT INTO items (id, age, name, category, date, value, score, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            const insert = db.prepare('INSERT INTO items (id, age, name, category, date, value, score, flag, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
             for (const item of items) {
-                insert.run(...toColumnRowParams(item));
+                insert.run(...toColumnRowParams(item, 'sqlite'));
             }
 
             const prepared = prepareColumnTableQuery('sqlite', COLUMN_TABLE, sortAndSlice);

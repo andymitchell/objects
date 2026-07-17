@@ -13,6 +13,7 @@ const EmailSchema = z.object({
     address: z.object({
         city: z.string(),
     }).optional(),
+    tags: z.array(z.string()).optional(),
 });
 type Email = z.infer<typeof EmailSchema>;
 
@@ -42,6 +43,52 @@ describe('prepareObjectTableQuery', () => {
                 sort: [{ key: 'nonexistent.path' as any, direction: 1 }],
             });
             expect(result.success).toBe(false);
+        });
+
+        describe('Structural Sort Keys Refused', () => {
+            // Object- and array-typed sort keys have no cross-backend ordering: Postgres would
+            // order jsonb by its btree rules, SQLite by raw JSON text, and the runtime comparator
+            // by string form — three different orders. The builders refuse them outright.
+
+            for (const dialect of ['pg', 'sqlite'] as const) {
+                it(`returns error when the sort key addresses an object-typed field (${dialect})`, () => {
+                    const result = prepareObjectTableQuery(dialect, table, undefined, {
+                        sort: [{ key: 'address' as any, direction: 1 }],
+                    });
+                    expect(result.success).toBe(false);
+                    if (result.success) return;
+                    expect(result.errors[0]!.type).toBe('unexpected_kind');
+                    expect(result.errors[0]!.message).toContain('address');
+                });
+
+                it(`returns error when the sort key addresses an array-typed field (${dialect})`, () => {
+                    const result = prepareObjectTableQuery(dialect, table, undefined, {
+                        sort: [{ key: 'tags' as any, direction: 1 }],
+                    });
+                    expect(result.success).toBe(false);
+                    if (result.success) return;
+                    expect(result.errors[0]!.type).toBe('unexpected_kind');
+                    expect(result.errors[0]!.message).toContain('tags');
+                });
+
+                it(`refuses a structural sort key when cursor pagination is requested (${dialect})`, () => {
+                    const result = prepareObjectTableQuery(dialect, table, undefined, {
+                        sort: [{ key: 'address' as any, direction: 1 }],
+                        after_pk: 'email_1',
+                    });
+                    expect(result.success).toBe(false);
+                    if (result.success) return;
+                    expect(result.errors[0]!.type).toBe('unexpected_kind');
+                    expect(result.errors[0]!.message).toContain('address');
+                });
+            }
+
+            it('still allows scalar leaves beneath a structural parent', () => {
+                const result = prepareObjectTableQuery('pg', table, undefined, {
+                    sort: [{ key: 'address.city' as any, direction: 1 }],
+                });
+                expect(result.success).toBe(true);
+            });
         });
 
         it('succeeds when no filter and no sortAndSlice provided', () => {

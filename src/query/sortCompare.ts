@@ -32,12 +32,23 @@ export type EncodedSortValue = string | number | null;
  * Idempotent: `encodeSortValue(encodeSortValue(v)) === encodeSortValue(v)`. Non-finite
  * numbers move to the string form because JSON cannot carry them — keeping them numeric
  * would let a value order differently before and after a cursor round-trip.
+ * Total: never throws. A value that resists string coercion entirely (an object with no
+ * prototype, a throwing `toString`/`Symbol.toPrimitive`, a revoked proxy) encodes to the
+ * literal `'[object Object]'`.
  */
 export function encodeSortValue(v: unknown): EncodedSortValue {
     if (v === null || v === undefined) return null;
     if (typeof v === 'number') return Number.isFinite(v) ? v : String(v);
     if (typeof v === 'string') return v;
-    return String(v);
+    try {
+        return String(v);
+    } catch {
+        // A value with no usable string form (no-prototype object, throwing toString or
+        // Symbol.toPrimitive, revoked proxy, or an array containing one). The literal is
+        // returned rather than re-probing the value: any further call into it could throw
+        // again, and encoding must never throw.
+        return '[object Object]';
+    }
 }
 
 /**
@@ -63,9 +74,15 @@ export function encodeSortValue(v: unknown): EncodedSortValue {
  *
  * @remarks
  * The comparator defines a total order over all inputs and never throws — pagination
- * requires that any two values, however malformed, order consistently. Mixed-type pairs
+ * requires that any two values, however malformed, order consistently. String comparison
+ * is by Unicode code point — equal to UTF-8 byte order (SQLite BINARY collation, Postgres
+ * C collation), not to JavaScript's native UTF-16 code-unit order, which differs for
+ * supplementary-plane characters. Mixed-type pairs
  * resolve by bracket (numbers before strings, direction-scaled) rather than by string
- * coercion, which was not transitive (`10 < '30' < 5 < 10` cycles). This deliberately
+ * coercion, which was not transitive (`10 < '30' < 5 < 10` cycles). Structural values
+ * (objects, arrays) take their string form and so mutually tie; ordering them is outside
+ * the cross-backend contract — the SQL builders refuse structural sort keys outright.
+ * This deliberately
  * diverges from the where-filter range operators (see `evaluatePredicate`), which
  * type-bracket to a non-match: a filter answers a boolean predicate, whereas ordering
  * needs a three-way verdict for every pair.
@@ -84,7 +101,30 @@ export function compareValues(a: unknown, b: unknown, direction: 1 | -1): number
     if (aNum && !bNum) return -1 * direction;
     if (!aNum && bNum) return 1 * direction;
 
+    if (typeof ea === 'string' && typeof eb === 'string') {
+        return compareStringsByCodePoint(ea, eb) * direction;
+    }
     return (ea < eb ? -1 : ea > eb ? 1 : 0) * direction;
+}
+
+/**
+ * Compares two strings by Unicode code point. JS relational operators compare by UTF-16
+ * code unit, which inverts pairs where one string starts a surrogate pair (all supplementary-
+ * plane characters) and the other holds a BMP character above U+D7FF; code-point order equals
+ * UTF-8 byte order, which is what SQLite's BINARY collation and Postgres's C collation use.
+ * Lone surrogates (never representable in UTF-8/JSON) still order totally, by their own value.
+ */
+function compareStringsByCodePoint(a: string, b: string): number {
+    if (a === b) return 0;
+    const len = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < len) {
+        const ca = a.codePointAt(i)!;
+        const cb = b.codePointAt(i)!;
+        if (ca !== cb) return ca < cb ? -1 : 1;
+        i += ca > 0xFFFF ? 2 : 1;   // equal code points advance both strings equally
+    }
+    return a.length < b.length ? -1 : 1;   // equal prefix; a === b already returned 0
 }
 
 /**

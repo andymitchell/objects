@@ -1,6 +1,7 @@
 import type { PreparedWhereClauseStatement } from '../../where-filter/sql/types.ts';
 import type { DotPropPathConversionResult } from '../../utils/sql/types.ts';
 import { SortAndSliceSchema } from '../schemas.ts';
+import { resolveSort } from '../sortCompare.ts';
 import type { ColumnTableInfo, PreparedQueryClausesResult, QueryError, SortAndSlice } from '../types.ts';
 import type { SqlDialect, SqlFragment } from './types.ts';
 import { _buildOrderByClause } from './internals/buildOrderByClause.ts';
@@ -57,8 +58,10 @@ function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseState
  *
  * @note Sort keys not in `allowedColumns` produce a `QueryError`. The PK column must be included
  *   in `allowedColumns` since it is used as an automatic sort tiebreaker.
- * @note A primary key tiebreaker is automatically appended to the sort to ensure deterministic ordering.
- * @note Null values sort last (Postgres `NULLS LAST`, SQLite simulated), matching `sortAndSliceObjects` behaviour.
+ * @note A primary key tiebreaker is appended to the sort per `resolveSort` — always ascending,
+ *   unless the sort already ends on the primary key.
+ * @note Null values sort last (Postgres `NULLS LAST`; SQLite simulated). The per-dialect standard
+ *   test suites verify parity with `sortAndSliceObjects`.
  */
 export function prepareColumnTableQuery<T extends Record<string, any>>(
     dialect: SqlDialect,
@@ -79,12 +82,8 @@ export function prepareColumnTableQuery<T extends Record<string, any>>(
     // 2. Resolve sort with PK tiebreaker
     let resolvedSort: Array<{ key: string; direction: 1 | -1 }> | undefined;
     if (parsed.data.sort && parsed.data.sort.length > 0) {
-        const sortCopy = [...parsed.data.sort];
-        const lastEntry = sortCopy[sortCopy.length - 1]!;
-        if (lastEntry.key !== table.pkColumnName) {
-            sortCopy.push({ key: table.pkColumnName, direction: 1 });
-        }
-        resolvedSort = sortCopy;
+        // The pk is a runtime string here, so the sort is handled in its key-widened form.
+        resolvedSort = resolveSort<Record<string, any>>(parsed.data.sort, table.pkColumnName);
     }
 
     // 3. Validate sort keys against allowedColumns

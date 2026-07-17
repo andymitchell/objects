@@ -38,6 +38,8 @@ const RANGE_COMPARES: Readonly<Record<RangeOperator, RangeCompare>> = {
  * A range bound against a value of another type does not match, and does not error: comparison operators
  * *type-bracket*, so a wrong-typed row is simply not in the answer. Only a bound whose own operand is
  * uncomparable is an error, because that is a defect in the filter.
+ * This deliberately diverges from ordering (`compareValues` in the query module), which must place every
+ * pair of values — whatever their types — in a total order; a filter only answers a boolean predicate.
  */
 export function evaluatePredicate(value: unknown, predicate: Predicate, matchSubFilter: SubFilterMatcher): boolean {
     switch (predicate.kind) {

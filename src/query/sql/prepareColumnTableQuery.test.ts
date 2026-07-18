@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { prepareColumnTableQuery } from './prepareColumnTableQuery.ts';
+import { encodeSortValue } from '../sortCompare.ts';
 import type { ColumnTableInfo } from '../types.ts';
 
 const table: ColumnTableInfo = {
     tableName: 'users',
     pkColumnName: 'id',
     allowedColumns: ['id', 'created_at', 'name', 'email'],
+    columnKinds: {},
 };
 
 describe('prepareColumnTableQuery', () => {
@@ -41,6 +43,7 @@ describe('prepareColumnTableQuery', () => {
                     tableName: 'bad',
                     pkColumnName: 'pk_not_allowed',
                     allowedColumns: ['name'],
+                    columnKinds: {},
                 };
                 const result = prepareColumnTableQuery('pg', badTable, {
                     sort: [{ key: 'name', direction: 1 }],
@@ -146,6 +149,7 @@ describe('prepareColumnTableQuery', () => {
                     tableName: 'items',
                     pkColumnName: 'id',
                     allowedColumns: ['id', 'order'],
+                    columnKinds: {},
                 };
                 const result = prepareColumnTableQuery('pg', reservedTable, {
                     sort: [{ key: 'order', direction: 1 }],
@@ -160,6 +164,7 @@ describe('prepareColumnTableQuery', () => {
                     tableName: 'items',
                     pkColumnName: 'id',
                     allowedColumns: ['id', 'user-name'],
+                    columnKinds: {},
                 };
                 const result = prepareColumnTableQuery('pg', specialTable, {
                     sort: [{ key: 'user-name', direction: 1 }],
@@ -294,6 +299,183 @@ describe('prepareColumnTableQuery', () => {
                 sort: [{ key: 'created_at', direction: -1 }], limit: 10
             });
             expect(r1).toEqual(r2);
+        });
+    });
+
+    describe('Column Kinds', () => {
+        const kindTable: ColumnTableInfo = {
+            tableName: 'users',
+            pkColumnName: 'id',
+            allowedColumns: ['id', 'name', 'age', 'flag'],
+            columnKinds: { id: 'text', name: 'text', age: 'numeric', flag: 'boolean' },
+        };
+
+        describe('Text collation pinning (Postgres)', () => {
+            // PGlite defaults to C collation, so the real-engine suites cannot observe the pin — these
+            // string pins are the only guard that production Postgres orders text by code point.
+            it('pins COLLATE "C" on a text-declared column ORDER BY', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, { sort: [{ key: 'name', direction: 1 }] });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).toContain('"name" COLLATE "C"');
+            });
+
+            it('leaves a numeric-declared column unpinned while still pinning the text pk tiebreaker', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, { sort: [{ key: 'age', direction: 1 }] });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).toContain('"age" ASC');
+                expect(result.order_by_statement).not.toContain('"age" COLLATE');
+                expect(result.order_by_statement).toContain('"id" COLLATE "C"');
+            });
+
+            it('leaves an undeclared column unpinned (empty columnKinds)', () => {
+                // `table` declares columnKinds: {} — nothing is text, so nothing is pinned.
+                const result = prepareColumnTableQuery('pg', table, { sort: [{ key: 'name', direction: 1 }] });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).not.toContain('COLLATE');
+            });
+        });
+
+        describe('Boolean boundary translation', () => {
+            it('binds a boolean-column boundary as a real boolean for Postgres', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, {
+                    sort: [{ key: 'flag', direction: 1 }],
+                    after_boundary: { values: [encodeSortValue(true)], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement).not.toBeNull();
+                expect(result.where_statement!.statement_arguments).toContain(true);
+            });
+
+            it('binds a boolean-column boundary as 1/0 for SQLite', () => {
+                const result = prepareColumnTableQuery('sqlite', kindTable, {
+                    sort: [{ key: 'flag', direction: 1 }],
+                    after_boundary: { values: [encodeSortValue(false)], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement).not.toBeNull();
+                expect(result.where_statement!.statement_arguments).toContain(0);
+            });
+        });
+
+        describe('After-boundary predicate', () => {
+            it('binds the boundary values directly, with no correlated subquery', () => {
+                const result = prepareColumnTableQuery('pg', kindTable, {
+                    sort: [{ key: 'name', direction: 1 }],
+                    after_boundary: { values: ['Bob'], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement).not.toBeNull();
+                expect(result.where_statement!.where_clause_statement).not.toContain('SELECT');
+                expect(result.where_statement!.statement_arguments).toContain('Bob');
+            });
+        });
+
+        describe('Bigint columns [dec-bigint-boundary-strict-binding]', () => {
+            const bigintTable: ColumnTableInfo = {
+                tableName: 'ledgers',
+                pkColumnName: 'id',
+                allowedColumns: ['id', 'amount'],
+                columnKinds: { id: 'text', amount: 'bigint' },
+            };
+
+            it('orders a bigint column bare: no COLLATE, no cast', () => {
+                const result = prepareColumnTableQuery('pg', bigintTable, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.order_by_statement).toContain('"amount" ASC NULLS LAST');
+                expect(result.order_by_statement).not.toContain('"amount" COLLATE');
+                expect(result.order_by_statement).not.toContain('::');
+            });
+
+            it('passes the bigint kind through to the boundary binder: a tagged value binds as a decimal string for Postgres', () => {
+                const result = prepareColumnTableQuery('pg', bigintTable, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_boundary: { values: [encodeSortValue(9007199254740993n)], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement!.statement_arguments).toContain('9007199254740993');
+            });
+
+            it('passes the bigint kind through to the boundary binder: a tagged value binds as a native BigInt for SQLite', () => {
+                const result = prepareColumnTableQuery('sqlite', bigintTable, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_boundary: { values: [encodeSortValue(9007199254740993n)], pk: 'u1' },
+                });
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.where_statement!.statement_arguments).toContain(9007199254740993n);
+            });
+
+            it('rejects a stale bare-string boundary on a bigint column with a cursor error', () => {
+                const result = prepareColumnTableQuery('pg', bigintTable, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_boundary: { values: ['10'], pk: 'u1' },
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+            });
+
+            describe('Bigint-kind primary key [dec-bigint-boundary-strict-binding]', () => {
+                // `SortBoundary.pk` is a PrimaryKeyValue (string | number), so the synthetic pk
+                // tiebreaker can never carry the tagged form: keyset pagination over a bigint pk
+                // column works only while pk values fit safe-integer precision, and fails loudly
+                // — never silently mis-anchored — beyond it.
+                const bigintPkTable: ColumnTableInfo = {
+                    tableName: 'ledgers',
+                    pkColumnName: 'id',
+                    allowedColumns: ['id', 'amount'],
+                    columnKinds: { id: 'bigint', amount: 'bigint' },
+                };
+
+                it('a safe-integer pk value anchors the synthetic tiebreaker in both dialects', () => {
+                    const pg = prepareColumnTableQuery('pg', bigintPkTable, {
+                        sort: [{ key: 'amount', direction: 1 }],
+                        after_boundary: { values: [encodeSortValue(10n)], pk: 42 },
+                    });
+                    expect(pg.success).toBe(true);
+                    if (!pg.success) return;
+                    expect(pg.where_statement!.statement_arguments).toContain('42');
+
+                    const sqlite = prepareColumnTableQuery('sqlite', bigintPkTable, {
+                        sort: [{ key: 'amount', direction: 1 }],
+                        after_boundary: { values: [encodeSortValue(10n)], pk: 42 },
+                    });
+                    expect(sqlite.success).toBe(true);
+                    if (!sqlite.success) return;
+                    expect(sqlite.where_statement!.statement_arguments).toContain(42n);
+                });
+
+                it('a pk value hydrated beyond safe-integer precision fails loudly', () => {
+                    const result = prepareColumnTableQuery('pg', bigintPkTable, {
+                        sort: [{ key: 'amount', direction: 1 }],
+                        after_boundary: { values: [encodeSortValue(10n)], pk: 2 ** 53 },
+                    });
+                    expect(result.success).toBe(false);
+                    if (result.success) return;
+                    expect(result.errors[0]!.type).toBe('cursor');
+                    expect(result.errors[0]!.message).toContain('safe-integer');
+                });
+
+                it('a pk value hydrated as a bare decimal string fails loudly', () => {
+                    const result = prepareColumnTableQuery('pg', bigintPkTable, {
+                        sort: [{ key: 'amount', direction: 1 }],
+                        after_boundary: { values: [encodeSortValue(10n)], pk: '9007199254740993' },
+                    });
+                    expect(result.success).toBe(false);
+                    if (result.success) return;
+                    expect(result.errors[0]!.type).toBe('cursor');
+                });
+            });
         });
     });
 });

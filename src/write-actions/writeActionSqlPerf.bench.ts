@@ -8,6 +8,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { z } from 'zod';
 import { prepareWhereClauseForPg, PropertyTranslatorPgJsonbSchema, type WhereFilterDefinition } from '../where-filter/index.ts';
+import type { PreparedStatementArgument } from '../utils/sql/types.ts';
 
 // ─── DB Proxy (simulated network latency) ────────────────────────────────────
 
@@ -118,7 +119,7 @@ function buildWhereClause(where: WhereFilterDefinition<TestItem>) {
 
 // ─── Direct SQL Builders ─────────────────────────────────────────────────────
 
-function buildInsertSql(item: TestItem): { sql: string; params: (string | number | boolean | null)[] } {
+function buildInsertSql(item: TestItem): { sql: string; params: PreparedStatementArgument[] } {
     return {
         sql: 'INSERT INTO items (pk, data) VALUES ($1, $2::jsonb)',
         params: [item.id, JSON.stringify(item)],
@@ -150,13 +151,13 @@ function flattenToLeafPaths(obj: Record<string, unknown>, prefix: string[] = [])
 function buildUpdateSql(
     updateData: Record<string, unknown>,
     where: WhereFilterDefinition<TestItem>,
-): { sql: string; params: (string | number | boolean | null)[] } {
+): { sql: string; params: PreparedStatementArgument[] } {
     const clause = buildWhereClause(where);
     const leaves = flattenToLeafPaths(updateData);
 
     // Build nested jsonb_set chain
     // Params: leaves first, then where clause args
-    const params: (string | number | boolean | null)[] = [];
+    const params: PreparedStatementArgument[] = [];
     let expr = 'data';
     let paramIdx = 1;
 
@@ -182,7 +183,7 @@ function buildUpdateSql(
 
 function buildDeleteSql(
     where: WhereFilterDefinition<TestItem>,
-): { sql: string; params: (string | number | boolean | null)[] } {
+): { sql: string; params: PreparedStatementArgument[] } {
     const clause = buildWhereClause(where);
     return {
         sql: `DELETE FROM items WHERE ${clause.where_clause_statement}`,
@@ -274,7 +275,7 @@ async function runRmw(db: Db, scenario: Scenario, rowCount: number, iteration: n
 
             // 3. Batch write-back via UPDATE FROM VALUES
             const valuesParts: string[] = [];
-            const params: (string | number | boolean | null)[] = [];
+            const params: PreparedStatementArgument[] = [];
             let paramIdx = 1;
             for (const row of updated) {
                 valuesParts.push(`($${paramIdx}, $${paramIdx + 1}::jsonb)`);

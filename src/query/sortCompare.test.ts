@@ -2,11 +2,13 @@ import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
     encodeSortValue,
     compareValues,
+    compareToBoundary,
+    isEncodedBigInt,
     resolveSort,
     buildSortComparator,
     type EncodedSortValue,
 } from './sortCompare.ts';
-import type { SortDefinition } from './types.ts';
+import type { SortBoundary, SortDefinition } from './types.ts';
 
 /**
  * Deterministic value corpus covering every encoding bracket: null-likes, finite numbers
@@ -145,7 +147,12 @@ describe('compareValues', () => {
         for (const v of CORPUS) {
             const once = encodeSortValue(v);
             const twice = encodeSortValue(once);
-            if (!(once === twice)) {
+            // Primitives re-encode to themselves; the tagged bigint form is a fresh snapshot
+            // each call, so its idempotence is structural [dec-encode-snapshots].
+            const idempotent = isEncodedBigInt(once)
+                ? isEncodedBigInt(twice) && twice.$bigint === once.$bigint
+                : once === twice;
+            if (!idempotent) {
                 failures.push(`encodeSortValue not idempotent for ${label(v)}: ${label(once)} vs ${label(twice)}`);
             }
         }
@@ -351,8 +358,117 @@ describe('compile-time contracts', () => {
         expect(typeof typeOnly).toBe('function');
     });
 
-    it('EncodedSortValue is exactly string | number | null', () => {
-        expectTypeOf<EncodedSortValue>().toEqualTypeOf<string | number | null>();
+    it('EncodedSortValue is exactly string | number | the tagged bigint form | null', () => {
+        expectTypeOf<EncodedSortValue>().toEqualTypeOf<string | number | { readonly $bigint: string } | null>();
     });
 
+});
+
+/**
+ * `compareToBoundary` is the in-memory statement of the value-based keyset seek. Its sign decides
+ * inclusion: a row is kept for the next page exactly when it orders strictly *after* the boundary
+ * (positive). These tests assert the sign — before (negative), after (positive), or the boundary
+ * position itself (zero) — across directions, nulls, tied prefixes, the pk tiebreaker, and the
+ * code-point string contract.
+ */
+describe('compareToBoundary', () => {
+    type Row = { id: string; age?: number | null; name?: string | null; category?: string };
+    const boundary = (values: EncodedSortValue[], pk: string): SortBoundary => ({ values, pk });
+
+    describe('Single key, ascending', () => {
+        const sort: SortDefinition<Row> = [{ key: 'age', direction: 1 }];
+
+        it('places a larger value after the boundary', () => {
+            expect(compareToBoundary({ id: 'x', age: 30 }, boundary([20], 'm'), sort, 'id')).toBeGreaterThan(0);
+        });
+
+        it('places a smaller value before the boundary', () => {
+            expect(compareToBoundary({ id: 'x', age: 10 }, boundary([20], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+
+        it('breaks a tie on the sort value by the pk, ascending', () => {
+            expect(compareToBoundary({ id: 'z', age: 20 }, boundary([20], 'm'), sort, 'id')).toBeGreaterThan(0);
+            expect(compareToBoundary({ id: 'a', age: 20 }, boundary([20], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+
+        it('returns zero for the boundary row itself', () => {
+            expect(compareToBoundary({ id: 'm', age: 20 }, boundary([20], 'm'), sort, 'id')).toBe(0);
+        });
+    });
+
+    describe('Single key, descending', () => {
+        const sort: SortDefinition<Row> = [{ key: 'age', direction: -1 }];
+
+        it('places a smaller value after the boundary under descending order', () => {
+            expect(compareToBoundary({ id: 'x', age: 10 }, boundary([20], 'm'), sort, 'id')).toBeGreaterThan(0);
+        });
+
+        it('places a larger value before the boundary under descending order', () => {
+            expect(compareToBoundary({ id: 'x', age: 30 }, boundary([20], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+
+        it('keeps the pk tiebreaker ascending even when the sort is descending', () => {
+            expect(compareToBoundary({ id: 'z', age: 20 }, boundary([20], 'm'), sort, 'id')).toBeGreaterThan(0);
+            expect(compareToBoundary({ id: 'a', age: 20 }, boundary([20], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+    });
+
+    describe('Null positions (nulls last)', () => {
+        const sort: SortDefinition<Row> = [{ key: 'age', direction: 1 }];
+
+        it('places a null row after a non-null boundary', () => {
+            expect(compareToBoundary({ id: 'x', age: null }, boundary([20], 'm'), sort, 'id')).toBeGreaterThan(0);
+        });
+
+        it('places a non-null row before a null boundary', () => {
+            expect(compareToBoundary({ id: 'x', age: 5 }, boundary([null], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+
+        it('ties two nulls and breaks by the pk', () => {
+            expect(compareToBoundary({ id: 'z', age: null }, boundary([null], 'm'), sort, 'id')).toBeGreaterThan(0);
+            expect(compareToBoundary({ id: 'a', age: null }, boundary([null], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+    });
+
+    describe('Multi-key with tied prefix', () => {
+        const sort: SortDefinition<Row> = [{ key: 'category', direction: 1 }, { key: 'name', direction: 1 }];
+
+        it('uses the second key when the first ties', () => {
+            expect(compareToBoundary({ id: 'x', category: 'A', name: 'Charlie' }, boundary(['A', 'Bob'], 'm'), sort, 'id')).toBeGreaterThan(0);
+            expect(compareToBoundary({ id: 'x', category: 'A', name: 'Alice' }, boundary(['A', 'Bob'], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+
+        it('lets the first key decide before the second is consulted', () => {
+            expect(compareToBoundary({ id: 'x', category: 'B', name: 'Aaron' }, boundary(['A', 'Bob'], 'm'), sort, 'id')).toBeGreaterThan(0);
+        });
+
+        it('falls through to the pk when every sort key ties', () => {
+            expect(compareToBoundary({ id: 'a', category: 'A', name: 'Bob' }, boundary(['A', 'Bob'], 'm'), sort, 'id')).toBeLessThan(0);
+            expect(compareToBoundary({ id: 'z', category: 'A', name: 'Bob' }, boundary(['A', 'Bob'], 'm'), sort, 'id')).toBeGreaterThan(0);
+        });
+    });
+
+    describe('Primary key already in the user sort', () => {
+        it('does not append a second pk arm (ascending pk sort)', () => {
+            const sort: SortDefinition<Row> = [{ key: 'id', direction: 1 }];
+            expect(compareToBoundary({ id: 'z' }, boundary(['m'], 'm'), sort, 'id')).toBeGreaterThan(0);
+            expect(compareToBoundary({ id: 'a' }, boundary(['m'], 'm'), sort, 'id')).toBeLessThan(0);
+            expect(compareToBoundary({ id: 'm' }, boundary(['m'], 'm'), sort, 'id')).toBe(0);
+        });
+
+        it('respects a descending pk sort when the pk is the sort key', () => {
+            const sort: SortDefinition<Row> = [{ key: 'id', direction: -1 }];
+            // Descending: 'a' (code point below 'm') sorts after the boundary, 'z' before it.
+            expect(compareToBoundary({ id: 'a' }, boundary(['m'], 'm'), sort, 'id')).toBeGreaterThan(0);
+            expect(compareToBoundary({ id: 'z' }, boundary(['m'], 'm'), sort, 'id')).toBeLessThan(0);
+        });
+    });
+
+    describe('Code-point string ordering', () => {
+        it('orders by code point, not locale: lowercase after uppercase', () => {
+            const sort: SortDefinition<Row> = [{ key: 'name', direction: 1 }];
+            // 'a' (U+0061) has a higher code point than 'B' (U+0042); a locale collation would swap them.
+            expect(compareToBoundary({ id: 'x', name: 'a' }, boundary(['B'], 'm'), sort, 'id')).toBeGreaterThan(0);
+        });
+    });
 });

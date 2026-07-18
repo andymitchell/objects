@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { DDL } from '../../ddl/types.ts';
+import { isEncodedBigInt } from '../sortCompare.ts';
 import { STANDARD_TEST_DDL, type StandardTestItem } from '../standardTestFixtures.ts';
 import type { ColumnTableInfo, ObjectTableInfo } from '../types.ts';
 
@@ -46,14 +47,30 @@ export const OBJECT_TABLE: ObjectTableInfo<StandardTestRow> = {
 /**
  * The flat columns of the relational (column-table) variant. `sender` is absent: a nested
  * object has no relational column, so the dot-prop test is gated off via `COLUMN_TABLE_DDL`.
+ * `amount` is the bigint column exercised only by the opt-in bigint battery
+ * (`../standardTests.bigint.ts`); it has no counterpart in `StandardTestRowSchema` because the
+ * JSON-document (object-table) suites cannot store a bigint and reject the key instead.
  */
-export const COLUMN_TABLE_COLUMNS = ['id', 'age', 'name', 'category', 'date', 'value', 'score', 'flag'] as const;
+export const COLUMN_TABLE_COLUMNS = ['id', 'age', 'name', 'category', 'date', 'value', 'score', 'flag', 'amount'] as const;
 
 /** Table descriptor for the relational (column-table) suites. */
 export const COLUMN_TABLE: ColumnTableInfo = {
     tableName: 'items',
     pkColumnName: 'id',
     allowedColumns: [...COLUMN_TABLE_COLUMNS],
+    // Kinds mirror the fixture schemas: string leaves → text, number leaves → numeric,
+    // flag → boolean, amount → bigint.
+    columnKinds: {
+        id: 'text',
+        age: 'numeric',
+        name: 'text',
+        category: 'text',
+        date: 'text',
+        value: 'numeric',
+        score: 'numeric',
+        flag: 'boolean',
+        amount: 'bigint',
+    },
 };
 
 /**
@@ -73,12 +90,37 @@ export const COLUMN_TABLE_DDL: DDL<StandardTestItem> = {
 };
 
 /**
- * Maps a fixture item to the column-table insert parameters: one value per flat column
- * (absent/undefined becomes SQL NULL), then the whole item as a JSON `payload` string.
+ * Serialises a fixture item to the `payload` TEXT column. `JSON.stringify` cannot carry a
+ * bigint, so bigint fields are written in the ordering contract's tagged form
+ * (`{ $bigint: '<decimal>' }`); {@link parsePayload} reverses it. Items without bigints
+ * serialise exactly as plain `JSON.stringify` would.
+ */
+export function stringifyPayload(item: Record<string, unknown>): string {
+    return JSON.stringify(item, (_key, value: unknown) =>
+        typeof value === 'bigint' ? { $bigint: value.toString() } : value);
+}
+
+/**
+ * Parses a `payload` column back to the exact fixture item, reviving tagged bigints.
  *
- * Rows are selected back via `payload` and `JSON.parse`d, so the round-trip reproduces the
- * exact item regardless of how each driver types its column values; the typed columns exist
- * purely for the engine to ORDER BY.
+ * Any value of the reserved `{ $bigint: '<canonical>' }` shape revives to a `BigInt` — the same
+ * reservation the ordering contract makes — so a fixture holding such an object as a genuine
+ * user value would fail its round-trip equality loudly rather than survive ambiguously.
+ */
+export function parsePayload(payload: string): Record<string, unknown> {
+    return JSON.parse(payload, (_key, value: unknown) =>
+        isEncodedBigInt(value) ? BigInt(value.$bigint) : value) as Record<string, unknown>;
+}
+
+/**
+ * Maps a fixture item to the column-table insert parameters: one value per flat column
+ * (absent/undefined becomes SQL NULL), then the whole item as a `payload` string built by
+ * {@link stringifyPayload}.
+ *
+ * Rows are selected back via `payload` and {@link parsePayload}, so the round-trip reproduces
+ * the exact item regardless of how each driver types its column values; the typed columns exist
+ * purely for the engine to ORDER BY. Bigint values bind as-is — both PGlite and better-sqlite3
+ * accept a JS bigint parameter natively.
  *
  * @param dialect Booleans bind as-is for Postgres (a real `BOOLEAN` column), but
  *   better-sqlite3 cannot bind a JS boolean, so for SQLite they become `1`/`0` into the
@@ -91,6 +133,6 @@ export function toColumnRowParams(item: Record<string, unknown>, dialect: 'pg' |
             if (dialect === 'sqlite' && typeof value === 'boolean') return value ? 1 : 0;
             return value;
         }),
-        JSON.stringify(item),
+        stringifyPayload(item),
     ];
 }

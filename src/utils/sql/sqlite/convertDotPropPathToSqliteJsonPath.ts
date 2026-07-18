@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { type TreeNodeMap, type ZodKind, convertSchemaToDotPropPathTree } from "../../../dot-prop-paths/schema-tree.ts";
 import { isUnspreadableRecordPath, resolvePath } from "../../../dot-prop-paths/resolvePath.ts";
+import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts";
 import { isZodSchema } from "../../isZodSchema.ts";
-import type { DotPropPathConversionResult } from "../types.ts";
+import type { DotPropPathConversionResult, SortValueKind } from "../types.ts";
 import { sqliteJsonPathSegments, sqliteSqlStringLiteral } from "./sqliteJsonPath.ts";
 
 export const SQLITE_UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
@@ -55,5 +56,42 @@ export function convertDotPropPathToSqliteJsonPath<T extends Record<string, any>
     }
 
     const jsonPath = sqliteSqlStringLiteral(sqliteJsonPathSegments(resolved.segments));
-    return { success: true, expression: `json_extract(${columnName}, ${jsonPath})` };
+    const expression = `json_extract(${columnName}, ${jsonPath})`;
+    // Surface the comparison family so the cursor builders bind and translate boundary values
+    // correctly — most importantly booleans, which SQLite stores and orders as 1/0, not 'true'/'false'.
+    const kind = sqliteSortValueKind(resolved.leafKind, resolved.leafSchema);
+    return kind === undefined ? { success: true, expression } : { success: true, expression, kind };
+}
+
+/**
+ * Maps a resolved leaf kind to the {@link SortValueKind} SQLite orders it by. Kinds with no clean
+ * scalar family (structural, temporal-in-JSON, exotic) yield `undefined`, so their values bind raw
+ * — sound for SQLite's storage-class ordering of strings and numbers.
+ */
+function sqliteSortValueKind(leafKind: ZodKind, leafSchema: AnyZodSchema | undefined): SortValueKind | undefined {
+    switch (leafKind) {
+        case 'string': return 'text';
+        case 'number':
+        case 'int':
+        case 'nan': return 'numeric';
+        case 'boolean': return 'boolean';
+        case 'bigint': return 'bigint';
+        case 'enum': return enumMemberKind(leafSchema);
+        default: return undefined;
+    }
+}
+
+/**
+ * The scalar family an enum's members share (single-kind enums only), mirroring the Postgres enum
+ * cast so both dialects classify the same column identically. Mixed-scalar or schema-less enums
+ * yield `undefined`.
+ */
+function enumMemberKind(schema: AnyZodSchema | undefined): SortValueKind | undefined {
+    if (!schema) return undefined;
+    const memberKinds = new Set(getEnumValues(schema).map(member => typeof member));
+    if (memberKinds.size !== 1) return undefined;
+    if (memberKinds.has('string')) return 'text';
+    if (memberKinds.has('number')) return 'numeric';
+    if (memberKinds.has('boolean')) return 'boolean';
+    return undefined;
 }

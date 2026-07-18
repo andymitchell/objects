@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     StandardTestItemSchema,
+    bigintItems,
     booleanItems,
     multiTiedItems,
     nestedItems,
@@ -35,6 +36,7 @@ describe('standardTestFixtures', () => {
         ['multiTiedItems', multiTiedItems],
         ['unicodeItems', unicodeItems],
         ['booleanItems', booleanItems],
+        ['bigintItems', bigintItems],
         ['tenItems', tenItems],
     ];
 

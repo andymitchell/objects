@@ -390,4 +390,168 @@ describe('prepareObjectTableQuery', () => {
             expect(r1).toEqual(r2);
         });
     });
+
+    describe('Text Collation Pinning (Postgres)', () => {
+        // Postgres orders text by the database's default collation (en_US/ICU in production), but the
+        // ordering contract is code-point order. `COLLATE "C"` pins it. PGlite defaults to C, so the
+        // real-engine suites cannot observe this — these string pins are the only guard for production.
+        it('pins COLLATE "C" on a text ORDER BY expression', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, { sort: [{ key: 'date', direction: -1 }] });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.order_by_statement).toContain('::text COLLATE "C"');
+        });
+
+        it('does not pin COLLATE on a numeric ORDER BY expression', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, { sort: [{ key: 'priority', direction: 1 }] });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.order_by_statement).toContain('::numeric ASC');
+            expect(result.order_by_statement).not.toContain('::numeric COLLATE');
+        });
+
+        it('pins COLLATE "C" on the text after_pk cursor comparison', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_pk: 'e1',
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement!.where_clause_statement).toContain('::text COLLATE "C"');
+        });
+
+        it('omits COLLATE entirely for the SQLite dialect', () => {
+            const result = prepareObjectTableQuery('sqlite', table, undefined, { sort: [{ key: 'date', direction: -1 }] });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.order_by_statement).not.toContain('COLLATE');
+        });
+    });
+
+    describe('After-Boundary Cursor', () => {
+        it('emits a value-based boundary predicate that binds the value directly (no subquery)', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_boundary: { values: ['2024-01-01'], pk: 'e1' },
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement).not.toBeNull();
+            expect(result.where_statement!.where_clause_statement).not.toContain('SELECT');
+            expect(result.where_statement!.statement_arguments).toContain('2024-01-01');
+        });
+
+        it('pins COLLATE "C" inside the boundary predicate on a text key (Postgres)', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_boundary: { values: ['2024-01-01'], pk: 'e1' },
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement!.where_clause_statement).toContain('::text COLLATE "C"');
+        });
+
+        it('uses ? placeholders and no COLLATE for the boundary predicate on SQLite', () => {
+            const result = prepareObjectTableQuery('sqlite', table, undefined, {
+                sort: [{ key: 'date', direction: -1 }],
+                after_boundary: { values: ['2024-01-01'], pk: 'e1' },
+            });
+            expect(result.success).toBe(true);
+            if (!result.success) return;
+            expect(result.where_statement).not.toBeNull();
+            expect(result.where_statement!.where_clause_statement).not.toContain('COLLATE');
+        });
+
+        it('rejects a numeric-key boundary value that is not a number', () => {
+            const result = prepareObjectTableQuery('pg', table, undefined, {
+                sort: [{ key: 'priority', direction: 1 }],
+                after_boundary: { values: ['-Infinity'], pk: 'e1' },
+            });
+            expect(result.success).toBe(false);
+        });
+    });
+
+    describe('Bigint Sort Keys Refused [dec-object-table-bigint-rejection]', () => {
+        // JSON storage cannot carry a bigint, so a bigint-classified sort key on an object table is a
+        // contradiction the caller's serialisation layer must resolve. The refusal follows schema
+        // classification: z.bigint() plain and through transparent wrappers, and a union whose
+        // winning arm is bigint. Compositions with no clean scalar family stay on the pre-existing
+        // kind-less path, which promises no cross-engine ordering for any type family.
+
+        const LedgerSchema = z.object({
+            id: z.string(),
+            amount: z.bigint(),
+            amountNullable: z.bigint().nullable(),
+            amountOptional: z.bigint().optional(),
+            amountDefault: z.bigint().default(0n),
+            amountUnionFirst: z.union([z.bigint(), z.null()]),
+            amountUnionSecond: z.union([z.null(), z.bigint()]),
+        });
+        type Ledger = z.infer<typeof LedgerSchema>;
+
+        const ledgerTable: ObjectTableInfo<Ledger> = {
+            tableName: 'ledgers',
+            objectColumnName: 'data',
+            ddl: { primary_key: 'id' },
+            schema: LedgerSchema,
+        };
+
+        const bigintClassifiedKeys = [
+            'amount', 'amountNullable', 'amountOptional', 'amountDefault', 'amountUnionFirst',
+        ] as const;
+
+        for (const dialect of ['pg', 'sqlite'] as const) {
+            it(`refuses a plain sort on every bigint-classified key (${dialect}) [dec-object-table-bigint-rejection]`, () => {
+                for (const key of bigintClassifiedKeys) {
+                    const result = prepareObjectTableQuery(dialect, ledgerTable, undefined, {
+                        sort: [{ key: key as any, direction: 1 }],
+                    });
+                    expect(result.success, `expected refusal for sort key '${key}'`).toBe(false);
+                    if (result.success) continue;
+                    expect(result.errors[0]!.type).toBe('unsupported_kind');
+                    expect(result.errors[0]!.message).toContain(key);
+                    expect(result.errors[0]!.message).toContain('bigint');
+                }
+            });
+
+            it(`refuses an after_pk walk over a bigint key (${dialect}) [dec-object-table-bigint-rejection]`, () => {
+                const result = prepareObjectTableQuery(dialect, ledgerTable, undefined, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_pk: 'row_1',
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('unsupported_kind');
+            });
+
+            it(`refuses an after_boundary walk over a bigint key (${dialect}) [dec-object-table-bigint-rejection]`, () => {
+                const result = prepareObjectTableQuery(dialect, ledgerTable, undefined, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_boundary: { values: [{ $bigint: '10' }], pk: 'row_1' },
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('unsupported_kind');
+            });
+        }
+
+        it('union with a non-bigint winning arm falls outside the scalar-family guarantee: pg rejects kind-less (pre-existing path)', () => {
+            const result = prepareObjectTableQuery('pg', ledgerTable, undefined, {
+                sort: [{ key: 'amountUnionSecond' as any, direction: 1 }],
+            });
+            expect(result.success).toBe(false);
+            if (result.success) return;
+            expect(result.errors[0]!.type).toBe('unsupported_kind');
+        });
+
+        it('union with a non-bigint winning arm falls outside the scalar-family guarantee: sqlite binds kind-less (pre-existing raw path)', () => {
+            // Documents the boundary rather than closing it: no bigint value can physically reach
+            // this path through JSON storage, and the kind-less path has never promised
+            // cross-engine ordering for any type family.
+            const result = prepareObjectTableQuery('sqlite', ledgerTable, undefined, {
+                sort: [{ key: 'amountUnionSecond' as any, direction: 1 }],
+            });
+            expect(result.success).toBe(true);
+        });
+    });
 });

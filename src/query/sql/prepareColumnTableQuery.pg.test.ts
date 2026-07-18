@@ -1,10 +1,11 @@
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { registerBigintSortTests } from '../standardTests.bigint.ts';
 import { standardTests, type Execute } from '../standardTests.ts';
 import { flattenQueryClausesToSql } from './flattenQueryClauses.ts';
 import { prepareColumnTableQuery } from './prepareColumnTableQuery.ts';
-import { COLUMN_TABLE, COLUMN_TABLE_DDL, toColumnRowParams } from './standardTestSqlSupport.ts';
+import { COLUMN_TABLE, COLUMN_TABLE_DDL, parsePayload, toColumnRowParams } from './standardTestSqlSupport.ts';
 
 /**
  * Runs the shared standard tests against a real Postgres engine (PGlite) using a relational
@@ -29,6 +30,7 @@ describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
             value DOUBLE PRECISION,
             score DOUBLE PRECISION,
             flag BOOLEAN,
+            amount BIGINT,
             payload TEXT NOT NULL
         )`);
     });
@@ -37,7 +39,7 @@ describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
         await db.exec('DELETE FROM items');
         for (const item of items) {
             await db.query(
-                'INSERT INTO items (id, age, name, category, date, value, score, flag, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+                'INSERT INTO items (id, age, name, category, date, value, score, flag, amount, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
                 toColumnRowParams(item, 'pg')
             );
         }
@@ -51,8 +53,9 @@ describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
 
         const { sql, parameters } = flattenQueryClausesToSql(prepared, 'pg');
         const result = await db.query(`SELECT payload FROM items ${sql}`, parameters as unknown[]);
-        return (result.rows as Array<{ payload: string }>).map(row => JSON.parse(row.payload));
+        return (result.rows as Array<{ payload: string }>).map(row => parsePayload(row.payload));
     };
 
     standardTests({ it, expect, execute, implementationName: 'column-table-pg', ddl: COLUMN_TABLE_DDL });
+    registerBigintSortTests({ it, expect, execute, implementationName: 'column-table-pg' });
 });

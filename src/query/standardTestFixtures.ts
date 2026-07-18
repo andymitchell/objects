@@ -18,6 +18,9 @@ import type { DDL } from '../ddl/types.ts';
  *  - `MultiTiedItem` — rows tied on every key of a multi-key sort, for PK tiebreaker assertions
  *  - `UnicodeItem` — strings beyond the Basic Multilingual Plane, for code-point ordering assertions
  *  - `BooleanItem` — boolean sort values, for false-before-true ordering assertions
+ *  - `BigintItem` — bigint sort values spanning double-precision limits, for exact-value ordering
+ *    assertions (used only by the opt-in bigint battery, `./standardTests.bigint.ts` — JSON-document
+ *    engines cannot store a bigint and reject the key instead)
  */
 
 export type NumericItem = { id: string; age: number; name: string; category: string; date: string };
@@ -29,6 +32,7 @@ export type TiedItem = { id: string; score: number };
 export type MultiTiedItem = { id: string; score: number; date: string };
 export type UnicodeItem = { id: string; name: string };
 export type BooleanItem = { id: string; flag: boolean };
+export type BigintItem = { id: string; amount?: bigint | null; name: string };
 
 // Every member schema is strict: within the union, a branch must reject items carrying keys it
 // does not declare, so parsing resolves to the branch that fully describes the item and never
@@ -82,8 +86,14 @@ export const BooleanItemSchema = z.strictObject({
     flag: z.boolean(),
 });
 
+export const BigintItemSchema = z.strictObject({
+    id: z.string(),
+    amount: z.bigint().nullish(),
+    name: z.string(),
+});
+
 /** Union covering every shape used in the standard sort/slice tests. All branches share `id: string`. */
-export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem | UnicodeItem | BooleanItem;
+export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem | UnicodeItem | BooleanItem | BigintItem;
 
 /**
  * Zod union mirroring `StandardTestItem`. First-match wins; because every member is strict,
@@ -101,6 +111,7 @@ export const StandardTestItemSchema = z.union([
     MultiTiedItemSchema,
     UnicodeItemSchema,
     BooleanItemSchema,
+    BigintItemSchema,
 ]);
 
 export const numericItems: NumericItem[] = [
@@ -173,6 +184,29 @@ export const booleanItems: BooleanItem[] = [
     { id: 'b', flag: true },
     { id: 'c', flag: true },
     { id: 'd', flag: false },
+];
+
+// Amounts probe where bigint ordering can silently go wrong: the adjacent triple around 2^53
+// (k/c/a — collapsed to doubles they tie), its negative mirror (n/l), both int64 extremes (g/h),
+// small values near zero, a duplicate pair (e/f — pk tiebreak, name tiebreak on multi-key sorts),
+// and a null/absent pair (i/j — nulls-last). Ids are scrambled so no sorted order matches pk
+// order, and names repeat across distinct amounts so [name, amount] multi-key sorts have work to do.
+// Every amount fits int64, so the same rows seed a real BIGINT column.
+export const bigintItems: BigintItem[] = [
+    { id: 'a', amount: 9007199254740993n, name: 'north' },
+    { id: 'b', amount: -1n, name: 'south' },
+    { id: 'c', amount: 9007199254740992n, name: 'north' },
+    { id: 'd', amount: 0n, name: 'east' },
+    { id: 'e', amount: 10n, name: 'south' },
+    { id: 'f', amount: 10n, name: 'north' },
+    { id: 'g', amount: -9223372036854775808n, name: 'east' },
+    { id: 'h', amount: 9223372036854775807n, name: 'south' },
+    { id: 'i', amount: null, name: 'north' },
+    { id: 'j', name: 'east' },
+    { id: 'k', amount: 9007199254740991n, name: 'west' },
+    { id: 'l', amount: -9007199254740993n, name: 'west' },
+    { id: 'm', amount: 1n, name: 'west' },
+    { id: 'n', amount: -9007199254740992n, name: 'south' },
 ];
 
 /** 10 items for limit/offset/cursor tests, using PK ASC as default sort. */

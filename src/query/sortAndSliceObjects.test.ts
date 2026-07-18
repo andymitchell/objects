@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { sortAndSliceObjects } from './sortAndSliceObjects.ts';
+import { registerBigintSortTests } from './standardTests.bigint.ts';
 import { standardTests, type Execute } from './standardTests.ts';
 
 // --- Standard tests (behavioral / data-result) ---
@@ -13,6 +14,7 @@ const execute: Execute<any> = async (items, sortAndSlice, primaryKey) => {
 describe('sortAndSliceObjects', () => {
 
     standardTests({ it, expect, execute, implementationName: 'runtime' });
+    registerBigintSortTests({ it, expect, execute, implementationName: 'runtime' });
 
     // --- Per-file only ---
 

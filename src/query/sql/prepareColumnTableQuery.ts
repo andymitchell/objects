@@ -68,6 +68,25 @@ function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseState
  * @note A column declared `'text'` has its ORDER BY and cursor comparisons pinned with `COLLATE "C"`
  *   (Postgres) so they match `compareValues`; a `'boolean'` column's boundary value is translated to the
  *   stored form (`1`/`0` for SQLite, a real boolean for Postgres). Undeclared columns bind raw and unpinned.
+ * @note A column declared `'bigint'` orders bare (an int64 column already orders numerically, matching
+ *   the comparator's merged numeric bracket) and binds boundary values exactly: the encoded
+ *   `{ $bigint: '<decimal>' }` form produced by `encodeSortValue`, or a safe-integer number, within the
+ *   int64 range — bound as a canonical decimal string for Postgres and a native JS BigInt for SQLite.
+ *   Lossy shapes (unsafe-magnitude or fractional numbers, bare decimal strings, out-of-range values) are
+ *   rejected as `cursor` errors rather than silently mis-anchoring the walk.
+ *
+ * @remarks
+ * Minting a bigint boundary requires the driver to hydrate the column losslessly first: node-postgres
+ * returns int8 as a string by default (fix with `types.setTypeParser(20, BigInt)`), and better-sqlite3
+ * returns doubles that lose precision past 2^53 (fix with `statement.safeIntegers(true)`). Pass the
+ * hydrated bigint through `encodeSortValue` when building the boundary; the `cursor` rejection
+ * messages name these remedies when a lossy shape reaches the binder.
+ *
+ * A bigint-kind PRIMARY KEY has a narrower window: `SortBoundary.pk` is a `PrimaryKeyValue`
+ * (string | number), so the synthetic pk tiebreaker cannot carry the encoded bigint form. Keyset
+ * pagination over a bigint pk column therefore works only while pk values fit safe-integer
+ * precision (≤ 2^53 − 1); beyond that, the build fails with a loud `cursor` error rather than
+ * anchoring the walk on an imprecise value.
  */
 export function prepareColumnTableQuery<T extends Record<string, any>>(
     dialect: SqlDialect,

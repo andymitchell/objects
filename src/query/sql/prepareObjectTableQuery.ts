@@ -97,6 +97,14 @@ const SORTABLE_LEAF_KINDS = Object.getOwnPropertyNames(SORTABLE_LEAF_KIND_MAP) a
  * @note Sort keys must address scalar leaves. A key whose schema type is an object or array is
  *   refused (`unexpected_kind`): structural values have no ordering the JS comparator and both
  *   SQL dialects agree on.
+ * @note Bigint-classified sort keys are refused (`unsupported_kind`): JSON cannot carry a bigint,
+ *   so no stored value can order by one — sort by a serialisable form instead, or use a column
+ *   table. The refusal follows schema classification, including transparent wrappers
+ *   (nullable/optional/default/catch/readonly) and unions whose winning arm is bigint;
+ *   compositions with no clean scalar family (e.g. a union won by a non-bigint arm, pipes) follow
+ *   the pre-existing kind-less path, which promises no cross-engine ordering for any type family.
+ *   Because the pk tiebreaker resolves through the same converter, a bigint primary key refuses
+ *   every sorted or cursor query on the table.
  * @note `after_boundary` pages by value (the previous page's encoded sort values plus its pk), binding
  *   those values directly with no correlated subquery, so the walk stays complete even if the boundary
  *   row has since been deleted. See `SortAndSlice`.
@@ -142,6 +150,12 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
         if (!result.success) {
             // Name the offending key: a multi-key sort otherwise yields errors a caller cannot attribute.
             return { success: false, error: { ...result.error, message: `Sort key '${dotPropPath}': ${result.error.message}` } };
+        }
+        // JSON storage cannot carry a bigint, so a bigint-classified sort key on an object table is
+        // a contradiction the caller's serialisation layer must resolve; rejecting loudly beats a
+        // plausible-looking wrong walk. See decisions.md dec-object-table-bigint-rejection.
+        if (result.kind === 'bigint') {
+            return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `Sort key '${dotPropPath}': schema type bigint cannot be sorted or paged on an object (JSON) table — JSON cannot carry a bigint, so no stored value can order by it. Store the value in a serialisable form, or use a column table with columnKinds['${dotPropPath}'] = 'bigint'.` } };
         }
         // Pin Postgres text ordering to code-point (C) collation so the engine's ORDER BY and
         // cursor comparisons match compareValues regardless of the database's locale. Every clause

@@ -470,4 +470,88 @@ describe('prepareObjectTableQuery', () => {
             expect(result.success).toBe(false);
         });
     });
+
+    describe('Bigint Sort Keys Refused [dec-object-table-bigint-rejection]', () => {
+        // JSON storage cannot carry a bigint, so a bigint-classified sort key on an object table is a
+        // contradiction the caller's serialisation layer must resolve. The refusal follows schema
+        // classification: z.bigint() plain and through transparent wrappers, and a union whose
+        // winning arm is bigint. Compositions with no clean scalar family stay on the pre-existing
+        // kind-less path, which promises no cross-engine ordering for any type family.
+
+        const LedgerSchema = z.object({
+            id: z.string(),
+            amount: z.bigint(),
+            amountNullable: z.bigint().nullable(),
+            amountOptional: z.bigint().optional(),
+            amountDefault: z.bigint().default(0n),
+            amountUnionFirst: z.union([z.bigint(), z.null()]),
+            amountUnionSecond: z.union([z.null(), z.bigint()]),
+        });
+        type Ledger = z.infer<typeof LedgerSchema>;
+
+        const ledgerTable: ObjectTableInfo<Ledger> = {
+            tableName: 'ledgers',
+            objectColumnName: 'data',
+            ddl: { primary_key: 'id' },
+            schema: LedgerSchema,
+        };
+
+        const bigintClassifiedKeys = [
+            'amount', 'amountNullable', 'amountOptional', 'amountDefault', 'amountUnionFirst',
+        ] as const;
+
+        for (const dialect of ['pg', 'sqlite'] as const) {
+            it(`refuses a plain sort on every bigint-classified key (${dialect}) [dec-object-table-bigint-rejection]`, () => {
+                for (const key of bigintClassifiedKeys) {
+                    const result = prepareObjectTableQuery(dialect, ledgerTable, undefined, {
+                        sort: [{ key: key as any, direction: 1 }],
+                    });
+                    expect(result.success, `expected refusal for sort key '${key}'`).toBe(false);
+                    if (result.success) continue;
+                    expect(result.errors[0]!.type).toBe('unsupported_kind');
+                    expect(result.errors[0]!.message).toContain(key);
+                    expect(result.errors[0]!.message).toContain('bigint');
+                }
+            });
+
+            it(`refuses an after_pk walk over a bigint key (${dialect}) [dec-object-table-bigint-rejection]`, () => {
+                const result = prepareObjectTableQuery(dialect, ledgerTable, undefined, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_pk: 'row_1',
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('unsupported_kind');
+            });
+
+            it(`refuses an after_boundary walk over a bigint key (${dialect}) [dec-object-table-bigint-rejection]`, () => {
+                const result = prepareObjectTableQuery(dialect, ledgerTable, undefined, {
+                    sort: [{ key: 'amount', direction: 1 }],
+                    after_boundary: { values: [{ $bigint: '10' }], pk: 'row_1' },
+                });
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('unsupported_kind');
+            });
+        }
+
+        it('union with a non-bigint winning arm falls outside the scalar-family guarantee: pg rejects kind-less (pre-existing path)', () => {
+            const result = prepareObjectTableQuery('pg', ledgerTable, undefined, {
+                sort: [{ key: 'amountUnionSecond' as any, direction: 1 }],
+            });
+            expect(result.success).toBe(false);
+            if (result.success) return;
+            expect(result.errors[0]!.type).toBe('unsupported_kind');
+        });
+
+        it('union with a non-bigint winning arm falls outside the scalar-family guarantee: sqlite binds kind-less (pre-existing raw path)', () => {
+            // Documents the boundary rather than closing it: no bigint value can physically reach
+            // this path through JSON storage, and the kind-less path has never promised
+            // cross-engine ordering for any type family.
+            const result = prepareObjectTableQuery('sqlite', ledgerTable, undefined, {
+                sort: [{ key: 'amountUnionSecond' as any, direction: 1 }],
+            });
+            expect(result.success).toBe(true);
+        });
+    });
 });

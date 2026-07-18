@@ -1,4 +1,4 @@
-export type PreparedStatementArgument = string | number | boolean | null;
+export type PreparedStatementArgument = string | number | boolean | bigint | null;
 export type PreparedStatementArgumentOrObject = PreparedStatementArgument | object;
 
 /** SQL dialect for query generation. */
@@ -47,5 +47,5 @@ export type DotPropPathConversionResult =
 
 /** Typeguard: value is a primitive that can be used as a parameterised query argument. */
 export function isPreparedStatementArgument(x: any): x is PreparedStatementArgument {
-    return ['string', 'number', 'boolean'].includes(typeof x);
+    return ['string', 'number', 'boolean', 'bigint'].includes(typeof x);
 }

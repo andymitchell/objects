@@ -3,6 +3,7 @@ import {
     encodeSortValue,
     compareValues,
     compareToBoundary,
+    isEncodedBigInt,
     resolveSort,
     buildSortComparator,
     type EncodedSortValue,
@@ -146,7 +147,12 @@ describe('compareValues', () => {
         for (const v of CORPUS) {
             const once = encodeSortValue(v);
             const twice = encodeSortValue(once);
-            if (!(once === twice)) {
+            // Primitives re-encode to themselves; the tagged bigint form is a fresh snapshot
+            // each call, so its idempotence is structural [dec-encode-snapshots].
+            const idempotent = isEncodedBigInt(once)
+                ? isEncodedBigInt(twice) && twice.$bigint === once.$bigint
+                : once === twice;
+            if (!idempotent) {
                 failures.push(`encodeSortValue not idempotent for ${label(v)}: ${label(once)} vs ${label(twice)}`);
             }
         }
@@ -352,8 +358,8 @@ describe('compile-time contracts', () => {
         expect(typeof typeOnly).toBe('function');
     });
 
-    it('EncodedSortValue is exactly string | number | null', () => {
-        expectTypeOf<EncodedSortValue>().toEqualTypeOf<string | number | null>();
+    it('EncodedSortValue is exactly string | number | the tagged bigint form | null', () => {
+        expectTypeOf<EncodedSortValue>().toEqualTypeOf<string | number | { readonly $bigint: string } | null>();
     });
 
 });

@@ -1,10 +1,11 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
+import { registerBigintSortTests } from '../standardTests.bigint.ts';
 import { standardTests, type Execute } from '../standardTests.ts';
 import { flattenQueryClausesToSql } from './flattenQueryClauses.ts';
 import { prepareColumnTableQuery } from './prepareColumnTableQuery.ts';
-import { COLUMN_TABLE, COLUMN_TABLE_DDL, toColumnRowParams } from './standardTestSqlSupport.ts';
+import { COLUMN_TABLE, COLUMN_TABLE_DDL, parsePayload, toColumnRowParams } from './standardTestSqlSupport.ts';
 
 /**
  * Runs the shared standard tests against a real SQLite engine (better-sqlite3) using a
@@ -28,9 +29,10 @@ describe('prepareColumnTableQuery against SQLite (better-sqlite3)', () => {
                 value REAL,
                 score REAL,
                 flag INTEGER,
+                amount INTEGER,
                 payload TEXT NOT NULL
             )`);
-            const insert = db.prepare('INSERT INTO items (id, age, name, category, date, value, score, flag, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            const insert = db.prepare('INSERT INTO items (id, age, name, category, date, value, score, flag, amount, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             for (const item of items) {
                 insert.run(...toColumnRowParams(item, 'sqlite'));
             }
@@ -44,11 +46,12 @@ describe('prepareColumnTableQuery against SQLite (better-sqlite3)', () => {
 
             const { sql, parameters } = flattenQueryClausesToSql(prepared, 'sqlite');
             const rows = db.prepare(`SELECT payload FROM items ${sql}`).all(...parameters) as Array<{ payload: string }>;
-            return rows.map(row => JSON.parse(row.payload));
+            return rows.map(row => parsePayload(row.payload));
         } finally {
             db.close();
         }
     };
 
     standardTests({ it, expect, execute, implementationName: 'column-table-sqlite', ddl: COLUMN_TABLE_DDL });
+    registerBigintSortTests({ it, expect, execute, implementationName: 'column-table-sqlite' });
 });

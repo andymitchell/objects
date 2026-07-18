@@ -21,14 +21,14 @@ export type {
 export type { SortValueKind } from '../utils/sql/types.ts';
 
 // Schemas
-export { SortEntrySchema, SortDefinitionSchema, SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema, SortBoundarySchema, EncodedSortValueSchema } from './schemas.ts';
+export { SortEntrySchema, SortDefinitionSchema, SortAndSliceBaseSchema, SortAndSliceSchema, SortAndSliceCursorSchema, SortBoundarySchema, EncodedSortValueSchema, EncodedBigIntSchema } from './schemas.ts';
 
 // JS Runtime
 export { sortAndSliceObjects } from './sortAndSliceObjects.ts';
 
 // Ordering contract — the single JS statement of the sort-value/null/pk-tiebreak rules.
-export type { EncodedSortValue } from './sortCompare.ts';
-export { encodeSortValue, compareValues, resolveSort, buildSortComparator, compareToBoundary } from './sortCompare.ts';
+export type { EncodedSortValue, EncodedBigInt } from './sortCompare.ts';
+export { encodeSortValue, compareValues, isEncodedBigInt, resolveSort, buildSortComparator, compareToBoundary } from './sortCompare.ts';
 
 // SQL
 export type { SqlDialect, SqlFragment } from './sql/index.ts';

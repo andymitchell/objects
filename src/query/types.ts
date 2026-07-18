@@ -230,7 +230,10 @@ export type ObjectTableInfo<T extends Record<string, any>> = TableInfo & {
  * object table — whose Zod schema lets the converter infer each leaf's kind — a relational table
  * has no schema to introspect, so the kind must be declared. It drives text-collation pinning
  * (`'text'` → `COLLATE "C"`), boundary-value binding (`'boolean'` → dialect-correct `1`/`0` vs a
- * real boolean), and boundary-value validation (`'numeric'`/`'bigint'`). A column left undeclared
+ * real boolean; `'bigint'` → exact int64 binding of encoded or safe-integer boundary values,
+ * rejecting lossy shapes — note that a bigint-kind PRIMARY KEY supports keyset pagination only
+ * for pk values within safe-integer precision, since `SortBoundary.pk` cannot carry the encoded
+ * form), and boundary-value validation (`'numeric'`). A column left undeclared
  * is bound raw and left unpinned — correct only when its natural ordering already matches the
  * comparator (which does not hold for text on a non-`C` database, nor for booleans on SQLite),
  * so declare every column you sort or paginate on. An empty object (`{}`) is valid.
@@ -279,7 +282,7 @@ isTypeEqual<z.infer<typeof SortEntrySchema>, { key: string; direction: 1 | -1 }>
 // Verify the non-generic structural shape matches.
 isTypeEqual<z.infer<typeof SortDefinitionSchema>, Array<{ key: string; direction: 1 | -1 }>>(true);
 
-// EncodedSortValue: schema is the runtime witness of the string | number | null contract.
+// EncodedSortValue: schema is the runtime witness of the string | number | EncodedBigInt | null contract.
 isTypeEqual<z.infer<typeof EncodedSortValueSchema>, EncodedSortValue>(true);
 
 // SortBoundary: manual type and schema must stay in lockstep (values + pk).

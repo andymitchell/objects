@@ -122,13 +122,160 @@ describe('buildAfterBoundaryWhere', () => {
             expect(result.errors[0]!.type).toBe('cursor');
         });
 
-        it('rejects any boundary on a bigint key', () => {
-            const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: '123' }];
-            const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
-            expect(result.success).toBe(false);
-            if (result.success) return;
-            expect(result.errors[0]!.type).toBe('cursor');
-            expect(result.errors[0]!.message.toLowerCase()).toContain('bigint');
+        describe('Bigint kind [dec-bigint-boundary-strict-binding]', () => {
+
+            it('binds a tagged bigint beyond double precision as a decimal string for Postgres', () => {
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: '9007199254740993' } }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.statement.sql).toBe('((n > $1 OR n IS NULL))');
+                expect(result.statement.parameters).toEqual(['9007199254740993']);
+            });
+
+            it('binds a tagged bigint as a native BigInt for SQLite', () => {
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: '9007199254740993' } }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'sqlite');
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.statement.sql).toBe('((n > ? OR n IS NULL))');
+                expect(result.statement.parameters).toEqual([9007199254740993n]);
+            });
+
+            it('accepts both int64 extremes (the range is inclusive)', () => {
+                for (const payload of ['9223372036854775807', '-9223372036854775808']) {
+                    const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: payload } }];
+                    const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                    expect(result.success, `expected ${payload} to bind`).toBe(true);
+                    if (!result.success) continue;
+                    expect(result.statement.parameters).toEqual([payload]);
+                }
+            });
+
+            it('accepts a safe-integer number: what small-value driver hydration yields', () => {
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: 42 }];
+                const pg = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                const sqlite = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'sqlite');
+                expect(pg.success && sqlite.success).toBe(true);
+                if (!pg.success || !sqlite.success) return;
+                expect(pg.statement.parameters).toEqual(['42']);
+                expect(sqlite.statement.parameters).toEqual([42n]);
+            });
+
+            it('rejects a tagged value beyond the int64 range: a foreign or corrupt cursor', () => {
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: '9223372036854775808' } }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain('n');
+                expect(result.errors[0]!.message).toContain('int64');
+            });
+
+            it('rejects an unsafe-magnitude number and names the hydration remedy', () => {
+                // 2^53 is exactly what a lossy better-sqlite3 default read produces for a large bigint.
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: 9007199254740992 }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain('safeIntegers(true)');
+            });
+
+            it('rejects a non-integer number', () => {
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: 10.5 }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain('integer');
+            });
+
+            it('rejects a bare decimal string and names the hydration remedy', () => {
+                // A bare '10' is what node-postgres default int8 hydration produces.
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: '10' }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain('types.setTypeParser(20, BigInt)');
+            });
+
+            it('rejects a malformed tagged value without throwing', () => {
+                // The EncodedBigInt type admits any string payload; the binder must not let a
+                // non-canonical one reach BigInt() (which would throw) nor bind it.
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: 'abc' } }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+            });
+
+            it('rejects a tagged value on an undeclared-kind column, naming the columnKinds remedy', () => {
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: '10' } }];
+                const result = _buildAfterBoundaryWhereClause(entries, identity, 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain(`columnKinds['n'] = 'bigint'`);
+            });
+
+            it('binds the bigint into the equality-prefix arm of a multi-key boundary, in order', () => {
+                const entries: BoundaryEntry[] = [
+                    { key: 'n', direction: 1, value: { $bigint: '12345678901234567' } },
+                    { key: 'id', direction: 1, value: 'Z' },
+                ];
+                const pg = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(pg.success).toBe(true);
+                if (!pg.success) return;
+                expect(pg.statement.sql).toBe('((n > $1 OR n IS NULL)) OR (n = $2 AND (id > $3 OR id IS NULL))');
+                expect(pg.statement.parameters).toEqual(['12345678901234567', '12345678901234567', 'Z']);
+                const sqlite = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'sqlite');
+                expect(sqlite.success).toBe(true);
+                if (!sqlite.success) return;
+                expect(sqlite.statement.parameters).toEqual([12345678901234567n, 12345678901234567n, 'Z']);
+            });
+
+            it('rejects a tagged object on a text or numeric key', () => {
+                for (const kind of ['text', 'numeric'] as const) {
+                    const entries: BoundaryEntry[] = [{ key: 'k', direction: 1, value: { $bigint: '10' } }];
+                    const result = _buildAfterBoundaryWhereClause(entries, withKinds({ k: kind }), 'pg');
+                    expect(result.success, `expected rejection on a ${kind} key`).toBe(false);
+                    if (result.success) continue;
+                    expect(result.errors[0]!.type).toBe('cursor');
+                }
+            });
+
+            it('a one-shot hostile getter cannot corrupt the bind: the single guarded read wins [dec-encode-snapshots]', () => {
+                // A getter can produce a canonical payload once and then throw or change; the
+                // binder must act only on what its single guarded read saw, never re-reading.
+                let reads = 0;
+                const oneShot = {
+                    get $bigint(): string {
+                        reads += 1;
+                        if (reads > 1) throw new Error('re-read of a one-shot value');
+                        return '10';
+                    },
+                };
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: oneShot }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(true);
+                if (!result.success) return;
+                expect(result.statement.parameters).toEqual(['10']);
+            });
+
+            it('rejects a canonical payload too long for int64 without materialising or echoing it', () => {
+                // A million-digit canonical string passes the shape check but can never come from
+                // an int64 column; the rejection must not build the value or dump it into the message.
+                const entries: BoundaryEntry[] = [{ key: 'n', direction: 1, value: { $bigint: '9'.repeat(1_000_000) } }];
+                const result = _buildAfterBoundaryWhereClause(entries, withKinds({ n: 'bigint' }), 'pg');
+                expect(result.success).toBe(false);
+                if (result.success) return;
+                expect(result.errors[0]!.type).toBe('cursor');
+                expect(result.errors[0]!.message).toContain('int64');
+                expect(result.errors[0]!.message.length).toBeLessThan(500);
+            });
+
         });
 
         it('translates a boolean boundary to a real boolean parameter for Postgres', () => {

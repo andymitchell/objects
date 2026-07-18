@@ -3,6 +3,17 @@ import { z } from "zod";
 
 
 export const PrimaryKeyValueSchema = z.union([z.string(), z.number()]);
+
+/**
+ * The value of an item's primary key: a plain string or number.
+ *
+ * @remarks
+ * Does not admit `bigint` (see `dec-bigint-boundary-strict-binding` in `src/query/decisions.md`).
+ * A value-based pagination boundary carries its pk as this type, so it can never hold the encoded
+ * bigint form: a bigint-kind primary-key column supports keyset pagination (`after_boundary`) only
+ * while pk values fit safe-integer precision (≤ 2^53 − 1). Beyond that, the query builders fail
+ * loudly with a `cursor` error rather than anchoring a walk on an imprecise value.
+ */
 export type PrimaryKeyValue = string | number;
 
 export const FullPrimaryKeyValueSchema = z.union([z.string(), z.number(), z.symbol()]);

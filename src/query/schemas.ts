@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PrimaryKeyValueSchema } from '../utils/getKeyValue.ts';
+import { CANONICAL_BIGINT_RE } from './sortCompare.ts';
 
 /**
  * Zod schema for a single sort entry: { key: string, direction: 1 | -1 }.
@@ -30,18 +31,29 @@ export const SortAndSliceBaseSchema = z.object({
 });
 
 /**
- * Zod schema for EncodedSortValue — the normalised form of a sort-key value: `string | number | null`.
+ * Zod schema for EncodedBigInt — the tagged encoding of a bigint sort value:
+ * `{ $bigint: '<decimal>' }` with no extra keys and a canonical payload (no leading zeros,
+ * no `-0`). Parsed output is frozen, matching what `encodeSortValue` produces.
+ */
+export const EncodedBigIntSchema = z.strictObject({
+    $bigint: z.string().regex(CANONICAL_BIGINT_RE),
+}).readonly();
+
+/**
+ * Zod schema for EncodedSortValue — the normalised form of a sort-key value:
+ * `string | number | EncodedBigInt | null`.
  * Runtime source of truth for the {@link EncodedSortValue} contract, used to validate boundary values.
  */
-export const EncodedSortValueSchema = z.union([z.string(), z.number(), z.null()]);
+export const EncodedSortValueSchema = z.union([z.string(), z.number(), EncodedBigIntSchema, z.null()]);
 
 /**
  * Zod schema for SortBoundary — a value-based pagination boundary: the encoded sort-key values
  * of the last row on a page, plus that row's primary key.
  *
- * Validates only structure (each value is `string | number | null`, pk is a valid primary key).
- * The 1:1 alignment of `values` with the user's `sort` is enforced by `SortAndSliceSchema`, which
- * has the sort in context.
+ * Validates only structure (each value is a valid {@link EncodedSortValueSchema} member —
+ * string, number, tagged bigint, or null — and pk is a valid primary key). The 1:1 alignment
+ * of `values` with the user's `sort` is enforced by `SortAndSliceSchema`, which has the sort
+ * in context.
  *
  * @example
  * const boundary = SortBoundarySchema.parse({ values: ['2024-01-01', 42], pk: 'row_9' });

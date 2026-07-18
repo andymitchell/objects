@@ -1,4 +1,4 @@
-import type { EncodedSortValue } from '../../sortCompare.ts';
+import { encodeSortValue, isEncodedBigInt, type EncodedBigInt, type EncodedSortValue } from '../../sortCompare.ts';
 import type { DotPropPathConversionResult, PreparedStatementArgument, SortValueKind } from '../../../utils/sql/types.ts';
 import type { QueryError } from '../../types.ts';
 import type { SqlDialect, SqlFragment } from '../types.ts';
@@ -32,7 +32,10 @@ type BuildAfterBoundaryWhereResult =
  * Each value is bound according to its key's {@link SortValueKind}: `'text'`/`'numeric'` bind the
  * string/number (rejecting a mismatched encoding as a `cursor` error), `'boolean'` translates to
  * the dialect's representation (`1`/`0` for SQLite, a real boolean for Postgres), and `'bigint'`
- * is rejected outright. A key with no declared/derivable kind binds its value raw.
+ * binds a tagged `{ $bigint }` or safe-integer value exactly (decimal string for Postgres, native
+ * BigInt for SQLite), rejecting the lossy shapes bad hydration produces — see
+ * {@link bindBoundaryValue}. A key with no declared/derivable kind binds a string/number value raw
+ * and rejects a tagged bigint (binding one requires the declared kind).
  *
  * @param entries - The zipped boundary positions, in sort priority order, including any synthetic pk entry.
  * @param pathToSqlExpression - Resolves each key to its SQL expression (and kind); the same converter used for ORDER BY.
@@ -114,6 +117,10 @@ type BindBoundaryValueResult =
     | { success: true; value: PreparedStatementArgument }
     | { success: false; error: QueryError };
 
+/** Inclusive bounds of the values an int64 (BIGINT) column can hold. */
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
 /**
  * Validates and translates one non-null boundary value into the parameter its column orders by,
  * per the key's {@link SortValueKind}.
@@ -122,19 +129,64 @@ type BindBoundaryValueResult =
  *   such as `'-Infinity'`, which orders differently under `::numeric` than in the string bracket).
  * - `'boolean'` translates `'true'`/`'false'` to the dialect's stored form (a real boolean for
  *   Postgres, `1`/`0` for SQLite, which has no boolean type).
- * - `'bigint'` is rejected: its encoded decimal string orders lexically in memory but numerically
- *   in SQL, so a boundary walk cannot stay consistent across the two.
- * - No kind → bind the encoded value as-is.
+ * - `'bigint'` accepts the tagged `{ $bigint }` form within the int64 range, or a safe-integer
+ *   number (what drivers hydrate small values to) — bound for Postgres as the canonical decimal
+ *   string, for SQLite as a native JS BigInt. Everything else is exactly what lossy or
+ *   misconfigured driver hydration produces, and is rejected with the remedy named: an
+ *   unsafe-magnitude or fractional number, a bare decimal string, or an out-of-range tag
+ *   (a cursor that cannot come from an int64 column).
+ * - No kind → a plain string/number binds as-is; a tagged bigint is rejected — how a bigint
+ *   binds is dialect-specific, so it requires the declared `'bigint'` kind.
+ *
+ * @remarks
+ * The Postgres bind is the bare decimal string with no `::bigint` cast on the placeholder:
+ * column-table expressions are bare quoted identifiers, so Postgres infers int8 from the
+ * comparison context — the same wire form drivers themselves send for bigint parameters. A cast
+ * would require threading the kind into placeholder emission across both the strictly-after and
+ * equality-prefix arms for no present gain.
  */
 function bindBoundaryValue(
     key: string,
     kind: SortValueKind | undefined,
-    value: string | number,
+    value: string | number | EncodedBigInt,
     dialect: SqlDialect
 ): BindBoundaryValueResult {
     switch (kind) {
-        case 'bigint':
-            return { success: false, error: { type: 'cursor', message: `Sort key '${key}' is a bigint; after_boundary cannot page bigint keys (their ordering is not stable across in-memory and SQL).` } };
+        case 'bigint': {
+            if (typeof value === 'object') {
+                // Snapshot through the ordering contract's own encoder: one guarded read of a
+                // possibly-hostile object, yielding a plain frozen tag whose payload is safe to
+                // read repeatedly. A malformed tag encodes structurally (a string), not as a tag.
+                const snapshot = encodeSortValue(value);
+                if (!isEncodedBigInt(snapshot)) {
+                    return { success: false, error: { type: 'cursor', message: `Sort key '${key}' has a malformed encoded bigint boundary value; rebuild the boundary with encodeSortValue.` } };
+                }
+                const payload = snapshot.$bigint;
+                // int64 spans at most 20 characters ('-' plus 19 digits); a longer canonical
+                // payload cannot be in range, and skipping BigInt() on it keeps the builder
+                // total for payloads of any length (construction would throw past the engine's
+                // size limit). The echo is truncated so a giant payload never floods the message.
+                const echo = payload.length > 32 ? `${payload.slice(0, 32)}…` : payload;
+                if (payload.length > 20) {
+                    return { success: false, error: { type: 'cursor', message: `Sort key '${key}' has bigint boundary value ${echo}, outside the int64 range a bigint column can hold; the cursor cannot come from this table.` } };
+                }
+                const b = BigInt(payload);
+                if (b < INT64_MIN || b > INT64_MAX) {
+                    return { success: false, error: { type: 'cursor', message: `Sort key '${key}' has bigint boundary value ${echo}, outside the int64 range a bigint column can hold; the cursor cannot come from this table.` } };
+                }
+                return { success: true, value: dialect === 'pg' ? payload : b };
+            }
+            if (typeof value === 'number') {
+                if (!Number.isInteger(value)) {
+                    return { success: false, error: { type: 'cursor', message: `Sort key '${key}' is a bigint but the boundary value ${value} is not an integer.` } };
+                }
+                if (!Number.isSafeInteger(value)) {
+                    return { success: false, error: { type: 'cursor', message: `Sort key '${key}' is a bigint but the boundary value ${value} exceeds safe-integer precision and cannot reliably identify the boundary row. Hydrate bigint columns as BigInt (better-sqlite3: statement.safeIntegers(true)) and build the boundary from the BigInt value.` } };
+                }
+                return { success: true, value: dialect === 'pg' ? String(value) : BigInt(value) };
+            }
+            return { success: false, error: { type: 'cursor', message: `Sort key '${key}' is a bigint but the boundary value ${JSON.stringify(value)} is a bare string. Hydrate int8 columns as BigInt (node-postgres: types.setTypeParser(20, BigInt)) or supply the encoded { $bigint: '<decimal>' } form.` } };
+        }
         case 'text':
             if (typeof value !== 'string') return { success: false, error: { type: 'cursor', message: `Sort key '${key}' is text but the boundary value ${JSON.stringify(value)} is not a string.` } };
             return { success: true, value };
@@ -146,6 +198,11 @@ function bindBoundaryValue(
             if (value === 'false') return { success: true, value: dialect === 'pg' ? false : 0 };
             return { success: false, error: { type: 'cursor', message: `Sort key '${key}' is boolean but the boundary value ${JSON.stringify(value)} is not 'true' or 'false'.` } };
         default:
+            // A tagged bigint must never bind raw: an undeclared column gives no licence to pick
+            // a dialect representation, and a silently mis-bound anchor corrupts the whole walk.
+            if (typeof value === 'object') {
+                return { success: false, error: { type: 'cursor', message: `Sort key '${key}' has an encoded bigint boundary value but no declared kind; declare columnKinds['${key}'] = 'bigint' to enable bigint keyset pagination.` } };
+            }
             return { success: true, value };
     }
 }

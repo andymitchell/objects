@@ -135,14 +135,13 @@ describe('prepareObjectTableQuery', () => {
                 expect(result.order_by_statement).toContain('DESC NULLS LAST');
             });
 
-            it('SQLite ORDER BY simulates NULLS LAST with IS NULL trick', () => {
+            it('SQLite ORDER BY places nulls last', () => {
                 const result = prepareObjectTableQuery('sqlite', table, undefined, {
                     sort: [{ key: 'date', direction: -1 }],
                 });
                 expect(result.success).toBe(true);
                 if (!result.success) return;
-                expect(result.order_by_statement).toContain('IS NULL ASC');
-                expect(result.order_by_statement).toContain('DESC');
+                expect(result.order_by_statement).toContain('DESC NULLS LAST');
             });
         });
 

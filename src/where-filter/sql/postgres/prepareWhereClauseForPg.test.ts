@@ -477,4 +477,133 @@ describe('postgres where clause builder', () => {
         });
     });
 
+    // Postgres compares and orders text under the database's default collation, which follows the server's
+    // locale, while both the reference matcher and SQLite compare by code point. Pinning `COLLATE "C"` on every
+    // text comparison makes a filter mean the same thing on any database. It also makes a filter, an ORDER BY and
+    // a keyset predicate over the same field address one identical expression, which is what lets a single
+    // expression index serve all three — Postgres matches an index expression structurally, collation included.
+    describe('text comparisons are pinned to code-point collation', () => {
+        const CollationSchema = z.object({ id: z.string(), name: z.string(), rank: z.number(), active: z.boolean() });
+        type CollationRow = z.infer<typeof CollationSchema>;
+        const clauseFor = (filter: WhereFilterDefinition<CollationRow>): string => {
+            const result = prepareWhereClauseForPg(filter, new PropertyTranslatorPgJsonbSchema(CollationSchema, 'recordColumn'));
+            if (!result.success) throw new Error(result.errors.map(e => e.message).join('; '));
+            return result.where_clause_statement;
+        };
+
+        test('an equality on a text field compares under C collation', () => {
+            expect(clauseFor({ name: 'andy' })).toContain('::text COLLATE "C" =');
+        });
+
+        test('a range comparison on a text field compares under C collation', () => {
+            expect(clauseFor({ name: { $gt: 'andy' } })).toContain('::text COLLATE "C" >');
+        });
+
+        test('a numeric comparison carries no collation', () => {
+            expect(clauseFor({ rank: { $gte: 3 } })).not.toContain('COLLATE');
+        });
+
+        test('a boolean comparison carries no collation', () => {
+            expect(clauseFor({ active: true })).not.toContain('COLLATE');
+        });
+
+        // A regex is answered by the engine's pattern matcher, never a btree index, and `COLLATE "C"` would narrow
+        // its case folding to ASCII — diverging from the reference matcher for no gain.
+        test('a regex match carries no collation', () => {
+            expect(clauseFor({ name: { $regex: '^an' } })).not.toContain('COLLATE');
+        });
+    });
+
+    describe('a value reached through an array carries the same collation policy as a value read directly', () => {
+        const ArraySchema = z.object({
+            id: z.string(),
+            tags: z.array(z.string()),
+            items: z.array(z.object({ k: z.string() })),
+        });
+        type ArrayRow = z.infer<typeof ArraySchema>;
+        const clauseFor = (filter: WhereFilterDefinition<ArrayRow>): string => {
+            const result = prepareWhereClauseForPg(filter, new PropertyTranslatorPgJsonbSchema(ArraySchema, 'recordColumn'));
+            if (!result.success) throw new Error(result.errors.map(e => e.message).join('; '));
+            return result.where_clause_statement;
+        };
+
+        // Without this, the same `$gt` orders by locale when the array holds scalars and by code point when it
+        // holds objects — one filter, two meanings, decided by a detail of how the data happens to be shaped.
+        test("an ordered comparison against a scalar array's elements compares under C collation", () => {
+            expect(clauseFor({ tags: { $elemMatch: { $gt: 'B' } } })).toContain(`#>> '{}' COLLATE "C" >`);
+        });
+
+        test("an ordered comparison against a sub-document's field compares under C collation", () => {
+            expect(clauseFor({ items: { $elemMatch: { k: { $gt: 'B' } } } })).toContain('::text COLLATE "C" >');
+        });
+
+        // A path that descends THROUGH an array to a field is read from every spread element. The runtime
+        // supports it; the dot-prop path union stops at the array, so the filter is asserted into shape.
+        test('an ordered comparison against a field beneath an array compares under C collation', () => {
+            const beneathArray = { 'items.k': { $gt: 'B' } } as WhereFilterDefinition<ArrayRow>;
+            expect(clauseFor(beneathArray)).toContain(`#>> '{}' COLLATE "C" >`);
+        });
+    });
+
+    // A regex asks for case folding, not code-point order. Under C collation Postgres folds ASCII only, so a
+    // pinned subject stops matching the accented characters the reference matcher matches. The subject must
+    // therefore arrive unpinned however the value was reached — a producer cannot know its consumer is a regex.
+    describe('a regex subject is never collation-pinned, however the value is reached', () => {
+        const ArraySchema = z.object({
+            id: z.string(),
+            name: z.string(),
+            tags: z.array(z.string()),
+            items: z.array(z.object({ k: z.string() })),
+        });
+        type ArrayRow = z.infer<typeof ArraySchema>;
+        const clauseFor = (filter: WhereFilterDefinition<ArrayRow>): string => {
+            const result = prepareWhereClauseForPg(filter, new PropertyTranslatorPgJsonbSchema(ArraySchema, 'recordColumn'));
+            if (!result.success) throw new Error(result.errors.map(e => e.message).join('; '));
+            return result.where_clause_statement;
+        };
+
+        test('on a field read directly', () => {
+            expect(clauseFor({ name: { $regex: 'e', $options: 'i' } })).not.toContain('COLLATE');
+        });
+
+        test("on a scalar array's elements", () => {
+            expect(clauseFor({ tags: { $elemMatch: { $regex: 'e', $options: 'i' } } })).not.toContain('COLLATE');
+        });
+
+        test("on a sub-document's field", () => {
+            expect(clauseFor({ items: { $elemMatch: { k: { $regex: 'e', $options: 'i' } } } })).not.toContain('COLLATE');
+        });
+
+        test('on a field beneath an array', () => {
+            const beneathArray = { 'items.k': { $regex: 'e', $options: 'i' } } as WhereFilterDefinition<ArrayRow>;
+            expect(clauseFor(beneathArray)).not.toContain('COLLATE');
+        });
+    });
+
+    // The observable consequence of the rule above, run against a real engine: C collation would fold only ASCII,
+    // so 'É' would stop matching /é/i while the reference matcher still matches it.
+    describe('a case-insensitive regex folds an accented character, as the reference matcher does', () => {
+        const AccentSchema = z.object({
+            id: z.string(),
+            name: z.string(),
+            tags: z.array(z.string()),
+            items: z.array(z.object({ k: z.string() })),
+        });
+        const row = { id: '1', name: 'ÉCOLE', tags: ['ÉCOLE'], items: [{ k: 'ÉCOLE' }] };
+        // 'items.k' descends THROUGH the array to a field — supported at runtime, outside the typed path union.
+        const accentedFilters: Record<string, WhereFilterDefinition<typeof row>> = {
+            'on a field read directly': { name: { $regex: 'école', $options: 'i' } },
+            "on a scalar array's elements": { tags: { $elemMatch: { $regex: 'école', $options: 'i' } } },
+            "on a sub-document's field": { items: { $elemMatch: { k: { $regex: 'école', $options: 'i' } } } },
+            'on a field beneath an array': { 'items.k': { $regex: 'école', $options: 'i' } } as WhereFilterDefinition<typeof row>,
+        };
+
+        for (const [where, filter] of Object.entries(accentedFilters)) {
+            test(where, async () => {
+                expect(matchJavascriptObject(row, filter)).toBe(true);
+                expect(await matchJavascriptObjectInDb(row, filter, AccentSchema)).toBe(true);
+            });
+        }
+    });
+
 })

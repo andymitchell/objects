@@ -3,9 +3,7 @@ import { prepareWhereClauseForPg, PropertyTranslatorPgJsonbSchema } from '../../
 import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from '../../where-filter/sql/sqlite/index.ts';
 import type { PreparedWhereClauseStatement } from '../../where-filter/sql/types.ts';
 import type { DotPropPathConversionResult } from '../../utils/sql/types.ts';
-import type { ZodKind } from '../../dot-prop-paths/schema-tree.ts';
-import { convertDotPropPathToPostgresJsonPath } from '../../utils/sql/postgres/convertDotPropPathToPostgresJsonPath.ts';
-import { convertDotPropPathToSqliteJsonPath } from '../../utils/sql/sqlite/convertDotPropPathToSqliteJsonPath.ts';
+import { buildSortKeyExpression } from './buildSortKeyExpression.ts';
 import { SortAndSliceSchema } from '../schemas.ts';
 import { encodeSortValue, resolveSort } from '../sortCompare.ts';
 import type { ObjectTableInfo, PreparedQueryClausesResult, QueryError, SortAndSlice } from '../types.ts';
@@ -20,26 +18,6 @@ import { concatSqlParameters } from './internals/sqlParameterUtils.ts';
 function toWhereClauseStatement(fragment: SqlFragment): PreparedWhereClauseStatement {
     return { where_clause_statement: fragment.sql, statement_arguments: fragment.parameters };
 }
-
-/**
- * The leaf kinds a sort key may address: everything except `object` and `array`. Structural
- * values have no cross-backend ordering — Postgres would order jsonb by its btree rules,
- * SQLite by raw JSON text, and the runtime comparator by string form — so the sort/cursor
- * path converters refuse them rather than let the three orderings silently diverge.
- *
- * Declared as an exhaustive record over `Exclude<ZodKind, 'object' | 'array'>` so a Zod
- * upgrade that introduces a new kind fails compilation here instead of silently refusing it.
- */
-const SORTABLE_LEAF_KIND_MAP: Record<Exclude<ZodKind, 'object' | 'array'>, true> = {
-    any: true, bigint: true, boolean: true, catch: true, custom: true, date: true,
-    default: true, enum: true, file: true, function: true, int: true, intersection: true,
-    lazy: true, literal: true, map: true, nan: true, never: true, nonoptional: true,
-    null: true, nullable: true, number: true, optional: true, pipe: true, prefault: true,
-    promise: true, readonly: true, record: true, set: true, string: true, success: true,
-    symbol: true, template_literal: true, transform: true, tuple: true, undefined: true,
-    union: true, unknown: true, void: true,
-};
-const SORTABLE_LEAF_KINDS = Object.getOwnPropertyNames(SORTABLE_LEAF_KIND_MAP) as ZodKind[];
 
 /**
  * Builds parameterised SQL clauses (WHERE, ORDER BY, LIMIT, OFFSET) for a table that stores
@@ -140,32 +118,10 @@ export function prepareObjectTableQuery<T extends Record<string, any>>(
         );
     }
 
-    // Path-to-SQL converter for this table's JSON column. Serves only ORDER BY and the
-    // after_pk cursor (where-filters translate via PropertyTranslator*), so it restricts
-    // leaves to sortable kinds — see SORTABLE_LEAF_KIND_MAP.
-    const pathToSqlExpression = (dotPropPath: string): DotPropPathConversionResult => {
-        const result = dialect === 'pg'
-            ? convertDotPropPathToPostgresJsonPath(table.objectColumnName, dotPropPath, table.schema, SORTABLE_LEAF_KINDS)
-            : convertDotPropPathToSqliteJsonPath(table.objectColumnName, dotPropPath, table.schema, SORTABLE_LEAF_KINDS);
-        if (!result.success) {
-            // Name the offending key: a multi-key sort otherwise yields errors a caller cannot attribute.
-            return { success: false, error: { ...result.error, message: `Sort key '${dotPropPath}': ${result.error.message}` } };
-        }
-        // JSON storage cannot carry a bigint, so a bigint-classified sort key on an object table is
-        // a contradiction the caller's serialisation layer must resolve; rejecting loudly beats a
-        // plausible-looking wrong walk. See decisions.md dec-object-table-bigint-rejection.
-        if (result.kind === 'bigint') {
-            return { success: false, error: { type: 'unsupported_kind', dotPropPath, message: `Sort key '${dotPropPath}': schema type bigint cannot be sorted or paged on an object (JSON) table — JSON cannot carry a bigint, so no stored value can order by it. Store the value in a serialisable form, or use a column table with columnKinds['${dotPropPath}'] = 'bigint'.` } };
-        }
-        // Pin Postgres text ordering to code-point (C) collation so the engine's ORDER BY and
-        // cursor comparisons match compareValues regardless of the database's locale. Every clause
-        // that reads a sort key flows through this closure, so the pin applies uniformly. SQLite
-        // BINARY is already code-point, and non-text kinds order identically under any collation.
-        if (dialect === 'pg' && result.kind === 'text') {
-            return { success: true, expression: `${result.expression} COLLATE "C"`, kind: result.kind };
-        }
-        return result;
-    };
+    // Every clause that reads a sort key — ORDER BY and both keyset builders — resolves it here, so
+    // all of them, and any expression index built to serve them, carry byte-identical text.
+    const pathToSqlExpression = (dotPropPath: string): DotPropPathConversionResult =>
+        buildSortKeyExpression(dialect, table.objectColumnName, dotPropPath, table.schema);
 
     // 3. Build WHERE from filter
     let filterStatement: PreparedWhereClauseStatement | null = null;

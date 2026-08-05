@@ -98,14 +98,13 @@ describe('prepareColumnTableQuery', () => {
                 expect(result.order_by_statement).toContain('NULLS LAST');
             });
 
-            it('simulates NULLS LAST for SQLite', () => {
+            it('places nulls last for SQLite', () => {
                 const result = prepareColumnTableQuery('sqlite', table, {
                     sort: [{ key: 'name', direction: 1 }],
                 });
                 expect(result.success).toBe(true);
                 if (!result.success) return;
-                expect(result.order_by_statement).toContain('"name" IS NULL ASC');
-                expect(result.order_by_statement).toContain('"name" ASC');
+                expect(result.order_by_statement).toContain('"name" ASC NULLS LAST');
             });
         });
 

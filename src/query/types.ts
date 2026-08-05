@@ -203,6 +203,12 @@ export type TableInfo = { tableName: string };
  * object shape (preventing SQL injection via arbitrary paths), and it provides type information
  * for dialect-specific casting (e.g. Postgres `::numeric` vs `::text`).
  *
+ * A sort key is read as a JSON extraction expression, not a bare column, so an index meant to serve
+ * a sorted or paged query must be an expression index built on that exact expression — cast and
+ * collation included, since Postgres matches an index to a query structurally. Ask
+ * `buildSortKeyExpression` for the text rather than reconstructing it: a hand-written rendering of
+ * the same path produces an index the emitted queries cannot use.
+ *
  * @example
  * const table: ObjectTableInfo<Email> = {
  *   tableName: 'emails',

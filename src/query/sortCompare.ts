@@ -145,9 +145,10 @@ export function encodeSortValue(v: unknown): EncodedSortValue {
  * String comparison
  * is by Unicode code point — equal to UTF-8 byte order (SQLite BINARY collation, Postgres
  * C collation), not to JavaScript's native UTF-16 code-unit order, which differs for
- * supplementary-plane characters. The SQL builders hold Postgres to this by pinning text sort and cursor
- * expressions with `COLLATE "C"`, so a database whose default collation is locale-aware (e.g. `en_US`,
- * where `'a' < 'B'`) still orders exactly as this comparator does. Mixed-bracket pairs
+ * supplementary-plane characters. The SQL builders hold Postgres to this by pinning every text
+ * expression with `COLLATE "C"` — sort, cursor, and where-filter comparison alike — so a database
+ * whose default collation is locale-aware (e.g. `en_US`, where `'a' < 'B'`) still orders and matches
+ * exactly as this comparator does. Mixed-bracket pairs
  * resolve by bracket (numeric before string, direction-scaled) rather than by string
  * coercion, which was not transitive (`10 < '30' < 5 < 10` cycles). Structural values
  * (objects, arrays) take their string form and so mutually tie — except the reserved

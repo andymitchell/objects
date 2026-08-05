@@ -23,6 +23,7 @@ import { emitMultiScalarPgComparison } from "./multiScalarPg.ts";
 import { arraySizeEquals, guardedJsonbArray, mapTypeToPostgres, pgRegexOptionPrefix, toJsonbParam } from "./pgJsonbFragments.ts";
 import type { BindValue } from "./pgJsonbFragments.ts";
 import { spreadJsonbArrays } from "./spreadJsonbArrays.ts";
+import { withCodePointCollation, withoutCodePointCollation } from "../../../utils/sql/postgres/pgCodePointCollation.ts";
 
 
 /**
@@ -120,6 +121,18 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             return 'FALSE';
         }
         return result.expression;
+    }
+
+    /**
+     * An array element (or a leaf reached through one) read as text, pinned to code point.
+     *
+     * A value read out of an array reaches SQL by a different route than one read from a field — an element
+     * accessor rather than the path converter — but it is the same value, and a comparison against it must mean
+     * the same thing. Without the pin a `$gt` would order by locale for a scalar array and by code point for an
+     * array of objects, since only the latter is read through the converter.
+     */
+    private elementAsText(jsonbExpression: string): string {
+        return withCodePointCollation(`${jsonbExpression} #>> '{}'`);
     }
 
     /** A path-conversion error in the shape the shared converter produces, so callers classify it uniformly. */
@@ -356,7 +369,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 ? typeof forPredicate.operand === 'number'
                 : this.elementNeedsNumericCast(forPredicate);
             return {
-                customSqlIdentifier: numeric ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`,
+                customSqlIdentifier: numeric ? `(${alias} #>> '{}')::numeric` : this.elementAsText(alias),
                 customRawJsonb: alias,
             };
         };
@@ -377,7 +390,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
                 const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
-                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} #>> '{}' IN (${placeholders.join(', ')}))`;
+                return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${this.elementAsText(alias)} IN (${placeholders.join(', ')}))`;
             }
             case 'nin': {
                 if (predicate.operand.length === 0) return '1 = 1';
@@ -387,7 +400,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} IN (${vals.join(', ')}))`;
                 }
                 const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
-                return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} #>> '{}' IN (${placeholders.join(', ')}))`;
+                return `NOT EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${this.elementAsText(alias)} IN (${placeholders.join(', ')}))`;
             }
 
             case 'all': {
@@ -413,7 +426,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                         return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} = ${toJsonbParam(operand as string | number | boolean, this.binder(statementArguments))})`;
                     }
                     const placeholder = this.generatePlaceholder(operand as PreparedStatementArgumentOrObject, statementArguments);
-                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${alias} #>> '{}' = ${placeholder})`;
+                    return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${this.elementAsText(alias)} = ${placeholder})`;
                 });
                 return conditions.join(' AND ');
             }
@@ -462,7 +475,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                 // The element's text identifier, cast to numeric when the body compares numerically, mirroring the
                 // leaf comparison's typed accessor. A range's `<`/`>` would otherwise compare the element as TEXT
                 // (`'-8' < '-9'` is lexically true), and a conjunction can hide the range one level down.
-                const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`;
+                const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : this.elementAsText(alias);
                 const body = this.emitPredicate(dotpropPath, resolved, bodyPred, statementArguments, errors, rootFilter, {
                     customSqlIdentifier: elementId,
                     customRawJsonb: alias,
@@ -484,7 +497,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'undefinedField': {
                 const alias = nextAlias();
                 const body = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, {
-                    customSqlIdentifier: `${alias} #>> '{}'`,
+                    customSqlIdentifier: this.elementAsText(alias),
                     customRawJsonb: alias,
                 });
                 return `EXISTS (SELECT 1 FROM ${elements(alias)} WHERE ${body})`;
@@ -574,6 +587,8 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             spread = { ...spread, output_column: leafColumn, output_identifier: `${leafColumn} #>> '{}'` };
         }
         const resolvedSpread = spread;
+        // The spread leaf read as text, pinned exactly as a directly-read text field is.
+        const leafText = withCodePointCollation(resolvedSpread.output_identifier);
         const multiScalarElement = this.multiScalarPaths.has(resolved.lookupPath);
         const nextAlias = this.aliasFactory(path.filter(node => node.kind === 'array').length);
 
@@ -587,7 +602,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
                 }
                 const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
-                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_identifier} IN (${placeholders.join(', ')}))`;
+                return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${leafText} IN (${placeholders.join(', ')}))`;
             }
             case 'nin': {
                 if (predicate.operand.length === 0) return '1 = 1';
@@ -596,7 +611,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} IN (${vals.join(', ')}))`;
                 }
                 const placeholders = predicate.operand.map(v => this.generatePlaceholder(v as PreparedStatementArgumentOrObject, statementArguments));
-                return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_identifier} IN (${placeholders.join(', ')}))`;
+                return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${leafText} IN (${placeholders.join(', ')}))`;
             }
             case 'all': {
                 const conditions = predicate.elements.map(operand => {
@@ -611,7 +626,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                         return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_column} = ${toJsonbParam(operand as string | number | boolean, this.binder(statementArguments))})`;
                     }
                     const placeholder = this.generatePlaceholder(operand as PreparedStatementArgumentOrObject, statementArguments);
-                    return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${resolvedSpread.output_identifier} = ${placeholder})`;
+                    return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${leafText} = ${placeholder})`;
                 });
                 return conditions.length === 0 ? '1 = 1' : conditions.join(' AND ');
             }
@@ -633,14 +648,14 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'regex':
             case 'range': {
                 const rawJsonbId = resolvedSpread.output_column;
-                const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: leafText, customRawJsonb: rawJsonbId });
                 return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }
             case 'ne': {
                 // The complement of `$eq` over the whole path: NO element's leaf may equal the operand.
                 const equality: Predicate = { kind: 'eq', operand: predicate.operand };
                 const rawJsonbId = resolvedSpread.output_column;
-                const subClause = this.emitPredicate(dotpropPath, resolved, equality, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                const subClause = this.emitPredicate(dotpropPath, resolved, equality, statementArguments, errors, rootFilter, { customSqlIdentifier: leafText, customRawJsonb: rawJsonbId });
                 return `NOT EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }
             case 'exists': {
@@ -684,7 +699,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
                     subClause = '1 = 0';
                 } else {
                     const bodyPred = predicate.body.scalarPredicate;
-                    const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : `${alias} #>> '{}'`;
+                    const elementId = this.elementNeedsNumericCast(bodyPred) ? `(${alias} #>> '{}')::numeric` : this.elementAsText(alias);
                     subClause = this.emitPredicate(dotpropPath, resolved, bodyPred, statementArguments, errors, rootFilter, { customSqlIdentifier: elementId, customRawJsonb: alias });
                 }
                 return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE EXISTS (SELECT 1 FROM ${leafElements} WHERE ${subClause}))`;
@@ -692,7 +707,7 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
             case 'scalar':
             case 'undefinedField': {
                 const rawJsonbId = resolvedSpread.output_column;
-                const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: resolvedSpread.output_identifier, customRawJsonb: rawJsonbId });
+                const subClause = this.emitPredicate(dotpropPath, resolved, predicate, statementArguments, errors, rootFilter, { customSqlIdentifier: leafText, customRawJsonb: rawJsonbId });
                 return `EXISTS (SELECT 1 FROM ${resolvedSpread.sql} WHERE ${subClause})`;
             }
             default:
@@ -854,9 +869,15 @@ class BasePropertyTranslatorJsonb<T extends Record<string, any> = Record<string,
      *
      * A broken pattern is a REJECTION (the value-driven matcher throws on it too), surfaced as 'not well-defined'
      * so the seam rethrows; a valid pattern Postgres cannot faithfully express is a capability gap, surfaced as a skip.
+     *
+     * The subject is read without the text collation pin every other comparison carries. A regex match is not a
+     * code-point comparison, and under `COLLATE "C"` a case-insensitive pattern folds ASCII only — so `'É'` would
+     * stop matching `/é/i`, which the JS RegExp this mirrors does match. A regex cannot use a btree index either
+     * way, so nothing is lost by unpinning it. The pin is stripped here rather than skipped at each producer,
+     * because an identifier is built once and any operator may read it — a producer cannot know a regex will.
      */
     private emitRegex(dotpropPath: string, resolved: ResolvedPath, predicate: Predicate & { kind: 'regex' }, statementArguments: PreparedStatementArgument[], rootFilter: WhereFilterDefinition<T>, customSqlIdentifier: string | undefined): string {
-        const sqlIdentifier = customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']);
+        const sqlIdentifier = withoutCodePointCollation(customSqlIdentifier ?? this.getSqlIdentifier(dotpropPath, ['string']));
         // Mirror the JS oracle (`new RegExp($regex, $options)`): an invalid pattern or an invalid flag is a
         // REJECTION (the reference throws), surfaced as 'not well-defined' so the seam rethrows (vs a skip).
         try {

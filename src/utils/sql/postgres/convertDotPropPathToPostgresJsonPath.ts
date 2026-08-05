@@ -5,6 +5,7 @@ import { getEnumValues, type AnyZodSchema } from "../../../zod/introspection.ts"
 import { isZodSchema } from "../../isZodSchema.ts";
 import type { DotPropPathConversionResult, SortValueKind } from "../types.ts";
 import { pgJsonbAccessor } from "./pgJsonbAccessor.ts";
+import { withCodePointCollation } from "./pgCodePointCollation.ts";
 
 export const UNSAFE_WARNING = "It's unsafe to generate a SQL identifier for this.";
 
@@ -18,9 +19,22 @@ const STRUCTURAL_KINDS: readonly ZodKind[] = ['array', 'object'];
  * expression, and the leaf's kind decides both the final operator (`->` for jsonb, `->>` for text) and the
  * cast. Each key is quoted, which makes a key that carries a quote or a comment marker inert data.
  *
+ * A text leaf is additionally pinned with `COLLATE "C"`, so it compares and orders by code point on any
+ * database, whatever its default locale. This is the same guarantee `compareValues` gives in JS, and it
+ * is applied here rather than at each call site so that a filter, a sort, and a keyset predicate on one
+ * key all render the same text — which is also what lets a single expression index serve all three.
+ *
+ * @param columnName - The jsonb column the path is read out of.
+ * @param dotPropPath - The path, e.g. `'contact.name'`.
+ * @param nodeMapOrSchema - The schema describing the stored object, or a pre-built path tree.
+ * @param errorIfNotAsExpected - When given, a leaf whose kind is outside this list is refused (`unexpected_kind`).
+ * @param noCasting - Drops the type cast from the emitted expression, and with it the collation pin, which
+ *   only a genuine text expression can carry. The reported `kind` still reflects the cast the leaf orders by.
+ * @returns `{ success: true, expression, kind? }`, or `{ success: false, error }`. Never throws.
+ *
  * @example
  * convertDotPropPathToPostgresJsonPath('data', 'contact.name', nodeMap)
- * // → { success: true, expression: "(data->'contact'->>'name')::text" }
+ * // → { success: true, expression: `(data->E'contact'->>E'name')::text COLLATE "C"`, kind: 'text' }
  *
  * @example
  * convertDotPropPathToPostgresJsonPath('data', 'unknown.path', nodeMap)
@@ -77,11 +91,15 @@ export function convertDotPropPathToPostgresJsonPath<T extends Record<string, an
 
     const accessor = pgJsonbAccessor(columnName, resolved.segments, { asText: !STRUCTURAL_KINDS.includes(zodKind) });
     const cast = noCasting? '' : mappedCast;
-    const expression = `${accessor}${cast}`;
-    // Surface the comparison family so the sort/cursor builders can pin text collation and bind
-    // boundary values correctly. Derived from the cast the leaf actually orders by (which stands
-    // even when `noCasting` drops it from the emitted expression).
+    // Surface the comparison family so the sort/cursor builders bind boundary values correctly.
+    // Derived from the cast the leaf actually orders by (which stands even when `noCasting` drops
+    // it from the emitted expression).
     const kind = sortValueKindFromPgCast(mappedCast);
+    // Only a genuine text expression can carry the pin: without the cast the accessor's type is not
+    // guaranteed collatable. Non-text kinds compare identically under any collation.
+    const expression = kind === 'text' && !noCasting
+        ? withCodePointCollation(`${accessor}${cast}`)
+        : `${accessor}${cast}`;
     return kind === undefined ? { success: true, expression } : { success: true, expression, kind };
 }
 

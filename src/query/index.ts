@@ -34,6 +34,8 @@ export { encodeSortValue, compareValues, isEncodedBigInt, resolveSort, buildSort
 export type { SqlDialect, SqlFragment } from './sql/index.ts';
 export { prepareObjectTableQuery } from './sql/index.ts';
 export { prepareColumnTableQuery } from './sql/index.ts';
+// The one expression a JSON sort key resolves to — needed to build an index that can serve it.
+export { buildSortKeyExpression } from './sql/index.ts';
 export { flattenQueryClausesToSql } from './sql/index.ts';
 
 // Standard test fixtures + DDL — published so adapters can build a real ICollection

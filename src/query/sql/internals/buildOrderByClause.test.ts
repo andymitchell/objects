@@ -42,22 +42,21 @@ describe('buildOrderByClause', () => {
     });
 
     describe('SQLite', () => {
-        it('simulates NULLS LAST via IS NULL', () => {
+        it('generates ASC/DESC with NULLS LAST', () => {
             const result = _buildOrderByClause([{ key: 'name', direction: 1 }], identity, 'sqlite');
             expect(result.success).toBe(true);
             if (!result.success) return;
-            expect(result.orderBy).toContain('IS NULL ASC');
-            expect(result.orderBy).toContain('name ASC');
+            expect(result.orderBy).toBe('name ASC NULLS LAST');
         });
 
-        it('joins multiple keys with IS NULL pairs', () => {
+        it('joins multiple keys with commas', () => {
             const result = _buildOrderByClause(
                 [{ key: 'date', direction: -1 }, { key: 'name', direction: 1 }],
                 identity, 'sqlite'
             );
             expect(result.success).toBe(true);
             if (!result.success) return;
-            expect(result.orderBy).toBe('date IS NULL ASC, date DESC, name IS NULL ASC, name ASC');
+            expect(result.orderBy).toBe('date DESC NULLS LAST, name ASC NULLS LAST');
         });
 
         it('uses pathToSqlExpression for JSON column access', () => {
@@ -67,7 +66,7 @@ describe('buildOrderByClause', () => {
             );
             expect(result.success).toBe(true);
             if (!result.success) return;
-            expect(result.orderBy).toBe("data->>'sender.name' IS NULL ASC, data->>'sender.name' ASC");
+            expect(result.orderBy).toBe("data->>'sender.name' ASC NULLS LAST");
         });
     });
 

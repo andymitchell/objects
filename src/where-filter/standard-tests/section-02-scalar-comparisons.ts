@@ -353,6 +353,39 @@ export function registerScalarComparisonsA(ctx: SectionCtx): void {
                     expectOrAcknowledgeUnsupported(result, true);
                 });
 
+                test('supplementary plane: U+E000 < U+10000 (code-point order)', async () => {
+                    // A UTF-16 code-unit comparison inverts this pair: U+10000 is the surrogate
+                    // pair D800 DC00, and D800 < E000 as code units. Code-point (= UTF-8 byte)
+                    // order places U+E000 first.
+                    const result = await matchJavascriptObject(
+                        {
+                            contact: { name: String.fromCodePoint(0xE000) }
+                        },
+                        {
+                            'contact.name': {
+                                '$lt': String.fromCodePoint(0x10000),
+                            }
+                        },
+                        ContactSchema
+                    );
+                    expectOrAcknowledgeUnsupported(result, true);
+                });
+
+                test('supplementary plane: U+10000 > U+E000', async () => {
+                    const result = await matchJavascriptObject(
+                        {
+                            contact: { name: String.fromCodePoint(0x10000) }
+                        },
+                        {
+                            'contact.name': {
+                                '$gt': String.fromCodePoint(0xE000),
+                            }
+                        },
+                        ContactSchema
+                    );
+                    expectOrAcknowledgeUnsupported(result, true);
+                });
+
                 test('spaces matter: "A B" < "AB"', async () => {
                     // Space (32) is less than 'A' (65)
                     // So 'A B' < 'AB' is FALSE.

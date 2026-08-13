@@ -57,8 +57,10 @@ export type FuzzRow = z.infer<typeof FuzzSchema>;
 /** The one path in {@link FuzzSchema} that crosses two arrays. Its leaf arrays scope a compound predicate. */
 export const NESTED_ARRAY_PATH = 'groups.subtags';
 
-// Lowercase-ASCII ONLY. Mixed case / non-ASCII would hit PG/SQLite collation vs JS code-point
-// divergence in string ranges. Do not extend the alphabet without excluding string-range ops.
+// ASCII ONLY. The mingo secondary oracle (WF-P14) compares strings by UTF-16 code unit, while the
+// evaluator and the SQL adapters compare by Unicode code point — the orders diverge on
+// supplementary-plane values. Do not extend the alphabet beyond ASCII without excluding
+// string-range ops from the mingo lane.
 const NAME_POOL = ['ann', 'bob', 'cid', 'dan'] as const;
 const TAG_POOL = ['a', 'b', 'c', 'd'] as const;
 

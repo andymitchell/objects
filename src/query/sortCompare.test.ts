@@ -2,6 +2,7 @@ import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
     encodeSortValue,
     compareValues,
+    compareStringsByCodePoint,
     compareToBoundary,
     isEncodedBigInt,
     resolveSort,
@@ -211,6 +212,41 @@ describe('compareValues', () => {
             expect(compareValues(LONE_HIGH_SURROGATE, PRIVATE_USE_BMP, 1)).toBe(-1);
         });
 
+    });
+
+});
+
+describe('compareStringsByCodePoint', () => {
+
+    // The exported statement of the text-ordering contract: the comparison ordering, where-filter
+    // range bounds, and consumers implementing the contract against their own substrate all share.
+
+    it('orders a BMP character before a supplementary-plane character', () => {
+        // A UTF-16 code-unit comparison inverts this pair (U+10000 starts with surrogate 0xD800 < 0xE000).
+        expect(compareStringsByCodePoint(PRIVATE_USE_BMP, FIRST_SUPPLEMENTARY)).toBeLessThan(0);
+        expect(compareStringsByCodePoint(FIRST_SUPPLEMENTARY, PRIVATE_USE_BMP)).toBeGreaterThan(0);
+    });
+
+    it('orders the empty string first and a strict prefix before its extension', () => {
+        expect(compareStringsByCodePoint('', 'a')).toBeLessThan(0);
+        expect(compareStringsByCodePoint('Car', 'Cart')).toBeLessThan(0);
+        expect(compareStringsByCodePoint('Cart', 'Car')).toBeGreaterThan(0);
+        expect(compareStringsByCodePoint('Car', 'Car')).toBe(0);
+    });
+
+    it('stays total over lone surrogates, comparing them as their own value', () => {
+        expect(compareStringsByCodePoint(LONE_HIGH_SURROGATE, PRIVATE_USE_BMP)).toBeLessThan(0);
+        expect(compareStringsByCodePoint(PRIVATE_USE_BMP, LONE_HIGH_SURROGATE)).toBeGreaterThan(0);
+        expect(compareStringsByCodePoint(LONE_HIGH_SURROGATE, LONE_HIGH_SURROGATE)).toBe(0);
+    });
+
+    it('agrees with the ordering comparator on every string pair', () => {
+        const corpus = ['', 'Banana', 'Car', 'Cart', 'apple', 'zz', PRIVATE_USE_BMP, FIRST_SUPPLEMENTARY, LONE_HIGH_SURROGATE];
+        for (const a of corpus) {
+            for (const b of corpus) {
+                expect(Math.sign(compareStringsByCodePoint(a, b))).toBe(Math.sign(compareValues(a, b, 1)));
+            }
+        }
     });
 
 });

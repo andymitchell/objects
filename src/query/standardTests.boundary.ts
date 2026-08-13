@@ -5,11 +5,13 @@ import { buildSortComparator, encodeSortValue } from './sortCompare.ts';
 import type { PrimaryKeyValue, SortAndSlice, SortBoundary, SortDefinition } from './types.ts';
 import {
     type BooleanItem,
+    type CaseItem,
     type NullableItem,
     type NullishItem,
     type NumericItem,
     type UnicodeItem,
     booleanItems,
+    caseItems,
     numericItems,
     nullableItems,
     nullishItems,
@@ -204,6 +206,15 @@ export function registerAfterBoundaryTests(ctx: AfterBoundaryTestContext): void 
                 const collected = await walk(ctx, unicodeItems, sort, 1, 'id');
                 if (collected === 'skipped') return;
                 expect(collected).toEqual(referenceIds(unicodeItems, sort, 'id'));
+            });
+
+            itIfSupported([{ key: 'name', direction: 1 }])('walks mixed-case strings case-sensitively, uppercase first', async () => {
+                // A locale-collated boundary comparison would order 'apple' before 'Banana' and
+                // re-derive a different page split; code-point order keeps every page boundary exact.
+                const sort: SortDefinition<CaseItem> = [{ key: 'name', direction: 1 }];
+                const collected = await walk(ctx, caseItems, sort, 1, 'id');
+                if (collected === 'skipped') return;
+                expect(collected).toEqual(referenceIds(caseItems, sort, 'id'));
             });
         });
 

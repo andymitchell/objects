@@ -5,6 +5,7 @@ import { registerAfterBoundaryTests } from './standardTests.boundary.ts';
 import type { SortAndSlice, SortDefinition } from './types.ts';
 import {
     type BooleanItem,
+    type CaseItem,
     type NullableItem,
     type NullishItem,
     type NumericItem,
@@ -14,6 +15,7 @@ import {
     type UnicodeItem,
     STANDARD_TEST_DDL,
     booleanItems,
+    caseItems,
     multiTiedItems,
     nestedItems,
     nullableItems,
@@ -170,6 +172,27 @@ export function standardTests<T extends Record<string, any> = StandardTestItem>(
                 );
                 if (descending === 'skipped') return;
                 expect(descending.map(i => i.id)).toEqual(['c', 'a', 'd', 'b']);
+            });
+
+            itIfSupported(sortNameAsc)('orders mixed-case strings case-sensitively, uppercase first', async () => {
+                // Code-point order is case-sensitive: 'Banana' (b) < 'apple' (a) < 'cherry' (c) < 'zz' (d).
+                // Inert on byte-collated engines; the discriminator where a locale collation leaks in,
+                // since a locale orders 'apple' before 'Banana'.
+                const ascending = await run(
+                    caseItems,
+                    { sort: sortNameAsc } as SortAndSlice<CaseItem>,
+                    'id'
+                );
+                if (ascending === 'skipped') return;
+                expect(ascending.map(i => i.id)).toEqual(['b', 'a', 'c', 'd']);
+
+                const descending = await run(
+                    caseItems,
+                    { sort: sortName } as SortAndSlice<CaseItem>,
+                    'id'
+                );
+                if (descending === 'skipped') return;
+                expect(descending.map(i => i.id)).toEqual(['d', 'c', 'a', 'b']);
             });
 
             itIfSupported(sortFlag)('orders boolean sort values false before true with pk tiebreak', async () => {

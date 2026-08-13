@@ -17,6 +17,7 @@ import type { DDL } from '../ddl/types.ts';
  *  - `TiedItem` — duplicate sort values for PK tiebreaker
  *  - `MultiTiedItem` — rows tied on every key of a multi-key sort, for PK tiebreaker assertions
  *  - `UnicodeItem` — strings beyond the Basic Multilingual Plane, for code-point ordering assertions
+ *  - `CaseItem` — mixed-case ASCII strings, for case-sensitive (locale-blind) ordering assertions
  *  - `BooleanItem` — boolean sort values, for false-before-true ordering assertions
  *  - `BigintItem` — bigint sort values spanning double-precision limits, for exact-value ordering
  *    assertions (used only by the opt-in bigint battery, `./standardTests.bigint.ts` — JSON-document
@@ -31,6 +32,7 @@ export type NestedItem = { id: string; sender: { name: string } };
 export type TiedItem = { id: string; score: number };
 export type MultiTiedItem = { id: string; score: number; date: string };
 export type UnicodeItem = { id: string; name: string };
+export type CaseItem = { id: string; name: string };
 export type BooleanItem = { id: string; flag: boolean };
 export type BigintItem = { id: string; amount?: bigint | null; name: string };
 
@@ -81,6 +83,11 @@ export const UnicodeItemSchema = z.strictObject({
     name: z.string(),
 });
 
+export const CaseItemSchema = z.strictObject({
+    id: z.string(),
+    name: z.string(),
+});
+
 export const BooleanItemSchema = z.strictObject({
     id: z.string(),
     flag: z.boolean(),
@@ -93,7 +100,7 @@ export const BigintItemSchema = z.strictObject({
 });
 
 /** Union covering every shape used in the standard sort/slice tests. All branches share `id: string`. */
-export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem | UnicodeItem | BooleanItem | BigintItem;
+export type StandardTestItem = NumericItem | NullableItem | UndefinedItem | NullishItem | NestedItem | TiedItem | MultiTiedItem | UnicodeItem | CaseItem | BooleanItem | BigintItem;
 
 /**
  * Zod union mirroring `StandardTestItem`. First-match wins; because every member is strict,
@@ -110,6 +117,7 @@ export const StandardTestItemSchema = z.union([
     TiedItemSchema,
     MultiTiedItemSchema,
     UnicodeItemSchema,
+    CaseItemSchema,
     BooleanItemSchema,
     BigintItemSchema,
 ]);
@@ -174,6 +182,16 @@ export const unicodeItems: UnicodeItem[] = [
     { id: 'a', name: String.fromCodePoint(0xE000) },
     { id: 'b', name: '' },
     { id: 'c', name: String.fromCodePoint(0x10000) },
+    { id: 'd', name: 'zz' },
+];
+
+// Mixed-case ASCII: code-point order is case-sensitive ('B' < 'a'), so name ASC yields b,a,c,d —
+// not pk order. Inert on byte-collated engines; THE behavioural discriminator where a locale
+// collation leaks in, since a locale orders 'apple' before 'Banana' and yields a,b,c,d instead.
+export const caseItems: CaseItem[] = [
+    { id: 'a', name: 'apple' },
+    { id: 'b', name: 'Banana' },
+    { id: 'c', name: 'cherry' },
     { id: 'd', name: 'zz' },
 ];
 

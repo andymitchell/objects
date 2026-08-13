@@ -287,7 +287,7 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * |------|---------|-----------|
  * | **Exact scalar** | `'Andy'`, `100`, `true` | Strict equality (`===`) for string, number, boolean |
  * | **Deep object equality** | `{ name: 'Andy', age: 30 }` | Deep equality (all keys must match) |
- * | **Range operators** | `{ $gt: 10, $lte: 100 }` | `$gt`, `$lt`, `$gte`, `$lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic / JS code-point order, case-sensitive). |
+ * | **Range operators** | `{ $gt: 10, $lte: 100 }` | `$gt`, `$lt`, `$gte`, `$lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic by Unicode code point = UTF-8 byte order; case-sensitive). |
  * | **$eq** | `{ $eq: 'Andy' }` | Explicit equality (`===`). `{ $eq: null }` matches null/missing. |
  * | **$regex** | `{ $regex: 'And', $options: 'i' }` | Regex match. String values only. |
  *

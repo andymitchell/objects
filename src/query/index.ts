@@ -28,7 +28,7 @@ export { sortAndSliceObjects } from './sortAndSliceObjects.ts';
 
 // Ordering contract — the single JS statement of the sort-value/null/pk-tiebreak rules.
 export type { EncodedSortValue, EncodedBigInt } from './sortCompare.ts';
-export { encodeSortValue, compareValues, isEncodedBigInt, resolveSort, buildSortComparator, compareToBoundary } from './sortCompare.ts';
+export { encodeSortValue, compareValues, compareStringsByCodePoint, isEncodedBigInt, resolveSort, buildSortComparator, compareToBoundary } from './sortCompare.ts';
 
 // SQL
 export type { SqlDialect, SqlFragment } from './sql/index.ts';

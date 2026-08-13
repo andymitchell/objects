@@ -1,5 +1,6 @@
 import deepEql from "deep-eql";
 import isPlainObject from "../../utils/isPlainObject.ts";
+import { compareStringsByCodePoint } from "../../query/sortCompare.ts";
 import type { ValueComparisonType, WhereFilterDefinition } from "../types.ts";
 import type { Predicate, RangeBound, RangeOperator } from "./predicate.ts";
 
@@ -9,12 +10,22 @@ import type { Predicate, RangeBound, RangeOperator } from "./predicate.ts";
  */
 export type SubFilterMatcher = (element: Record<string, unknown>, filter: WhereFilterDefinition) => boolean;
 
-type RangeCompare = <X extends number | string>(value: X, bound: X) => boolean;
+type RangeCompare = (value: number, bound: number) => boolean;
 const RANGE_COMPARES: Readonly<Record<RangeOperator, RangeCompare>> = {
     '$gt': (value, bound) => value > bound,
     '$lt': (value, bound) => value < bound,
     '$gte': (value, bound) => value >= bound,
     '$lte': (value, bound) => value <= bound,
+};
+
+// A string pair routes through compareStringsByCodePoint — the same statement of text order the
+// sorter and the SQL builders apply — so a range bound and a sort on one key cannot disagree.
+// (Bare JS relational operators compare UTF-16 code units, which invert supplementary-plane pairs.)
+const RANGE_VERDICTS: Readonly<Record<RangeOperator, (cmp: number) => boolean>> = {
+    '$gt': cmp => cmp > 0,
+    '$lt': cmp => cmp < 0,
+    '$gte': cmp => cmp >= 0,
+    '$lte': cmp => cmp <= 0,
 };
 
 /**
@@ -38,8 +49,10 @@ const RANGE_COMPARES: Readonly<Record<RangeOperator, RangeCompare>> = {
  * A range bound against a value of another type does not match, and does not error: comparison operators
  * *type-bracket*, so a wrong-typed row is simply not in the answer. Only a bound whose own operand is
  * uncomparable is an error, because that is a defect in the filter.
- * This deliberately diverges from ordering (`compareValues` in the query module), which must place every
- * pair of values — whatever their types — in a total order; a filter only answers a boolean predicate.
+ * On mixed-type pairs this deliberately diverges from ordering (`compareValues` in the query module), which
+ * must place every pair of values — whatever their types — in a total order; a filter only answers a boolean
+ * predicate. A string pair, however, satisfies its bound by the same Unicode code-point comparison ordering
+ * uses, so a range filter and a sort on one key agree about which values lie beyond a bound.
  */
 export function evaluatePredicate(value: unknown, predicate: Predicate, matchSubFilter: SubFilterMatcher): boolean {
     switch (predicate.kind) {
@@ -212,6 +225,6 @@ function satisfiesBound(value: number | string, bound: RangeBound): boolean {
         throw new Error(`Range operator '${operator}' requires a string or number filter value, got ${typeof operand}`);
     }
     if (typeof value === 'number' && typeof operand === 'number') return RANGE_COMPARES[operator](value, operand);
-    if (typeof value === 'string' && typeof operand === 'string') return RANGE_COMPARES[operator](value, operand);
+    if (typeof value === 'string' && typeof operand === 'string') return RANGE_VERDICTS[operator](compareStringsByCodePoint(value, operand));
     return false;
 }

@@ -2,6 +2,7 @@ import { describe, test, expect } from "vitest";
 import { evaluatePredicate, matchesMissingField, type SubFilterMatcher } from "./evaluatePredicate.ts";
 import { parseFieldPredicate } from "./parseFieldPredicate.ts";
 import type { Predicate } from "./predicate.ts";
+import { compareValues } from "../../query/sortCompare.ts";
 
 /** A sub-filter reading that recurses through the parser, so an object element is matched field by field. */
 const matchSubFilter: SubFilterMatcher = (element, filter) =>
@@ -84,6 +85,68 @@ describe('a predicate is evaluated against the value stored at its field', () =>
             expect(evaluate('a', { $size: 1 })).toBe(false);
             expect(evaluate(undefined, { $all: ['a'] })).toBe(false);
             expect(evaluate(5, { $elemMatch: { $gt: 1 } })).toBe(false);
+        });
+    });
+
+    describe('string range bounds compare by Unicode code point', () => {
+
+        // U+E000 (BMP private-use) precedes U+10000 (supplementary plane) by code point, but a
+        // UTF-16 code-unit comparison inverts the pair: U+10000 is the surrogate pair D800 DC00,
+        // and D800 < E000 as code units.
+        const bmp = String.fromCodePoint(0xE000);
+        const astral = String.fromCodePoint(0x10000);
+
+        test('a supplementary-plane character orders after a high BMP character', () => {
+            expect(evaluate(bmp, { $lt: astral })).toBe(true);
+            expect(evaluate(astral, { $lt: bmp })).toBe(false);
+        });
+
+        test('every range operator agrees, in both operand orders', () => {
+            expect(evaluate(astral, { $gt: bmp })).toBe(true);
+            expect(evaluate(bmp, { $gt: astral })).toBe(false);
+            expect(evaluate(bmp, { $lte: astral })).toBe(true);
+            expect(evaluate(astral, { $lte: bmp })).toBe(false);
+            expect(evaluate(astral, { $gte: bmp })).toBe(true);
+            expect(evaluate(bmp, { $gte: astral })).toBe(false);
+            // Equal values satisfy only the inclusive bounds.
+            expect(evaluate(astral, { $gte: astral })).toBe(true);
+            expect(evaluate(astral, { $lte: astral })).toBe(true);
+            expect(evaluate(astral, { $gt: astral })).toBe(false);
+            expect(evaluate(astral, { $lt: astral })).toBe(false);
+        });
+
+        test('the empty string orders before every non-empty string', () => {
+            expect(evaluate('a', { $gt: '' })).toBe(true);
+            expect(evaluate('', { $lt: 'a' })).toBe(true);
+            expect(evaluate('', { $gt: 'a' })).toBe(false);
+            expect(evaluate('', { $gte: '' })).toBe(true);
+        });
+
+        test('a strict prefix orders before its extension', () => {
+            expect(evaluate('Car', { $lt: 'Cart' })).toBe(true);
+            expect(evaluate('Cart', { $gt: 'Car' })).toBe(true);
+            expect(evaluate('Cart', { $lt: 'Car' })).toBe(false);
+        });
+
+        test('uppercase orders before lowercase — case-sensitive, locale-blind', () => {
+            expect(evaluate('Banana', { $lt: 'apple' })).toBe(true);
+            expect(evaluate('apple', { $gt: 'Banana' })).toBe(true);
+            expect(evaluate('apple', { $lt: 'Banana' })).toBe(false);
+        });
+
+        test('every bound verdict is identical to the ordering comparator\'s verdict', () => {
+            // The anti-drift pin: a range filter and a sort must agree on which values lie beyond a
+            // bound, so each operator's verdict is the sign of the shared three-way comparison.
+            const corpus = ['', 'Banana', 'Car', 'Cart', 'apple', 'zz', bmp, astral];
+            for (const a of corpus) {
+                for (const b of corpus) {
+                    const cmp = compareValues(a, b, 1);
+                    expect(evaluate(a, { $gt: b })).toBe(cmp > 0);
+                    expect(evaluate(a, { $lt: b })).toBe(cmp < 0);
+                    expect(evaluate(a, { $gte: b })).toBe(cmp >= 0);
+                    expect(evaluate(a, { $lte: b })).toBe(cmp <= 0);
+                }
+            }
         });
     });
 });

@@ -155,10 +155,12 @@ export function encodeSortValue(v: unknown): EncodedSortValue {
  * {@link EncodedBigInt} shape, which orders as the bigint it denotes; ordering other
  * structural values is outside the cross-backend contract — the SQL builders refuse
  * structural sort keys outright.
- * This deliberately
- * diverges from the where-filter range operators (see `evaluatePredicate`), which
- * type-bracket to a non-match: a filter answers a boolean predicate, whereas ordering
- * needs a three-way verdict for every pair.
+ * Mixed-type pairs
+ * deliberately diverge from the where-filter range operators (see `evaluatePredicate`), which
+ * type-bracket to a non-match rather than an order: a filter answers a boolean predicate, whereas
+ * ordering needs a three-way verdict for every pair. String pairs do not diverge: a range bound
+ * between two strings satisfies by this same code-point comparison, so a filter and a sort on one
+ * key agree about which values lie beyond a bound.
  */
 export function compareValues(a: unknown, b: unknown, direction: 1 | -1): number {
     const ea = encodeSortValue(a);
@@ -255,13 +257,31 @@ function compareBigIntToNumber(b: bigint, n: number): -1 | 0 | 1 {
 }
 
 /**
- * Compares two strings by Unicode code point. JS relational operators compare by UTF-16
- * code unit, which inverts pairs where one string starts a surrogate pair (all supplementary-
- * plane characters) and the other holds a BMP character above U+D7FF; code-point order equals
- * UTF-8 byte order, which is what SQLite's BINARY collation and Postgres's C collation use.
- * Lone surrogates (never representable in UTF-8/JSON) still order totally, by their own value.
+ * Compares two strings by Unicode code point — the one text comparison referenced by both the
+ * ordering contract ({@link compareValues}) and the where-filter range operators, so a sort and a
+ * range bound on the same key can never disagree about which values lie beyond a boundary.
+ *
+ * JS relational operators compare by UTF-16 code unit, which inverts pairs where one string
+ * starts a surrogate pair (all supplementary-plane characters) and the other holds a BMP
+ * character above U+D7FF.
+ *
+ * Exported for consumers implementing the same text-ordering contract against their own
+ * substrate.
+ *
+ * @param a - Left string.
+ * @param b - Right string.
+ * @returns Negative if `a` orders before `b`, positive if after, `0` if equal.
+ *
+ * @example
+ * compareStringsByCodePoint(String.fromCodePoint(0xE000), String.fromCodePoint(0x10000)); // < 0
+ * [...items].sort((x, y) => compareStringsByCodePoint(x.name, y.name));
+ *
+ * @remarks
+ * Total over all JS strings — a lone surrogate compares as its own value — and equal to UTF-8
+ * byte order (SQLite's BINARY collation, Postgres's C collation) exactly for well-formed
+ * scalar-value strings, since a lone surrogate has no UTF-8 representation.
  */
-function compareStringsByCodePoint(a: string, b: string): number {
+export function compareStringsByCodePoint(a: string, b: string): number {
     if (a === b) return 0;
     const len = Math.min(a.length, b.length);
     let i = 0;

@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { standardTests, type Execute } from '../standardTests.ts';
 import { encodeSortValue } from '../sortCompare.ts';
@@ -8,6 +8,17 @@ import { flattenQueryClausesToSql } from './flattenQueryClauses.ts';
 import { prepareObjectTableQuery } from './prepareObjectTableQuery.ts';
 import { OBJECT_TABLE, type StandardTestRow } from './standardTestSqlSupport.ts';
 
+// One PGlite instance for the whole file — the boot compiles a 6.4MB WASM payload, so it is paid once and
+// shared by every suite below. Each entry point clears the table instead of rebuilding it; tests in a file run
+// sequentially, so sharing is race-free.
+let db: PGlite;
+beforeAll(async () => {
+    db = new PGlite();
+    await db.exec('CREATE TABLE items (data JSONB NOT NULL)');
+});
+// A live WASM instance can hold the worker open past its teardown budget.
+afterAll(async () => { await db.close(); });
+
 /**
  * Runs the shared standard tests against a real Postgres engine (PGlite): items are inserted
  * into a JSONB column, the prepared clauses are executed, and the returned rows are compared
@@ -15,14 +26,6 @@ import { OBJECT_TABLE, type StandardTestRow } from './standardTestSqlSupport.ts'
  * (ORDER BY casts, NULLS LAST, cursor subqueries) agree with `sortAndSliceObjects`.
  */
 describe('prepareObjectTableQuery against Postgres (PGlite)', () => {
-
-    // One PGlite instance per file — the WASM boot is expensive. Each execute clears the table
-    // instead of rebuilding it; tests in a file run sequentially, so sharing is race-free.
-    let db: PGlite;
-    beforeAll(async () => {
-        db = new PGlite();
-        await db.exec('CREATE TABLE items (data JSONB NOT NULL)');
-    });
 
     const execute: Execute<any> = async (items, sortAndSlice) => {
         await db.exec('DELETE FROM items');
@@ -55,12 +58,6 @@ describe('prepareObjectTableQuery against Postgres (PGlite)', () => {
  * a real engine to prove the filter binds across every arm, for both cursor modes.
  */
 describe('prepareObjectTableQuery keeps a WHERE filter binding across every keyset arm (PGlite)', () => {
-    let db: PGlite;
-    beforeAll(async () => {
-        db = new PGlite();
-        await db.exec('CREATE TABLE items (data JSONB NOT NULL)');
-    });
-
     // Sorting by age appends the id tiebreaker, so the cursor is a two-arm predicate:
     // (age past 10) OR (age tied at 10 AND id past 'b'). Row 'z' matches only that second arm and
     // sits in the excluded category — the row a precedence bug leaks past `category = 'keep'`.

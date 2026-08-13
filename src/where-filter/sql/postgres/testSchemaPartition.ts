@@ -3,9 +3,14 @@ import { PGlite } from '@electric-sql/pglite';
 /**
  * Test-only isolation primitive for the Postgres where-clause conformance harness.
  *
- * Why: booting a fresh PGlite (WASM heap) per test costs ~1s. This module owns a single shared PGlite and
- * a single reused table, and clears the table (`TRUNCATE`) before each match call — so a
+ * Why: booting a fresh PGlite compiles a 6.4MB WASM payload — ~0.6s alone, and several seconds when other
+ * test files are booting their own at the same time. This module owns a single shared PGlite and a single
+ * reused table, and clears the table (`TRUNCATE`) before each match call — so a
  * `SELECT ... WHERE <clause>` sees only that call's one row, without paying a fresh-WASM boot per test.
+ *
+ * Scope: the instance is shared by one test FILE, and that is the most sharing available. Vitest gives each
+ * test file its own child process, so a module-level singleton cannot outlive the file that created it —
+ * every file reaching Postgres pays exactly one boot, and no file can pay less.
  *
  * Why a reused table rather than a fresh schema per call: `CREATE SCHEMA`/`DROP SCHEMA CASCADE` churn grows
  * PGlite's WASM heap (catalog allocations it never returns to the OS), so over a long file — and especially
@@ -133,7 +138,7 @@ export async function disposeAllForTest(): Promise<void> {
     // Intentionally empty — see the module note.
 }
 
-/** Force the one-time WASM init + table creation off the first test (cycle-0 is ~1s; later ops are ms-scale). Call in `beforeAll`. */
+/** Force the one-time WASM init + table creation off the first test (cycle-0 is ~0.6s alone and several seconds when files boot concurrently; later ops are ms-scale). Call in `beforeAll`. */
 export async function warmUp(): Promise<void> {
     await ensureTable(getSharedPgClient());
 }

@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { registerBigintSortTests } from '../standardTests.bigint.ts';
 import { standardTests, type Execute } from '../standardTests.ts';
@@ -16,8 +16,8 @@ import { COLUMN_TABLE, COLUMN_TABLE_DDL, parsePayload, toColumnRowParams } from 
  */
 describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
 
-    // One PGlite instance per file — the WASM boot is expensive. Each execute clears the table
-    // instead of rebuilding it; tests in a file run sequentially, so sharing is race-free.
+    // One PGlite instance per file — the boot compiles a 6.4MB WASM payload. Each execute clears the
+    // table instead of rebuilding it; tests in a file run sequentially, so sharing is race-free.
     let db: PGlite;
     beforeAll(async () => {
         db = new PGlite();
@@ -34,6 +34,8 @@ describe('prepareColumnTableQuery against Postgres (PGlite)', () => {
             payload TEXT NOT NULL
         )`);
     });
+    // A live WASM instance can hold the worker open past its teardown budget.
+    afterAll(async () => { await db.close(); });
 
     const execute: Execute<any> = async (items, sortAndSlice) => {
         await db.exec('DELETE FROM items');

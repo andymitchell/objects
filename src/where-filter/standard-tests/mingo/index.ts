@@ -119,11 +119,14 @@ export function registerSecondaryOracleProperty(ctx: SectionCtx, opts: { seed: n
 
             // The reference throws only on a filter outside the portable operand domain, and the generator stays
             // inside it — so a throw here is a generator defect, not a datum. Let it surface.
-            if (verdicts(row, generated).ours === verdicts(row, generated).mongo) continue;
+            const generatedVerdicts = verdicts(row, generated);
+            if (generatedVerdicts.ours === generatedVerdicts.mongo) continue;
 
-            // Report the guilty arm, not the tree that contained it.
+            // Report the guilty arm, not the tree that contained it. A filter with no logic node to descend
+            // through comes back unchanged, and both oracles are pure, so its verdicts are the ones already in
+            // hand.
             const filter = minimizeDisagreement(row, generated);
-            const { ours, mongo } = verdicts(row, filter);
+            const { ours, mongo } = filter === generated ? generatedVerdicts : verdicts(row, filter);
 
             const shape = filterShape(filter, isArrayFieldPath);
             const existing = found.get(shape);

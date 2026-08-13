@@ -145,7 +145,7 @@ export const sqlEngines: readonly EngineSeam[] = allEngines.filter(e => e.name !
 /**
  * Registers the shared-PGlite lifecycle hooks for the current test file. Call once at module scope
  * in any file whose tests reach `matchOnPostgres` (directly or via `allEngines`): PGlite is a
- * singleton per worker that must be warmed once, never cold-booted per test.
+ * singleton for the file that must be warmed once, never cold-booted per test.
  */
 export function usePostgresLifecycle(): void {
     beforeAll(warmUp);

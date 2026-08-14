@@ -207,4 +207,22 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
             expect(validateWriteAction(pullTags([Infinity]), NestedSchema)).toEqual([]);
         });
     });
+
+    // `where` paths speak the escaped path grammar: `rank\.value` is ONE key named `rank.value` — the
+    // spelling the typed path unions offer. The gate must resolve it to the declared field, or a mistyped
+    // dotted-key filter slips preflight and silently matches nothing at run time.
+    describe("where paths speak the escaped dotted-key grammar", () => {
+        const DottedSchema = z.object({ id: z.string(), 'rank.value': z.number() }).strict();
+        type DottedRow = z.infer<typeof DottedSchema>;
+        const wd = (payload: unknown): WriteAction<DottedRow> => ({ type: "write", ts: 0, uuid: "U", payload: payload as WriteAction<DottedRow>["payload"] });
+
+        it("reports a type mismatch on an escaped dotted-key where path as invalid_filter", () => {
+            expect(validateWriteAction(wd({ type: "update", data: { id: "1" }, where: { 'rank\\.value': 'x' } }), DottedSchema))
+                .toMatchObject([{ type: "invalid_filter", reason: "type_mismatch", where_path: 'rank\\.value' }]);
+        });
+
+        it("accepts a well-typed escaped dotted-key where", () => {
+            expect(validateWriteAction(wd({ type: "update", data: { id: "1" }, where: { 'rank\\.value': 1 } }), DottedSchema)).toEqual([]);
+        });
+    });
 });

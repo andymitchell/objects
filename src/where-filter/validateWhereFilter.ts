@@ -1,6 +1,7 @@
 import type { ZodType } from "zod";
 import { convertSchemaToDotPropPathTree, type TreeNode } from "../dot-prop-paths/schema-tree.ts";
 import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
+import { escapeDotPropPathSegment, parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 import { objectRejectsUnknownKeys } from "../zod/introspection.ts";
 import { WhereFilterLogicOperators, ValueComparisonRangeOperators } from "./consts.ts";
 import { broadeningOperatorNames } from "./ast/operators.ts";
@@ -73,6 +74,13 @@ import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonV
  * number field) — these match zero rows but stay unflagged to keep the
  * validator simple and its false-positive surface minimal.
  *
+ * **Paths speak the canonical escaped grammar** — `\.` is a literal dot inside one key, so `a\.b` names a
+ * single dotted key and resolves to its schema node, while the raw spelling `a.b` names two keys (an accepted
+ * miss when the schema declares neither). Two path families stand down entirely (misses, never flags): any
+ * path holding a key name that itself contains a backslash (the matcher's property reader also decodes `\\`,
+ * so the two grammars disagree on where such a path points), and the subtree of a key whose name ends in `\`
+ * (its children render identically to a sibling dotted key's escape, so they are unaddressable).
+ *
  * **Opt-in `SerialisableJsonSubset` (`{ requireSerialisableJsonSubset: true }`).** A *further* narrowing layered
  * on top of everything above: also reject every operand that cannot losslessly round-trip JSON — a non-finite
  * number in ANY position (incl. a satisfiable match-all `$lt: Infinity` and an `$in` member), a non-JSON carrier
@@ -102,10 +110,11 @@ const BROADENING_OPS: readonly string[] = broadeningOperatorNames;
 const RANGE_OPS = ValueComparisonRangeOperators; // literal tuple — each element keeps its `RangeOp` type (no `as string[]`), so a classified operand can record which range op produced it
 
 /**
- * path → *every* `TreeNode` registered at that path. The flat `TreeNodeMap` keeps only the first node per
- * path (zod.ts), which loses the other variants of a union and collapses an array's element node onto its
- * container. Keeping all of them is what lets the validator (a) avoid false-rejecting a union path whose
- * variants disagree on type, and (b) tell an object-array (has child paths) from a scalar array (none).
+ * path (canonical escaped rendering — a dotted key spells its dot `\.`) → *every* `TreeNode` registered at
+ * that path. The flat `TreeNodeMap` keeps only the first node per path (zod.ts), which loses the other
+ * variants of a union and collapses an array's element node onto its container. Keeping all of them is what
+ * lets the validator (a) avoid false-rejecting a union path whose variants disagree on type, and (b) tell an
+ * object-array (has child paths) from a scalar array (none).
  */
 type NodeMultimap = Record<string, TreeNode[]>;
 /**
@@ -217,7 +226,13 @@ function dedupeIssues(issues: WhereFilterValidationIssue[]): WhereFilterValidati
     });
 }
 
-/** DFS the schema tree into a multimap (all nodes per path) and a set of paths that have a distinct child path. */
+/**
+ * DFS the schema tree into a multimap (all nodes per path) and a set of paths that have a distinct child path.
+ * Every index key is the path's canonical ESCAPED rendering — the grammar filter paths arrive in, where a key
+ * holding a literal dot spells it `\.` (`a\.b` is ONE key named `a.b`). The tree's own `dotprop_path` raw-joins
+ * key names, which would collide a dotted key with a genuine nesting, so the DFS re-derives each path from the
+ * key names instead.
+ */
 function buildSchemaIndex(root: TreeNode): SchemaIndex {
     // Null-prototype: the multimap is indexed by filter-supplied paths, so an inherited key like
     // '__proto__' or 'constructor' must look up as absent — never resolve an inherited object.
@@ -225,22 +240,32 @@ function buildSchemaIndex(root: TreeNode): SchemaIndex {
     const hasChildren = new Set<string>();
     const strictCandidate = new Set<string>();
     const open = new Set<string>();
-    const stack: TreeNode[] = [root];
+    const stack: Array<{ node: TreeNode; path: string }> = [{ node: root, path: "" }];
     while (stack.length) {
-        const node = stack.pop()!;
-        (multimap[node.dotprop_path] ??= []).push(node);
+        const { node, path } = stack.pop()!;
+        (multimap[path] ??= []).push(node);
         // Classify each object node: `.strict()` guarantees a written row holds no undeclared key (its parse
         // rejects extras); default/passthrough/catchall (`open`) can carry one. Union variants share a path,
         // so a path is genuinely strict only when EVERY object node there is strict — `strict = candidate \ open`.
         if (node.kind === "object" && node.schema) {
-            if (objectRejectsUnknownKeys(node.schema)) strictCandidate.add(node.dotprop_path);
-            else open.add(node.dotprop_path);
+            if (objectRejectsUnknownKeys(node.schema)) strictCandidate.add(path);
+            else open.add(path);
         }
+        // A key ending in `\` is leaf-only in the escaped grammar: joining a child onto it renders the same
+        // string as a sibling dotted key's escape (`a\` + `.b` = `a\.b` = escape of `a.b`), so its subtree is
+        // unaddressable — and indexing it could merge two different fields' nodes under one path. Index the
+        // node itself but neither its descendants nor `hasChildren`: an opaque node makes every check stand
+        // down (a miss), where descending-and-missing would flag a matchable filter (a false positive).
+        if (path.endsWith("\\")) continue;
         for (const child of node.children) {
-            // Array elements and union variants are nameless and reuse the parent's path; only a child with
-            // its *own* path means the parent owns sub-fields (i.e. it is an object-bearing node).
-            if (child.dotprop_path !== node.dotprop_path) hasChildren.add(node.dotprop_path);
-            stack.push(child);
+            // Array elements and union variants are nameless and reuse the parent's raw path — they inherit
+            // the escaped path too. Only a child with its *own* key means the parent owns sub-fields (i.e. it
+            // is an object-bearing node).
+            const childPath = child.dotprop_path === node.dotprop_path
+                ? path
+                : joinDotpropPath(path, escapeDotPropPathSegment(child.name));
+            if (childPath !== path) hasChildren.add(path);
+            stack.push({ node: child, path: childPath });
         }
     }
     const strict = new Set([...strictCandidate].filter((p) => !open.has(p)));
@@ -378,6 +403,14 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
         return;
     }
 
+    // Grammar-divergence guard: the canonical path grammar escapes ONLY dots, but the matcher's property
+    // reader also decodes `\\`, so the two disagree on a key whose NAME contains a backslash — the matcher
+    // may resolve such a path to a different location than the schema node indexed here, and any verdict
+    // based on that node could flag a filter the matcher matches. Stand down on the whole backslash-holding
+    // family (the structural checks above don't depend on path resolution and have already run): a provably
+    // safe blanket that costs only these pathological key names' coverage.
+    if (parseDotPropPathSegments(path).some((segment) => segment.includes("\\"))) return;
+
     const nodes = index.multimap[path];
     if (!nodes || nodes.length === 0) {
         // Flag only when every possible parent is a known object/array — otherwise the path may be a
@@ -428,15 +461,22 @@ function validateLeaf(path: string, condition: unknown, broadening: boolean, ind
 }
 
 /**
+ * The escaped-grammar parent of a filter path (`''` is the schema root). Splits on UNESCAPED dots only, so a
+ * dotted key's escaped spelling stays one segment: the parent of `a\.b` is the root, not the nonsense prefix
+ * `a\` a raw `lastIndexOf('.')` would produce.
+ */
+function parentOfPath(path: string): string {
+    return parseDotPropPathSegments(path).slice(0, -1).map(escapeDotPropPathSegment).join(".");
+}
+
+/**
  * True when `path`'s immediate parent is a `.strict()` object (or an array of strict objects) — the only case
  * where a missing leaf genuinely cannot exist on a written row, because a strict object's parse rejects extra
  * keys. Anything else (default/strip, passthrough, catchall, record, union, dynamic) fails-allow, so an
  * undeclared key there is not flagged: it may legitimately be present, and flagging would be a false positive.
  */
 function parentIsStrict(path: string, index: SchemaIndex): boolean {
-    const lastDot = path.lastIndexOf(".");
-    const parentPath = lastDot === -1 ? "" : path.slice(0, lastDot); // '' is the schema root
-    return index.strict.has(parentPath);
+    return index.strict.has(parentOfPath(path));
 }
 
 /**
@@ -446,12 +486,14 @@ function parentIsStrict(path: string, index: SchemaIndex): boolean {
  * (A strict variant can't carry it; a fail-open variant that itself declares `path` is covered by its kind.)
  */
 function parentMayCarryAnyType(path: string, index: SchemaIndex): boolean {
-    const lastDot = path.lastIndexOf(".");
-    const parentPath = lastDot === -1 ? "" : path.slice(0, lastDot);
+    const parentPath = parentOfPath(path);
     if (!index.open.has(parentPath)) return false; // no fail-open variant at the parent → declared kinds are exhaustive
+    // Membership is judged by the DECODED leaf key against each child's literal name: an object node's named
+    // children carry the raw key (`a.b` for a dotted key), while the filter path spells it escaped (`a\.b`).
+    const leafKey = parseDotPropPathSegments(path).at(-1);
     for (const node of index.multimap[parentPath] ?? []) {
         if (node.kind !== "object" || !node.schema || objectRejectsUnknownKeys(node.schema)) continue;
-        if (!node.children.some((c) => c.dotprop_path === path)) return true; // a fail-open variant omits `path`
+        if (!node.children.some((c) => c.name === leafKey)) return true; // a fail-open variant omits the key
     }
     return false;
 }

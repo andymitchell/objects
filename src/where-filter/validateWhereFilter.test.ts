@@ -410,6 +410,99 @@ describe("validateWhereFilter — mixed-strictness unions (a tolerant variant ca
     });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Escaped dotted-key paths. The path grammar spells a literal dot inside a key as `\.` — `a\.b` is ONE key
+// named `a.b`, while `a.b` is two keys. The typed path unions offer the escaped spelling and the matcher
+// resolves it, so the validator must read the same grammar: its schema index and parent derivation speak
+// the escaped rendering, or every legitimate dotted-key filter silently bypasses the schema-aware checks.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("validateWhereFilter — escaped dotted-key paths (the canonical path grammar)", () => {
+    const Dotted = z.object({
+        id: z.string(),
+        'a.b': z.number(),
+        'my.list': z.array(z.object({ v: z.number() }).strict()),
+    }).strict();
+    const vd = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, Dotted);
+
+    describe("schema-aware checks reach a dotted key through its escaped spelling", () => {
+        it("type-checks an escaped dotted-key path", () => {
+            expect(vd({ 'a\\.b': 'x' })).toMatchObject([{ reason: "type_mismatch", path: 'a\\.b' }]);
+            expect(vd({ 'a\\.b': 1 })).toEqual([]);
+        });
+
+        it("flags an unknown escaped dotted key under a strict root", () => {
+            expect(vd({ 'ghost\\.key': 1 })).toMatchObject([{ reason: "unknown_field", path: 'ghost\\.key' }]);
+        });
+
+        it("resolves fields nested under a dotted object key", () => {
+            const Nested = z.object({ 'a.b': z.object({ c: z.string() }).strict() }).strict();
+            const vn = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, Nested);
+            expect(vn({ 'a\\.b.c': 1 })).toMatchObject([{ reason: "type_mismatch", path: 'a\\.b.c' }]);
+            expect(vn({ 'a\\.b.ghost': 1 })).toMatchObject([{ reason: "unknown_field", path: 'a\\.b.ghost' }]);
+            expect(vn({ 'a\\.b.c': "ok" })).toEqual([]);
+        });
+
+        it("descends an object array behind a dotted key ($elemMatch and compound forms)", () => {
+            expect(vd({ 'my\\.list': { $elemMatch: { v: 'x' } } })).toMatchObject([{ reason: "type_mismatch", path: 'my\\.list.v' }]);
+            expect(vd({ 'my\\.list': { v: 'x' } })).toMatchObject([{ reason: "type_mismatch", path: 'my\\.list.v' }]);
+            expect(vd({ 'my\\.list': { $elemMatch: { v: 1 } } })).toEqual([]);
+        });
+
+        it("still type-checks a dotted key a fail-open parent DECLARES (declared types are parse-enforced)", () => {
+            const OpenDeclares = z.object({ inner: z.object({ 'a.b': z.number() }).passthrough() }).strict();
+            expect(validateWhereFilter({ 'inner.a\\.b': 'x' } as WhereFilterDefinition<Record<string, unknown>>, OpenDeclares))
+                .toMatchObject([{ reason: "type_mismatch", path: 'inner.a\\.b' }]);
+        });
+    });
+
+    describe("conservative pins — never a false positive; misses accepted", () => {
+        it("leaves the RAW spelling unflagged — it names two keys whose parent the schema does not model", () => {
+            // `a.b` reads as key `a` then key `b`. The matcher matches no conforming row, but the parent
+            // `a` is unknown (so not strict), and the validator conservatively stands down: an accepted miss.
+            expect(vd({ 'a.b': 1 })).toEqual([]);
+            expect(vd({ 'a.b': 'x' })).toEqual([]);
+        });
+
+        it("never flags broadening operators on an escaped dotted key", () => {
+            expect(vd({ 'a\\.b': { $ne: 1 } })).toEqual([]);
+            expect(vd({ 'ghost\\.key': { $exists: false } })).toEqual([]);
+        });
+
+        // A key whose NAME ends in `\` is leaf-only in the grammar: joining a child onto it renders the same
+        // string as a sibling dotted key's escape (`a\` + `.b` = `a\.b` = escape of `a.b`), so its subtree is
+        // unaddressable and the validator must treat the node as opaque — silent in BOTH directions.
+        it("stands down on an object array behind a trailing-backslash key — a matchable filter is never flagged", () => {
+            const TrailingSlash = z.object({ 'a\\': z.array(z.object({ b: z.number() }).strict()) }).strict();
+            const vt = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, TrailingSlash);
+            // Metamorphic guard: the matcher DOES resolve this filter against a conforming row, so any flag
+            // here would be a false positive (the descend-and-miss trap this pin exists to prevent).
+            const row: z.infer<typeof TrailingSlash> = { 'a\\': [{ b: 1 }] };
+            expect(matchJavascriptObject(row, { 'a\\': { $elemMatch: { b: 1 } } } as WhereFilterDefinition<typeof row>)).toBe(true);
+            expect(vt({ 'a\\': { $elemMatch: { b: 1 } } })).toEqual([]);
+            expect(vt({ 'a\\': { $elemMatch: { b: 'x' } } })).toEqual([]); // mismatch, but stand-down: accepted miss
+        });
+
+        it("stands down on a key whose name holds a backslash (the two runtime reader grammars disagree there)", () => {
+            const BackslashName = z.object({ 'x\\.y': z.number() }).strict(); // key literally named `x\.y`
+            const vb = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, BackslashName);
+            expect(vb({ 'x\\\\.y': 1 })).toEqual([]); // the key's canonical spelling — no flag in either direction
+            expect(vb({ 'x\\\\.y': 'str' })).toEqual([]); // accepted miss
+        });
+
+        it("stands down for a dotted key under a mixed-strictness union (a tolerant variant can carry it)", () => {
+            const Mixed = z.object({
+                poly: z.union([
+                    z.object({ t: z.literal('x'), 'a.b': z.string() }).strict(),
+                    z.object({ t: z.literal('y') }).passthrough(),
+                ]),
+            }).strict();
+            const vp = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, Mixed);
+            expect(vp({ 'poly.a\\.b': 5 })).toEqual([]); // the passthrough variant can carry `a.b` as any type
+            expect(vp({ 'poly.ghost\\.key': 1 })).toEqual([]); // parent has a fail-open variant → not strict
+        });
+    });
+});
+
 describe("validateWhereFilter — malformed operands (flagged statically, regardless of data or logic polarity)", () => {
     const S = z.object({ id: z.string(), age: z.number(), children: z.array(z.object({ name: z.string() }).strict()) }).strict();
     const v = (f: unknown) => validateWhereFilter(f as WhereFilterDefinition<Record<string, unknown>>, S);

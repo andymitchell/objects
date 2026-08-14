@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { getZodSchemaAtSchemaDotPropPath } from "../dot-prop-paths/schema-tree.ts";
+import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 import type { AnyZodSchema } from "../zod/introspection.ts";
 
 /**
  * Why a scope cannot be written through:
- * - `disallowed_segment`: a dot-segment is `__proto__`, `prototype` or `constructor`.
+ * - `disallowed_segment`: a path segment (decoded — `\.` is a literal dot inside one key) is `__proto__`,
+ *   `prototype` or `constructor`.
  * - `unknown_path`: the schema declares no field at the path.
  * - `not_an_object_array`: the path resolves, but not to an array of objects.
  */
@@ -53,7 +55,10 @@ const DISALLOWED_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
  * engine's scoped element schema would be the wrapper itself and could never validate an element.
  */
 export function resolveArrayScope(schema: AnyZodSchema, scope: string): ArrayScopeResolution {
-    if (scope.split('.').some(segment => DISALLOWED_SEGMENTS.has(segment))) {
+    // Judge decoded segments — the keys the runtime reader actually traverses. An escaped dotted key that
+    // merely CONTAINS a denylisted name (`k\.constructor` = one key named `k.constructor`) is an own-property
+    // read, never a prototype-chain walk, so it must not be rejected.
+    if (parseDotPropPathSegments(scope).some(segment => DISALLOWED_SEGMENTS.has(segment))) {
         return { ok: false, reason: 'disallowed_segment' };
     }
 

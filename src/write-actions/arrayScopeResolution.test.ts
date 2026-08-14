@@ -106,5 +106,24 @@ describe('resolveArrayScope', () => {
         it('rejects the raw spelling — it names two keys the schema does not declare', () => {
             expect(resolveArrayScope(dotted, 'my.list')).toEqual({ ok: false, reason: 'unknown_path' });
         });
+
+        // The denylist guards decoded SEGMENTS (what the runtime reader traverses), not raw substrings of the
+        // scope string: `k\.constructor` is one key named `k.constructor`, which the reader looks up as an own
+        // property — never a prototype-chain walk — so it must not be confused with a `constructor` segment.
+        const declaresDottedConstructor = z.object({
+            'k.constructor': z.array(z.object({ v: z.number() })),
+        });
+
+        it('accepts an escaped key that merely CONTAINS a denylisted name', () => {
+            const result = resolveArrayScope(declaresDottedConstructor, 'k\\.constructor');
+            expect(result.ok).toBe(true);
+            if (!result.ok) return;
+            expect(result.elementSchema.safeParse({ v: 1 }).success).toBe(true);
+        });
+
+        it('still rejects a genuine denylisted segment following an escaped dotted key', () => {
+            expect(resolveArrayScope(declaresDottedConstructor, 'k\\.constructor.constructor'))
+                .toEqual({ ok: false, reason: 'disallowed_segment' });
+        });
     });
 });

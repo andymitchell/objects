@@ -216,9 +216,17 @@ The behaviour was not merely a conservative under-match, which is why it went: `
 
 **MongoDB**: field names are opaque strings — there is no dot-escaping grammar to diverge.
 
-**WhereFilterDefinition**: a dot-prop path escapes a literal dot in a key as `\.`, so `rows.a\.b` names the two keys `rows` and `a.b`. The SQL path reader (`parseDotPropPathSegments`) recognises only `\.`; the JS matcher's reader (the `dot-prop` package) additionally decodes `\\`→`\`, `\[` and `\]`. So a path using one of those extra escapes — e.g. `rows.a\\.b` — is read differently by the two engines, and a data key that itself holds a backslash cannot be named by any path, escaped or not.
+**WhereFilterDefinition**: a dot-prop path escapes a literal dot in a key as `\.`, so `rows.a\.b` names the two keys `rows` and `a.b`. The SQL path reader (`parseDotPropPathSegments`) recognises only `\.`; the JS matcher's reader (the `dot-prop` package) additionally decodes `\\`→`\`, `\[` and `\]`. So a path using one of those extra escapes — e.g. `rows.a\\.b` — is read differently by the two engines, and a data key ENDING in a backslash cannot have its children named by any path, escaped or not (the trailing backslash fuses with the joining dot).
 
 Both readers agree on the common `\.` case; they diverge only on the backslash/bracket escapes the JS reader adds.
+
+The compile-time path unions (`DotPropPathsUnion` and family) render keys in the canonical
+(`parseDotPropPathSegments`) grammar: a dotted key is offered as `a\.b`, which both readers decode
+identically. But for a key that itself contains a backslash followed by a dot (e.g. the key `a\.b`,
+four characters), the canonical spelling the types offer is `a\\.b` — which the SQL reader decodes back
+to the key while the JS reader decodes `\\` first and reads two different keys. So the typed surface can
+now hand the JS reader a spelling it misreads; the split is no longer confined to hand-written paths. A
+key ENDING in a backslash is offered as a leaf only, since no spelling can address its children.
 
 **Rationale / status**: the divergence is narrow and the affected keys are pathological (a key literally containing `\`, `[` or `]`). Unifying the two readers is deferred — see `DECISIONS.md` #10 ("The escaped-dot path grammar is not unified …") for what it would require. Pinned at `dot-prop-paths/dotPropPathSegments.test.ts` ("a key holding a backslash cannot be named by any path, escaped or not").
 

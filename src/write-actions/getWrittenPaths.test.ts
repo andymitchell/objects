@@ -394,3 +394,61 @@ describe('4. Type-level contract', () => {
         isTypeEqual<typeof t, string[]>(true);
     });
 });
+
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. The escaped-path grammar (dotted and numeric keys)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('5. The escaped-path grammar (dotted and numeric keys)', () => {
+
+    // Payloads carry raw object KEYS (`data` keys, `path`, keyof-derived); the returned dot-prop
+    // PATHS must spell those keys in the escaped grammar (`\.` = literal dot) so a consumer splitting
+    // with the canonical parser lands on the key that was actually written.
+
+    type Dotted = {
+        id: string;
+        'rank.value': number;
+        'my.list': { v: number }[];
+    };
+
+    it('escapes a dotted data key so the returned path names ONE key', () => {
+        const action: WriteAction<Dotted> = {
+            ...baseEnvelope,
+            payload: { type: 'update', data: { 'rank.value': 2 }, where: { id: '1' } },
+        };
+        expect(getWrittenPaths(action)).toEqual(['rank\\.value']);
+    });
+
+    it('escapes a dotted array key for push', () => {
+        const action: WriteAction<Dotted> = {
+            ...baseEnvelope,
+            payload: { type: 'push', path: 'my.list', items: [], where: { id: '1' } },
+        };
+        expect(getWrittenPaths(action)).toEqual(['my\\.list']);
+    });
+
+    it('coerces then escapes a numeric array key — a fractional key renders its dot escaped', () => {
+        // A keyof-derived payload path can be a NUMBER at runtime; `3.5` stringifies with a dot, so
+        // the returned path must escape it or a canonical split reads two segments.
+        type NumKeyed = { id: string; 3.5: string[] };
+        const action: WriteAction<NumKeyed> = {
+            ...baseEnvelope,
+            payload: { type: 'push', path: 3.5, items: [], where: { id: '1' } },
+        };
+        expect(getWrittenPaths(action)).toEqual(['3\\.5']);
+    });
+
+    it('a dotted array scope arrives already escaped and prefixes the inner paths', () => {
+        const action: WriteAction<Dotted> = {
+            ...baseEnvelope,
+            payload: assertWriteArrayScope<Dotted, 'my\\.list'>({
+                type: 'array_scope',
+                scope: 'my\\.list',
+                action: { type: 'update', data: { v: 2 }, where: { v: 1 } },
+                where: { id: '1' },
+            }),
+        };
+        expect(getWrittenPaths(action)).toEqual(['my\\.list.v']);
+    });
+});

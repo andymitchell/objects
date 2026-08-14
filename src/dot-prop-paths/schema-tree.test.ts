@@ -557,3 +557,23 @@ describe('getZodSchemaAtSchemaDotPropPath — inherited-name path segments resol
         expect(resolved?.safeParse('x').success).toBe(true);
     });
 });
+
+describe('getZodSchemaAtSchemaDotPropPath honours the escaped-dot grammar', () => {
+
+    // `a\.b` is ONE key named `a.b`; raw `a.b` is the two-segment path a → b. The schema walker must
+    // split with the canonical parser, or a dotted key is unreachable by any spelling.
+    const schema = z.object({
+        'a.b': z.object({ c: z.string() }),
+        a: z.object({ x: z.number() }),
+    });
+
+    test('the escaped spelling resolves the dotted key', () => {
+        const c = getZodSchemaAtSchemaDotPropPath(schema, 'a\\.b.c');
+        expect(c?.safeParse('hello').success).toBe(true);
+        expect(c?.safeParse(5).success).toBe(false);
+    });
+
+    test('the raw spelling reads two keys, which this schema does not declare', () => {
+        expect(getZodSchemaAtSchemaDotPropPath(schema, 'a.b')).toBeUndefined();
+    });
+});

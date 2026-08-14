@@ -4,6 +4,32 @@
 import type { EnsureRecord } from "../types.js";
 import type { PrimaryKeyValue } from "../utils/getKeyValue.ts";
 
+/* ----------------------------------------------------------------------------
+The dot-prop path grammar (canonical runtime statement: `parseDotPropPathSegments`) escapes a literal
+dot inside a key: `rank\.value` is ONE key named `rank.value`, while `rank.value` is the two-segment
+path rank → value. Every path-generating type in this file renders object keys through
+`EscapeSegment`, and every path-consuming type splits on UNESCAPED dots only — so a spelling these
+types offer is a spelling the runtime resolves, and vice versa.
+
+A dot is the only character the grammar escapes, so a key ENDING in a backslash cannot address its
+children by any spelling (`a\` + `.` + `b` renders `a\.b`, which decodes as the single key `a.b`).
+The generators therefore offer such a key as a leaf and suppress its subtree.
+---------------------------------------------------------------------------- */
+
+/** Renders one object key as a path segment: each literal dot gains a backslash escape. Type-level mirror of `escapeDotPropPathSegment`. */
+type EscapeSegment<S extends string> = S extends `${infer Head}.${infer Rest}` ? `${Head}\\.${EscapeSegment<Rest>}` : S;
+
+/** Decodes one path segment back to the object key it names: each `\.` becomes a literal dot. */
+type UnescapeSegment<S extends string> = S extends `${infer A}\\.${infer B}` ? `${A}.${UnescapeSegment<B>}` : S;
+
+/** Splits a path at its first UNESCAPED dot: `[head, rest]`, or `[whole]` when every dot is escaped. Type-level mirror of `parseDotPropPathSegments`' split rule. */
+type SplitFirstUnescapedDot<P extends string, Acc extends string = ''> =
+    P extends `${infer Head}.${infer Rest}`
+        ? Head extends `${string}\\`
+            ? SplitFirstUnescapedDot<Rest, `${Acc}${Head}.`>
+            : [`${Acc}${Head}`, Rest]
+        : [`${Acc}${P}`];
+
 
 export type DotPropPathsRecord<T extends Record<string, any>> = {
     [P in DotPropPathsUnion<T> as string & P]: PathValue<T, P>
@@ -42,12 +68,20 @@ type Path<T, Depth extends number = 6, ISD extends number = 2> = Depth extends 0
                 : `${string & K}` | `${string & K}.${Path<NonNullable<T[K]>, ISD, Prev[ISD]>}`
             : number extends K
                 ? never // Numeric index sig: not useful for dot-prop paths
-                : `${string & K}` | `${string & K}.${Path<NonNullable<T[K]>, Prev[Depth], ISD>}`
+                : `${EscapeSegment<string & K>}` | (K extends `${string}\\` ? never : `${EscapeSegment<string & K>}.${Path<NonNullable<T[K]>, Prev[Depth], ISD>}`)
         : never;
     }[keyof T]
     : '';
 
-export type RemoveTrailingDot<T> = T extends `${infer S}.` ? never : T;
+/**
+ * Drops dangling paths that end in a path separator (`a.`), keeping paths whose final dot is escaped
+ * data (`x\.` names a key called `x.`).
+ */
+export type RemoveTrailingDot<T> = T extends `${infer S}.` ? (S extends `${string}\\` ? T : never) : T;
+/**
+ * Union of every dot-prop path `T` declares, spelled in the escaped grammar the runtime parses:
+ * a key holding a literal dot appears as `rank\.value`, never as the two-segment `rank.value`.
+ */
 export type DotPropPathsUnion<T, ISD extends number = 2> = { [K in Path<T, 6, ISD>]: RemoveTrailingDot<K> }[Path<T, 6, ISD>];
 export type DotPropPathsIncArrayUnion<T extends Record<string,any>, ISD extends number = 2> = DotPropPathToObjectArraySpreadingArrays<T> | DotPropPathsUnion<T, ISD>;
 
@@ -66,9 +100,9 @@ type ObjectProperties<T> = { // Helper type to pick only non-scalar, non-array o
 }[keyof T];
 type ScalarPath<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
     {
-        [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${string & P}` :
+        [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${EscapeSegment<string & P>}` :
             P extends ObjectProperties<T>
-            ? `${Prefix}${string & P}.${ScalarPath<NonNullable<T[P]>>}`
+            ? (P extends `${string}\\` ? never : `${Prefix}${EscapeSegment<string & P>}.${ScalarPath<NonNullable<T[P]>>}`)
             : never;
     }[keyof T];
 type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
@@ -77,11 +111,11 @@ type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix exten
         ? `${Prefix}${ScalarPathSpreadingObjectArrays<U>}`
         : never
     : {
-        [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${string & P}` :
+        [P in keyof T]-?: P extends ScalarProperties<T> ? `${Prefix}${EscapeSegment<string & P>}` :
             P extends ObjectProperties<T>
-            ? `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<NonNullable<T[P]>>}`
+            ? (P extends `${string}\\` ? never : `${Prefix}${EscapeSegment<string & P>}.${ScalarPathSpreadingObjectArrays<NonNullable<T[P]>>}`)
             : P extends keyof T ? (NonNullable<T[P]> extends Array<any> ? (NonNullable<T[P]>[number] extends object ?
-                `${Prefix}${string & P}.${ScalarPathSpreadingObjectArrays<NonNullable<T[P]>[number]>}` : never) : never)
+                (P extends `${string}\\` ? never : `${Prefix}${EscapeSegment<string & P>}.${ScalarPathSpreadingObjectArrays<NonNullable<T[P]>[number]>}`) : never) : never)
             : never;
     }[keyof T];
 type ArrayOfScalarProperties<T> = {
@@ -95,16 +129,16 @@ type ScalarPathToScalarArraySpreadingObjectArrays<T extends Record<string, any>,
     : {
         [P in keyof T]-?: P extends ScalarProperties<T> ? never :
             P extends ObjectProperties<T>
-            ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<NonNullable<T[P]>>}`
-            : P extends ArrayOfScalarProperties<T> ? `${Prefix}${string & P}`
-            : (NonNullable<T[P]> extends Array<any> 
-                ? (NonNullable<T[P]>[number] extends object 
-                    ? `${Prefix}${string & P}.${ScalarPathToScalarArraySpreadingObjectArrays<NonNullable<T[P]>[number]>}` 
-                    : (NonNullable<T[P]>[number] extends Scalar 
-                        ? `${Prefix}${string & P}` 
+            ? (P extends `${string}\\` ? never : `${Prefix}${EscapeSegment<string & P>}.${ScalarPathToScalarArraySpreadingObjectArrays<NonNullable<T[P]>>}`)
+            : P extends ArrayOfScalarProperties<T> ? `${Prefix}${EscapeSegment<string & P>}`
+            : (NonNullable<T[P]> extends Array<any>
+                ? (NonNullable<T[P]>[number] extends object
+                    ? (P extends `${string}\\` ? never : `${Prefix}${EscapeSegment<string & P>}.${ScalarPathToScalarArraySpreadingObjectArrays<NonNullable<T[P]>[number]>}`)
+                    : (NonNullable<T[P]>[number] extends Scalar
+                        ? `${Prefix}${EscapeSegment<string & P>}`
                         : never))
                 : never);
-                
+
     }[keyof T];
 
 export type DotPropPathsUnionScalar<T  extends Record<string, any>> = { [K in ScalarPath<T>]: RemoveTrailingDot<K> }[ScalarPath<T>];
@@ -123,28 +157,53 @@ export type NonObjectArrayProperty<T> = NonArrayProperty<T> | ArrayOfScalarPrope
 
 
 
-export type PathValue<T extends Record<string, any>, P> = P extends `${infer Key}.${infer Rest}`
-    ? Key extends keyof T
-        ? NonNullable<T[Key]> extends Array<infer U>
-            ? PathValue<EnsureRecord<U>, Rest>
-            : PathValue<NonNullable<T[Key]>, Rest>
-        : never
-    : P extends keyof T
-        ? NonNullable<T[P]>
-        : never;
+/**
+ * The type of the value a dot-prop path resolves to on `T`.
+ *
+ * Reads the escaped path grammar: the path is split at UNESCAPED dots only, and each segment is
+ * decoded (`\.` → literal dot) before the key lookup — so `rank\.value` resolves the key named
+ * `rank.value` while `rank.value` resolves rank → value. An array along the way is spread to its
+ * element type. An unresolvable path is `never`.
+ *
+ * NOTE: keep the body in lockstep with {@link PathValueIncDiscrimatedUnions} — same walk, but the
+ * union variant distributes over `T` at every recursion level, so the two cannot share one alias.
+ */
+export type PathValue<T extends Record<string, any>, P> =
+    P extends `${string}.${string}`
+        ? SplitFirstUnescapedDot<P & string> extends [infer Key extends string, infer Rest extends string]
+            ? UnescapeSegment<Key> extends infer UKey extends keyof T
+                ? NonNullable<T[UKey]> extends Array<infer U>
+                    ? PathValue<EnsureRecord<U>, Rest>
+                    : PathValue<NonNullable<T[UKey]>, Rest>
+                : never
+            : SplitFirstUnescapedDot<P & string> extends [infer Key extends string]
+                ? UnescapeSegment<Key> extends infer UKey extends keyof T
+                    ? NonNullable<T[UKey]>
+                    : never
+                : never
+        : P extends keyof T
+            ? NonNullable<T[P]>
+            : never;
 
 
-export type PathValueIncDiscrimatedUnions<T extends Record<string, any>, P> = 
-T extends unknown 
-    ? P extends `${infer Key}.${infer Rest}`
-        ? Key extends keyof T
-            ? NonNullable<T[Key]> extends Array<infer U>
-                ? PathValueIncDiscrimatedUnions<EnsureRecord<U>, Rest>
-                : PathValueIncDiscrimatedUnions<NonNullable<T[Key]>, Rest>
+/** {@link PathValue} that also distributes over each member of a `T` union at every nesting level. */
+export type PathValueIncDiscrimatedUnions<T extends Record<string, any>, P> =
+T extends unknown
+    ? P extends `${string}.${string}`
+        ? SplitFirstUnescapedDot<P & string> extends [infer Key extends string, infer Rest extends string]
+            ? UnescapeSegment<Key> extends infer UKey extends keyof T
+                ? NonNullable<T[UKey]> extends Array<infer U>
+                    ? PathValueIncDiscrimatedUnions<EnsureRecord<U>, Rest>
+                    : PathValueIncDiscrimatedUnions<NonNullable<T[UKey]>, Rest>
+                : never
+            : SplitFirstUnescapedDot<P & string> extends [infer Key extends string]
+                ? UnescapeSegment<Key> extends infer UKey extends keyof T
+                    ? NonNullable<T[UKey]>
+                    : never
+                : never
+        : P extends keyof T
+            ? NonNullable<T[P]>
             : never
-    : P extends keyof T
-        ? NonNullable<T[P]>
-        : never
     : never;
     
 
@@ -157,10 +216,10 @@ export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Dep
             ? never // Skip index-sig keys: can't enumerate array paths through an index signature
             : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
                 ? U extends object
-                    ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
-                    : `${Prefix}${K}`
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
+                    : `${Prefix}${EscapeSegment<K>}`
                 : T[K] extends object
-                    ? `${Prefix}${K}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`)
                     : never
         : never;
 }[keyof T] : '';
@@ -171,10 +230,10 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
             ? never // Skip index-sig keys: can't enumerate object-array paths through an index signature
             : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
                 ? U extends object // Check if the elements of array are objects
-                    ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}` | `${Prefix}${K}`
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
                     : never // Exclude if the elements are not objects
                 : T[K] extends object
-                    ? `${Prefix}${K}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`)
                     : never
         : never;
 }[keyof T] : '';

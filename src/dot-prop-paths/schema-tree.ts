@@ -10,6 +10,7 @@ import {
     type ZodKind,
     type AnyZodSchema,
 } from "../zod/introspection.ts";
+import { parseDotPropPathSegments } from "./dotPropPathSegments.ts";
 
 // Re-exported so SQL builders can name expected kinds without reaching into the introspection layer.
 export type { ZodKind };
@@ -257,7 +258,9 @@ export function getZodKindAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPro
  * trailing optional wrapper is still removed first, so an optional array yields the array schema.
  */
 export function getZodSchemaAtSchemaDotPropPath(schema: AnyZodSchema, path: DotPropPath, options?: { crossArrays?: boolean, unwrapTrailingArray?: boolean }): AnyZodSchema | undefined {
-    const keys = path.split('.');
+    // Canonical split: `\.` is a literal dot inside a key, not a separator — so a declared dotted key
+    // (e.g. `a.b`) is reachable via its escaped spelling `a\.b`.
+    const keys = parseDotPropPathSegments(path);
     let currentSchema: AnyZodSchema = schema;
 
     for (const key of keys) {

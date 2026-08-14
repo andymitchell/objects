@@ -47,6 +47,11 @@ export function parseDotPropPathSegments(path: string): string[] {
  * a path can be built that reads back as a different key: the key `a\` followed by the key `b` renders
  * `a\.b`, which parses as the single key `a.b`. Such a key cannot be named by any dot-prop path, escaped or
  * not, so this is a limit of the grammar rather than of this function.
+ *
+ * The output is canonical for readers that split with `parseDotPropPathSegments`. Readers built on the
+ * dot-prop package's grammar (`getProperty` and the typed property helpers) agree on `\.` but ALSO decode
+ * `\\` and bracket indexing, so a key containing those sequences is read differently by the two reader
+ * families — see the `escaped-dot-path-grammar-split` divergence entry.
  */
 export function escapeDotPropPathSegment(segment: string): string {
     return segment.replace(/\./g, '\\.');

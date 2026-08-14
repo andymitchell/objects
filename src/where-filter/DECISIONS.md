@@ -247,8 +247,10 @@ engine deny a disallowed path with the same verdict, rather than one engine sile
 **Context**: A dot-prop path escapes a literal dot in a key as `\.`. The SQL path reader
 (`parseDotPropPathSegments`) recognises only that escape; the JS matcher reads paths through the `dot-prop`
 package, which additionally decodes `\\`, `\[` and `\]`. The two readers therefore disagree on a path that
-uses those extra escapes, and a key that itself contains a backslash cannot be named at all (see
-`MONGO-DIVERGENCES.md`).
+uses those extra escapes, and a key ending in a backslash cannot address its children by any path (see
+`MONGO-DIVERGENCES.md`). The compile-time path unions render keys in the canonical
+(`parseDotPropPathSegments`) grammar, so a typed path can now carry a spelling — e.g. `a\\.b` for a key
+containing a backslash-then-dot — that the JS reader decodes differently from the SQL reader.
 
 **Decision**: Leave the two readers as they are; document the divergence rather than remove it.
 

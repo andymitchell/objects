@@ -1268,4 +1268,25 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
             }) satisfies WhereFilterDefinition<NestedCarrierDoc>;
         });
     });
+
+    describe('9. A key holding a literal dot is filtered through its escaped spelling', () => {
+
+        // The path grammar escapes a literal dot inside a key: `rows.a\.b` names rows → `a.b` (one
+        // key), while raw `rows.a.b` names rows → a → b. The filter keys must speak the same grammar
+        // the runtime path readers decode, or the filter silently misses the field.
+        type DottedDoc = { id: string; rows: { 'a.b': number } };
+
+        it('accepts the escaped spelling on every filter form', () => {
+            ({ 'rows.a\\.b': 1 }) satisfies WhereFilterDefinition<DottedDoc>;
+            ({ 'rows.a\\.b': 1 }) satisfies PartialObjectFilter<DottedDoc>;
+            ({ 'rows.a\\.b': 1 }) satisfies PartialObjectFilterStrict<DottedDoc>;
+        });
+
+        it('rejects the raw spelling, which names a two-segment path the document does not declare', () => {
+            // @ts-expect-error raw 'rows.a.b' reads rows → a → b, which DottedDoc does not declare
+            ({ 'rows.a.b': 1 }) satisfies PartialObjectFilter<DottedDoc>;
+            // @ts-expect-error raw 'rows.a.b' reads rows → a → b, which DottedDoc does not declare
+            ({ 'rows.a.b': 1 }) satisfies PartialObjectFilterStrict<DottedDoc>;
+        });
+    });
 });

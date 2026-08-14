@@ -512,3 +512,24 @@ describe("Resolving list rules from a DDL", () => {
     >().toEqualTypeOf<string>();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// 8. Sortable keys over a collection with a dotted key
+// ═══════════════════════════════════════════════════════════════════
+
+describe("Sortable keys over a collection with a dotted key", () => {
+  /** The key `rank.value` holds a literal dot; its dot-prop path spelling is `rank\.value`. */
+  type DottedFlat = { id: string; "rank.value": number };
+
+  it("accepts the escaped spelling — the one the runtime sort-key builder resolves", () => {
+    ({ key: "rank\\.value" }) satisfies SortableKeyRule<DottedFlat>;
+    ({ key: "rank\\.value", direction: 1 }) satisfies SortEntry<DottedFlat>;
+  });
+
+  it("rejects the raw spelling, which the runtime reads as the two-segment path rank → value", () => {
+    // @ts-expect-error: raw 'rank.value' names two keys, not the dotted key
+    ({ key: "rank.value" }) satisfies SortableKeyRule<DottedFlat>;
+    // @ts-expect-error: raw 'rank.value' names two keys, not the dotted key
+    ({ key: "rank.value", direction: -1 }) satisfies SortEntry<DottedFlat>;
+  });
+});

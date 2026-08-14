@@ -22,8 +22,12 @@ const dottedKeyRow = { id: '1', rows: { 'a.b': 1 } };
 const BackslashKeySchema = z.object({ id: z.string(), rows: z.object({ 'a\\': z.object({ b: z.number() }) }) });
 const backslashKeyRow = { id: '1', rows: { 'a\\': { b: 1 } } };
 
-/** The compile-time path grammar cannot name an escaped-dot key; the runtime grammar accepts the path (the validity gate still checks it). */
-const asDottedKeyFilter = (filter: unknown) => filter as WhereFilterDefinition<z.infer<typeof DottedKeySchema>>;
+/**
+ * The compile-time grammar cannot name a CHILD of a backslash-holding key: `a\` + `.` + `b` renders
+ * `a\.b`, which decodes as the single key `a.b`, so the path union rightly omits the subtree and this
+ * suite must cast to probe how the runtime readers split such a path. (An escaped-DOT key needs no
+ * cast: the unions offer `a\.b` spellings directly.)
+ */
 const asBackslashKeyFilter = (filter: unknown) => filter as WhereFilterDefinition<z.infer<typeof BackslashKeySchema>>;
 
 describe('divergence `escaped-dot-path-grammar-split` (#14)', () => {
@@ -31,7 +35,8 @@ describe('divergence `escaped-dot-path-grammar-split` (#14)', () => {
     describe.each(allEngines)('on $name', ({ match }) => {
 
         test('the common ground: an escaped dot names a dotted key identically everywhere', async () => {
-            expect(await match(dottedKeyRow, asDottedKeyFilter({ 'rows.a\\.b': 1 }), DottedKeySchema)).toEqual(matched(true));
+            const filter: WhereFilterDefinition<z.infer<typeof DottedKeySchema>> = { 'rows.a\\.b': 1 };
+            expect(await match(dottedKeyRow, filter, DottedKeySchema)).toEqual(matched(true));
         });
     });
 

@@ -86,4 +86,25 @@ describe('resolveArrayScope', () => {
             expect(resolveArrayScope(schema, 'maybe_null')).toEqual({ ok: false, reason: 'not_an_object_array' });
         });
     });
+
+    describe('a dotted array key is reached only through its escaped scope spelling', () => {
+
+        // The path grammar escapes a literal dot inside a key: `my\.list` is ONE key named `my.list`;
+        // `my.list` is two keys. The scope gate must read the same grammar the declared path unions speak.
+        const dotted = z.object({
+            id: z.string(),
+            'my.list': z.array(z.object({ v: z.number() })),
+        });
+
+        it('resolves the escaped spelling to the element schema', () => {
+            const result = resolveArrayScope(dotted, 'my\\.list');
+            expect(result.ok).toBe(true);
+            if (!result.ok) return;
+            expect(result.elementSchema.safeParse({ v: 1 }).success).toBe(true);
+        });
+
+        it('rejects the raw spelling — it names two keys the schema does not declare', () => {
+            expect(resolveArrayScope(dotted, 'my.list')).toEqual({ ok: false, reason: 'unknown_path' });
+        });
+    });
 });

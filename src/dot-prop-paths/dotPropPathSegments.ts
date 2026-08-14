@@ -2,6 +2,11 @@
  * Split a dot-prop path into its key segments, honouring the escape convention where `\.` is a literal dot
  * inside a key rather than a path separator. So `a\.b` is one key and `a.b` is two.
  *
+ * This is the canonical statement of the path grammar's split rule — the property readers and the SQL
+ * expression builders all resolve paths through it. A consumer addressing storage by a declared path should
+ * split with this function rather than on the raw `.` character, or a key holding a literal dot lands on the
+ * wrong location.
+ *
  * A leading, trailing, or doubled unescaped dot yields an empty segment, which callers treat as an invalid
  * path rather than as a key named `''`.
  *

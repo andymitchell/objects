@@ -6,4 +6,5 @@ export type { ShapeAmbiguity } from "./shape-ambiguity.ts";
 export { findNormalizingPaths } from "./schema-normalization.ts";
 export type { SchemaNormalization } from "./schema-normalization.ts";
 export { joinDotpropPath } from "./joinDotpropPath.ts";
+export { parseDotPropPathSegments } from "./dotPropPathSegments.ts";
 export type { DotPropPathsUnion, DotPropPathsUnionScalarSpreadingObjectArrays, DotPropPathsRecord, PathValue, ArrayProperty, ArrayElement, NumberProperty } from "./types.ts";

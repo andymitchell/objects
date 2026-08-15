@@ -14,9 +14,9 @@ import { assertWriteArrayScope, getWriteErrors, getWriteFailures, getWriteSucces
 /**
  * §12: deep verb semantics.
  *
- * The fine-grained mutation rules every implementation must reproduce identically: `undefined` deletes a
- * key while `null` is kept; merge deep-merges objects but replaces arrays wholesale, whereas assign
- * replaces wholesale; add_to_set's deep-equal treats `undefined`≡missing but `null`≠`undefined` and is
+ * The fine-grained mutation rules every implementation must reproduce identically: an explicit `undefined`
+ * in written data is refused while `null` is kept; merge deep-merges objects but replaces arrays wholesale,
+ * whereas assign replaces wholesale; add_to_set's deep-equal treats `undefined`≡missing but `null`≠`undefined` and is
  * array-order-sensitive; pull never initialises a missing field; and several pinned quirks (dirty-on-
  * no-change for update/array_scope, no-op short-circuit for push/inc/add_to_set, falsy-PK-as-missing).
  */
@@ -29,10 +29,28 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
 
     describe('12. Deep verb semantics', () => {
 
-        describe('12.1 undefined deletes a key, null is kept', () => {
+        describe('12.1 an explicit undefined is rejected, null is kept', () => {
+
+            /** Assert the whole batch was rejected as `invalid_data_value`/`malformed` at `dataPath`, unrecoverably, leaving state as `checkFinal` expects. */
+            const expectUndefinedRejected = <T extends Record<string, any>>(
+                r: Awaited<ReturnType<ReturnType<typeof createAdapter<T>>['apply']>>,
+                dataPath: string,
+                checkFinal: (finalItems: T[]) => void,
+                skipNote?: string,
+            ): void => expectOrAcknowledgeUnsupported(r, (r) => {
+                expect(r.result.ok).toBe(false);
+                const err = getWriteErrors(r.result)[0];
+                expect(err?.type).toBe('invalid_data_value');
+                if (err && err.type === 'invalid_data_value') {
+                    expect(err.reason).toBe('malformed');
+                    expect(err.data_path).toBe(dataPath);
+                }
+                expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
+                checkFinal(r.finalItems);
+            }, implName, skipNote);
 
             // T-12.1
-            test('undefined deletes a top-level key under merge', async () => {
+            test('a top-level undefined under merge is rejected, and the field keeps its value', async () => {
                 const adapter = createAdapter(NestedObjSchema, nestedObjDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', note: 'x' }],
@@ -40,14 +58,14 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                     schema: NestedObjSchema,
                     ddl: nestedObjDdl,
                 });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                    expect(r.finalItems[0]).toEqual({ id: '1' });
-                }, implName);
+                expectUndefinedRejected(r, 'note', (f) => {
+                    expect(f[0]).toEqual({ id: '1', note: 'x' });
+                    expect('note' in f[0]!).toBe(true);
+                });
             });
 
             // T-12.2
-            test('undefined deletes a nested key under merge, keeping siblings', async () => {
+            test('a nested undefined under merge is rejected at its full path, leaving the whole object alone', async () => {
                 const adapter = createAdapter(NestedObjSchema, nestedObjDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', meta: { a: 'x', b: 'y' } }],
@@ -55,15 +73,11 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                     schema: NestedObjSchema,
                     ddl: nestedObjDdl,
                 });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                    expect(r.finalItems[0]!.meta).toEqual({ b: 'y' });
-                    expect('a' in r.finalItems[0]!.meta!).toBe(false);
-                }, implName);
+                expectUndefinedRejected(r, 'meta.a', (f) => expect(f[0]!.meta).toEqual({ a: 'x', b: 'y' }));
             });
 
             // T-12.3 (assign)
-            itIfSupported('assignMethod')('undefined deletes a nested key under assign too', async () => {
+            itIfSupported('assignMethod')('the rejection does not depend on the update method — assign is refused the same way', async () => {
                 const adapter = createAdapter(NestedObjSchema, nestedObjDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', meta: { a: 'seed' } }],
@@ -71,10 +85,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                     schema: NestedObjSchema,
                     ddl: nestedObjDdl,
                 });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                    expect(r.finalItems[0]!.meta).toEqual({ a: 'x' });
-                }, implName, 'assign update method');
+                // `a: 'x'` would have landed had the action run at all, so the seed value proves nothing was applied.
+                expectUndefinedRejected(r, 'meta.b', (f) => expect(f[0]!.meta).toEqual({ a: 'seed' }), 'assign update method');
             });
 
             // T-12.4

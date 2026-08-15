@@ -23,6 +23,10 @@ export function runFuzzSection(ctx: SectionCtx): void {
     const iterations = ctx.fuzz?.iterations ?? DEFAULT_FUZZ_ITERATIONS;
     const invalidWhereCorpus = resolveCapability(ctx.capabilities, 'invalidWhereCorpus');
     const reconstructs = resolveCapability(ctx.capabilities, 'reconstructsOutcomes');
+    // `delete_property` joins the generated verb pool because removing a key is visible to the oracle below.
+    // `set_property_undefined` deliberately does not: the oracle reads a present-but-empty key as an absent
+    // one, so it cannot see the very state that verb produces, and §21 is where that distinction is judged.
+    const deleteProperty = resolveCapability(ctx.capabilities, 'deleteProperty');
 
     const reference = (initialItems: FuzzItem[], actions: ReturnType<typeof genBatch>, options?: { atomic?: boolean }) =>
         writeToItemsArray(actions, structuredClone(initialItems), FuzzSchema, fuzzDdl, options);
@@ -45,7 +49,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
         // P0 — a single action touches only rows it created or matched
         property(0, 'non-interference: an action leaves untouched rows byte-for-byte', async (rng, iter) => {
             const world = genWorld(rng);
-            const action = genWriteAction(rng, world, 'u0');
+            const action = genWriteAction(rng, world, 'u0', deleteProperty);
             const r = await runAdapter(world, [action]);
             if (r === undefined) return;
             const touched = touchedPks(action, world);
@@ -59,7 +63,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
         // P1 — differential oracle vs the in-package reference engine
         property(1, 'differential oracle: adapter agrees with the reference engine', async (rng, iter) => {
             const world = genWorld(rng);
-            const batch = genBatch(rng, world);
+            const batch = genBatch(rng, world, deleteProperty);
             const atomic = rng.bool(0.3);
             const r = await runAdapter(world, batch, { atomic });
             if (r === undefined) return;
@@ -76,7 +80,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
         property(2, 'input immutability: the world passed in is never mutated', async (rng, iter) => {
             const world = genWorld(rng);
             const snap = structuredClone(world);
-            const batch = genBatch(rng, world);
+            const batch = genBatch(rng, world, deleteProperty);
             const r = await runAdapter(world, batch, { atomic: rng.bool(0.3) });
             if (r === undefined) return;
             invariant(fuzzDeepEqual(world, snap), () => repro('P2', seed, 2, iter, snap, batch, 'caller world was mutated'));
@@ -138,7 +142,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
             // Guaranteed-failing regardless of prior actions: a NaN count is always invalid_data_value.
             // (A duplicate-pk create is NOT guaranteed — an earlier generated delete could remove the target.)
             const failing = makeWriteAction('fail', { type: 'create', data: { id: 'fail_row', count: NaN, sub_items: [] } });
-            const batch = [...genBatch(rng, w), failing];
+            const batch = [...genBatch(rng, w, deleteProperty), failing];
             const atomicR = await runAdapter(w, batch, { atomic: true });
             if (atomicR === undefined) return;
             invariant(atomicR.result.ok === false, () => repro('P6', seed, 6, iter, w, batch, 'atomic batch with a failing action reported ok'));
@@ -152,7 +156,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
         // P7 — the whole result survives a JSON round-trip
         property(7, 'serialisability: the result round-trips through JSON', async (rng, iter) => {
             const world = genWorld(rng);
-            const batch = genBatch(rng, world);
+            const batch = genBatch(rng, world, deleteProperty);
             const r = await runAdapter(world, batch);
             if (r === undefined) return;
             const round = JSON.parse(JSON.stringify(r.result));
@@ -188,7 +192,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
         // P9 — every outcome uuid is a submitted uuid
         property(9, 'outcome accounting: every outcome uuid was submitted', async (rng, iter) => {
             const world = genWorld(rng);
-            const batch = genBatch(rng, world);
+            const batch = genBatch(rng, world, deleteProperty);
             const r = await runAdapter(world, batch);
             if (r === undefined) return;
             const submitted = new Set(batch.map(a => a.uuid));
@@ -215,7 +219,7 @@ export function runFuzzSection(ctx: SectionCtx): void {
         // can never see a defect they share, but this one can.
         property(11, 'unique keys: final_items never holds a primary key twice', async (rng, iter) => {
             const world = genWorld(rng);
-            const batch = genBatch(rng, world);
+            const batch = genBatch(rng, world, deleteProperty);
             const r = await runAdapter(world, batch, { atomic: rng.bool(0.3) });
             if (r === undefined) return;
 

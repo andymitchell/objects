@@ -9,22 +9,26 @@ import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
 import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
 import { resolveArrayScope, type ArrayScopeRejectionReason } from "./arrayScopeResolution.ts";
+import { resolvePropertyPathTarget, type PropertyPathRejectionReason } from "./propertyPathResolution.ts";
 
 /**
- * A static fault found in an action's filter/scope tree, discriminated by `kind`: a `where`-clause fault
- * (carrying the `WhereFilterValidationIssue` fields) or an unwritable `array_scope.scope`. Callers map these
- * onto the `invalid_filter` / `invalid_scope` `WriteError` variants respectively.
+ * A static fault found in an action's filter/target tree, discriminated by `kind`: a `where`-clause fault
+ * (carrying the `WhereFilterValidationIssue` fields), an unwritable `array_scope.scope`, or an unwritable
+ * `set_property_undefined`/`delete_property` `path`. Callers map these onto the `invalid_filter` /
+ * `invalid_scope` / `invalid_property_path` `WriteError` variants respectively.
  */
 export type ActionValidationIssue =
     | ({ kind: "where" } & WhereFilterValidationIssue)
-    | { kind: "scope"; scope: string; reason: ArrayScopeRejectionReason };
+    | { kind: "scope"; scope: string; reason: ArrayScopeRejectionReason }
+    | { kind: "property_path"; path: string; reason: PropertyPathRejectionReason };
 
 /**
- * Collect every static invalid-`where` and invalid-scope issue across an action's WHOLE filter tree, against
- * the right schema at each level: the payload's own `where`, an `array_scope`'s scope and nested `action.where`
- * at any depth (validated against the scoped element schema), and a `pull`'s object-form `items_where` (against
- * the array element schema). Pure and data-independent, so it runs once up-front — the only way to catch a
- * nested invalid `where` when the outer `where` matches no items (the per-item recursion never runs then).
+ * Collect every static invalid-`where`, invalid-scope and unwritable-property-path issue across an action's
+ * WHOLE filter tree, against the right schema at each level: the payload's own `where`, an `array_scope`'s scope
+ * and nested `action.where` at any depth (validated against the scoped element schema), a `pull`'s object-form
+ * `items_where` (against the array element schema), and a `set_property_undefined`/`delete_property` `path`.
+ * Pure and data-independent, so it runs once up-front — the only way to catch a nested invalid `where` when the
+ * outer `where` matches no items (the per-item recursion never runs then).
  *
  * Single-sourced: BOTH the write engine's preflight (`preflightActionWhere`, which adds a runtime throw-safety
  * dry-run on top) and a store's up-front gate (`validateWriteAction`) call this, so the engine and a stacking
@@ -42,7 +46,8 @@ export type ActionValidationIssue =
  * const validate = compileValidateWhereFilter(schema, options);
  * const issues = collectActionWhereIssues(payload, schema, validate, options);
  * // e.g. [{ kind: 'scope', scope: 'children.nope', reason: 'unknown_path' },
- * //       { kind: 'where', reason: 'malformed', path: 'children.$ne', message: "Non-JSON operand ..." }]
+ * //       { kind: 'where', reason: 'malformed', path: 'children.$ne', message: "Non-JSON operand ..." },
+ * //       { kind: 'property_path', path: 'children.cid', reason: 'not_optional' }]
  */
 export function collectActionWhereIssues(
     payload: WritePayload<any>,
@@ -81,6 +86,16 @@ export function collectActionWhereIssues(
     } else if (payload.type === "pull") {
         for (const issue of validatePullItemsWhere(payload.items_where, schema, payload.path as string, options, prefix)) {
             issues.push({ kind: "where", ...issue });
+        }
+    } else if (payload.type === "set_property_undefined" || payload.type === "delete_property") {
+        // The `path` names the write TARGET, judged against the schema at THIS level — so a path nested in an
+        // `array_scope` is held to the element schema, exactly as a nested `where` is. A path the schema can never
+        // clear or remove is a permanent fault, so it is caught here rather than discovered per matched item.
+        if (schema) {
+            const resolution = resolvePropertyPathTarget(schema, payload.path as string, payload.type);
+            if (!resolution.ok) {
+                issues.push({ kind: "property_path", path: joinDotpropPath(prefix, payload.path as string), reason: resolution.reason });
+            }
         }
     }
 

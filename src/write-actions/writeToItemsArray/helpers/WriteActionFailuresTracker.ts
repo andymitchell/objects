@@ -28,6 +28,7 @@ function isUnrecoverable(type: WriteError["type"]): boolean {
     case "invalid_filter":
     case "invalid_scope":
     case "invalid_data_value":
+    case "invalid_property_path":
       return true;
     case "custom":
     case "blocked":

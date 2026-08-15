@@ -5,6 +5,7 @@ import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from 
 import { assertWriteArrayScope } from "./helpers.ts";
 import { combineWriteActionsWhereFilters, type CombineWriteActionsWhereFiltersResult } from "./index.ts";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
+import type { DDL } from "../ddl/types.ts";
 import type { WriteAction, WritePayload, WriteError } from "./types.ts";
 import type { Obj, Child, NumObj, Arm } from "./combineWriteActionsWhereFilters.harness.ts";
 import {
@@ -115,6 +116,8 @@ describe("combineWriteActionsWhereFilters", () => {
             { arm: "add_to_set", action: wa({ type: "add_to_set", path: "children", items: [{ cid: "z", age: 0, children: [] }], unique_by: "pk", where: { id: "r2" } }) },
             { arm: "push", action: wa({ type: "push", path: "children", items: [{ cid: "z", age: 0, children: [] }], where: { id: "r2" } }) },
             { arm: "pull", action: wa({ type: "pull", path: "children", items_where: { cid: "a1" }, where: { id: "r2" } }) },
+            { arm: "set_property_undefined", action: wa({ type: "set_property_undefined", path: "text", where: { id: "r2" } }) },
+            { arm: "delete_property", action: wa({ type: "delete_property", path: "text", where: { id: "r2" } }) },
         ];
         it.each(mutators)("includes the $arm target row alongside a sibling update", ({ action }) => {
             const batch = [wa({ type: "update", data: { text: "u" }, where: { id: "r1" } }), action];
@@ -199,6 +202,34 @@ describe("combineWriteActionsWhereFilters", () => {
             expect(missingCoverage(res.filter, ["r1", "r2"])).toEqual([]);
             expect(matchedIds(res.filter).has("r5")).toBe(false);
         });
+        it("narrows to the elements a scoped property change would touch, without losing their parents", () => {
+            // A property verb inside a scope changes only the matching ELEMENTS, so the derived filter is the
+            // outer `where` narrowed by an element match — the same shape every other scoped mutation takes.
+            // Its own fixture: only a removable element property can be named, which the shared `Obj` lacks.
+            type Note = { id: string; rows: { rid: string; hint?: string }[] };
+            const noteDdl: DDL<Note> = {
+                version: 1,
+                lists: { ".": { primary_key: "id", default_ordering_key: { key: "id", direction: 1 } }, "rows": { primary_key: "rid" } },
+            };
+            const noteRows: Note[] = [
+                { id: "n1", rows: [{ rid: "a1", hint: "h" }] },
+                { id: "n2", rows: [{ rid: "b1" }] },
+                { id: "n3", rows: [] },
+            ];
+            const action: WriteAction<Note> = {
+                type: "write", ts: 0, uuid: "u",
+                payload: assertWriteArrayScope<Note, "rows">({
+                    type: "array_scope", scope: "rows", where: { id: { $in: ["n1", "n2"] } },
+                    action: { type: "delete_property", path: "hint", where: { rid: "a1" } },
+                }),
+            };
+            const res = combineWriteActionsWhereFilters(noteDdl, [action]);
+            expect(res.success).toBe(true);
+            if (!res.success) return;
+            expect(res.filter).toEqual({ $and: [{ id: { $in: ["n1", "n2"] } }, { rows: { $elemMatch: { rid: "a1" } } }] });
+            // The row actually holding the targeted element is selected; the others are not.
+            expect(noteRows.filter((r) => matchJavascriptObject(r, res.filter!)).map((r) => r.id)).toEqual(["n1"]);
+        });
         it("still selects the root a scoped delete would remove an element from", () => {
             const action = wa(assertWriteArrayScope<Obj, "children">({
                 type: "array_scope", scope: "children", where: { id: "r1" },
@@ -271,6 +302,16 @@ describe("combineWriteActionsWhereFilters", () => {
         });
         it("returns no filter, not a match-none, for a single match-all where", () => {
             const res = combineWriteActionsWhereFilters(ddl, [wa({ type: "update", data: { text: "u" }, where: {} })]);
+            expect(res.success).toBe(true);
+            if (!res.success) return;
+            expect(res.filter).toBeUndefined();
+        });
+        it("lets an unconditional property change widen the whole batch to every row", () => {
+            const batch = [
+                wa({ type: "update", data: { text: "u" }, where: { id: "r1" } }),
+                wa({ type: "delete_property", path: "text", where: {} }),
+            ];
+            const res = combineWriteActionsWhereFilters(ddl, batch);
             expect(res.success).toBe(true);
             if (!res.success) return;
             expect(res.filter).toBeUndefined();
@@ -457,13 +498,14 @@ describe("combineWriteActionsWhereFilters", () => {
             expectTypeOf(combineWriteActionsWhereFilters<Obj>).parameter(2).toEqualTypeOf<boolean | undefined>();
         });
         it("keeps the payload arm set exhaustive", () => {
-            // Keyed off a shallow single-array type, where `WritePayload<T>['type']` resolves cleanly to all
-            // eight arms (it collapses to `unknown` for a nested-array T). Adding/removing an arm breaks this.
+            // Keyed off a shallow single-array type, where `WritePayload<T>['type']` resolves cleanly to every
+            // arm (it collapses to `unknown` for a nested-array T). Adding/removing an arm breaks this.
             type CanaryObj = { id: string; score: number; tags: { tid: string }[] };
             type SourceArm = WritePayload<CanaryObj>["type"];
             const _arms: Record<SourceArm, true> = {
                 create: true, update: true, delete: true, array_scope: true,
                 add_to_set: true, push: true, pull: true, inc: true,
+                set_property_undefined: true, delete_property: true,
             };
             expectTypeOf<SourceArm>().toEqualTypeOf<Arm>();
             expect(Object.keys(_arms).sort()).toEqual([...ALL_ARMS].sort());

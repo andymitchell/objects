@@ -18,8 +18,11 @@ import type {
   WriteResult,
   WritePayloadArrayScope,
   WritePayloadUpdate,
+  WritePayload,
 } from "./types.ts";
 import { resolveArrayScope } from "./arrayScopeResolution.ts";
+import { resolvePropertyPathTarget } from "./propertyPathResolution.ts";
+import { findNonJsonValues, type NonJsonValueIssue } from "../utils/findNonJsonValues.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
 
@@ -32,19 +35,47 @@ export function makeWritePayloadSchema(objectSchema?: z.ZodObject<any>) {
   return makeWriteActionAndPayloadSchema(objectSchema).payload;
 }
 
+/**
+ * Whether `data` holds an explicit `undefined` at any depth. Row schemas cannot answer this — an optional or
+ * `.any()` field parses `undefined` happily — so the two data-carrying verbs are refined with it, and the parse
+ * gate then admits exactly what the write engine will accept. Single-sourced with the engine's value walk.
+ */
+function holdsExplicitUndefined(data: unknown): boolean {
+  const issues: NonJsonValueIssue[] = [];
+  findNonJsonValues(data, "", issues, { flagUndefined: true });
+  return issues.some((issue) => issue.undefined_value);
+}
+
+/** Rejection wording for the two data-carrying verbs, naming the JSON-safe way to say what was intended. */
+const UNDEFINED_DATA_MESSAGE = {
+  create: "A create defines the whole item, so omit the key rather than giving it the value undefined",
+  update:
+    "Clearing or removing a property is 'set_property_undefined' / 'delete_property'; an update cannot carry the value undefined",
+} as const;
+
 function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
   const schema: z.ZodTypeAny = objectSchema ?? z.record(z.string(), z.any());
-  const WritePayloadCreateSchema = z.object({
-    type: z.literal("create"),
-    data: objectSchema ? objectSchema.strict() : schema,
-  });
+  const WritePayloadCreateSchema = z
+    .object({
+      type: z.literal("create"),
+      data: objectSchema ? objectSchema.strict() : schema,
+    })
+    .refine((data) => !holdsExplicitUndefined(data.data), {
+      message: UNDEFINED_DATA_MESSAGE.create,
+      path: ["data"],
+    });
 
-  const WritePayloadUpdateSchema = z.object({
-    type: z.literal("update"),
-    data: objectSchema ? objectSchema.partial().strict() : schema,
-    where: WhereFilterSchema,
-    method: UpdatingMethodSchema.optional(),
-  });
+  const WritePayloadUpdateSchema = z
+    .object({
+      type: z.literal("update"),
+      data: objectSchema ? objectSchema.partial().strict() : schema,
+      where: WhereFilterSchema,
+      method: UpdatingMethodSchema.optional(),
+    })
+    .refine((data) => !holdsExplicitUndefined(data.data), {
+      message: UNDEFINED_DATA_MESSAGE.update,
+      path: ["data"],
+    });
   isTypeEqual<
     z.infer<typeof WritePayloadUpdateSchema>["where"],
     WritePayloadUpdate<any>["where"]
@@ -109,6 +140,41 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
     where: WhereFilterSchema,
   });
 
+  // Single-sourced with the write engine's preflight (resolvePropertyPathTarget), so the parse gate admits
+  // exactly the properties the engine will write through — no gate/engine drift. Without an `objectSchema`
+  // there is nothing to resolve against, so the path is left to the engine to judge.
+  const WritePayloadSetPropertyUndefinedSchema = z
+    .object({
+      type: z.literal("set_property_undefined"),
+      path: z.string(),
+      where: WhereFilterSchema,
+    })
+    .refine(
+      (data) =>
+        !objectSchema ||
+        resolvePropertyPathTarget(schema, data.path, "set_property_undefined").ok,
+      {
+        message: "Path is not a property this schema allows to hold undefined",
+        path: ["path"],
+      },
+    );
+
+  const WritePayloadDeletePropertySchema = z
+    .object({
+      type: z.literal("delete_property"),
+      path: z.string(),
+      where: WhereFilterSchema,
+    })
+    .refine(
+      (data) =>
+        !objectSchema ||
+        resolvePropertyPathTarget(schema, data.path, "delete_property").ok,
+      {
+        message: "Path is not a property this schema allows to be absent",
+        path: ["path"],
+      },
+    );
+
   const WritePayloadSchema = z.union([
     WritePayloadCreateSchema,
     WritePayloadUpdateSchema,
@@ -118,6 +184,8 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
     WritePayloadPushSchema,
     WritePayloadPullSchema,
     WritePayloadIncSchema,
+    WritePayloadSetPropertyUndefinedSchema,
+    WritePayloadDeletePropertySchema,
   ]);
 
   const WriteActionSchema = z.object({
@@ -132,6 +200,25 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
 
 export const WriteActionSchema = makeWriteActionSchema<any>();
 isTypeEqual<z.infer<typeof WriteActionSchema>, WriteAction<any>>(true);
+
+// The assertion above passes by construction — `makeWriteActionSchema` casts its return to
+// `z.ZodType<WriteAction<any>>`. The payload factory does not cast, so its inferred type can be held to the
+// declared union for real. Whole-union equality is unattainable by design: `update.data`, `array_scope.action`
+// and `pull.items_where` are declared with path-derived and recursive types that the payload schema
+// deliberately types loosely, then narrows in a `.refine`. The discriminant set is the part that must match
+// exactly — it is what fails when a variant gains a schema but no type, or a type but no schema.
+type InferredPayload = z.infer<ReturnType<typeof makeWritePayloadSchema>>;
+isTypeEqual<InferredPayload["type"], WritePayload<any>["type"]>(true);
+
+// The property-targeting arms carry no loosely-typed field, so they are held to full structural equality.
+isTypeEqual<
+  Extract<InferredPayload, { type: "set_property_undefined" }>,
+  Extract<WritePayload<any>, { type: "set_property_undefined" }>
+>(true);
+isTypeEqual<
+  Extract<InferredPayload, { type: "delete_property" }>,
+  Extract<WritePayload<any>, { type: "delete_property" }>
+>(true);
 
 function checkArrayScopeAction(
   schema: z.ZodTypeAny,
@@ -192,6 +279,20 @@ export const WriteErrorSchema = z.discriminatedUnion("type", [
     type: z.literal("invalid_data_value"),
     data_path: z.string().optional(),
     reason: z.enum(["non_finite", "malformed"]),
+    message: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("invalid_property_path"),
+    path: z.string(),
+    reason: z.enum([
+      "disallowed_segment",
+      "unknown_path",
+      "traverses_array",
+      "object_array_property",
+      "not_undefinable",
+      "not_optional",
+      "primary_key",
+    ]),
   }),
   z.object({
     type: z.literal("blocked"),

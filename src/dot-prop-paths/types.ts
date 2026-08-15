@@ -241,6 +241,121 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
 
 
 
+/* ----------------------------------------------------------------------------
+Paths to properties that may be cleared (set to `undefined`) or removed (key deleted).
+
+Clearing and removing are different permissions, and `exactOptionalPropertyTypes` is what makes the
+difference real: `{x?: string}` may lose its key but may never hold `undefined`, while
+`{y: string | undefined}` may hold `undefined` but may never lose its key. A type that offered one
+union for both would license writes the declared shape forbids, so there are two.
+---------------------------------------------------------------------------- */
+
+/** Which permission a key must hold to be offered as a leaf: hold `undefined`, or be absent entirely. */
+type PropertyPermission = 'undefinable' | 'optional';
+
+/**
+ * Whether key `K` of `T` holds the permission `Mode` names.
+ *
+ * `undefinable` asks whether an object supplying `undefined` for `K` still satisfies `T`;
+ * `optional` asks whether an object supplying nothing for `K` still satisfies `T`. Both questions are
+ * put to `Pick<T, K>` so the key's own modifier (`?`) is part of the answer — that modifier is exactly
+ * what `exactOptionalPropertyTypes` gives independent meaning to.
+ *
+ * A string index signature answers both questions through the same two tests: its value type decides
+ * `undefinable`, and an empty object always satisfies an index signature, so it is always `optional`.
+ */
+type KeyHasPermission<T, K extends keyof T, Mode extends PropertyPermission> =
+    Mode extends 'undefinable'
+        ? ({ [P in K]: undefined } extends Pick<T, K> ? true : false)
+        : ({} extends Pick<T, K> ? true : false);
+
+/**
+ * Whether a value is an array of objects — the one leaf shape neither permission offers.
+ *
+ * Clearing or removing such a key discards a whole collection of objects in a single write, which is
+ * the same hazard that keeps object arrays out of `NonObjectArrayProperty`. Arrays of scalars carry no
+ * such hazard and stay in. `NonNullable` is applied first so an optional or nullable array is judged by
+ * the array it holds, and the element test is deliberately non-distributive: a mixed array
+ * (`(string | {a: 1})[]`) carries objects and so counts as one.
+ */
+type IsObjectArrayValue<V> = NonNullable<V> extends Array<infer U> ? ([U] extends [Scalar] ? false : true) : false;
+
+/** The rendered segment for key `K`, or `never` when `K` does not qualify as a leaf under `Mode`. */
+type OfferedLeafSegment<T, K extends keyof T, Mode extends PropertyPermission, Segment extends string> =
+    IsObjectArrayValue<T[K]> extends true
+        ? never
+        : (KeyHasPermission<T, K, Mode> extends true ? Segment : never);
+
+/**
+ * Every dot-prop path on `T` whose leaf key holds the permission `Mode` names.
+ *
+ * Built like {@link Path}: object depth is bounded by `Depth`, traversal through index signatures is
+ * bounded by the separate `ISD` budget, keys render through `EscapeSegment`, and a key ending in a
+ * backslash is offered as a leaf only (no spelling can reach its children).
+ *
+ * Two rules distinguish it from `Path`. A key that fails the permission is still traversed — a required
+ * object can perfectly well hold an optional leaf — it is simply not offered as a leaf itself. And
+ * arrays are never traversed: an element is addressed by scoping into the array, not by a path through
+ * it, so an array value terminates the walk.
+ */
+type PropertyPermissionPath<T, Mode extends PropertyPermission, Depth extends number = 6, ISD extends number = 2> =
+    Depth extends 0 ? never : T extends Array<any>
+    ? never
+    : T extends object
+    ? {
+        [K in keyof T]-?: K extends string | number
+        ? string extends K
+            ? ISD extends 0
+                ? OfferedLeafSegment<T, K, Mode, `${string & K}`> // Index-sig budget exhausted: leaf only, no recursion
+                : OfferedLeafSegment<T, K, Mode, `${string & K}`> | `${string & K}.${PropertyPermissionPath<NonNullable<T[K]>, Mode, ISD, Prev[ISD]>}`
+            : number extends K
+                ? never // Numeric index sig: not useful for dot-prop paths
+                : OfferedLeafSegment<T, K, Mode, `${EscapeSegment<string & K>}`> | (K extends `${string}\\` ? never : `${EscapeSegment<string & K>}.${PropertyPermissionPath<NonNullable<T[K]>, Mode, Prev[Depth], ISD>}`)
+        : never;
+    }[keyof T]
+    : never;
+
+/**
+ * Union of every dot-prop path on `T` whose value is allowed to be `undefined`.
+ *
+ * These are the properties a write may CLEAR: the key stays present, its value becomes `undefined`.
+ * A key qualifies when its declared type admits `undefined` — `{y: string | undefined}` and
+ * `{z?: string | undefined}` (the shape Zod's `.optional()` produces) both do, while `{x?: string}`
+ * does not, because under `exactOptionalPropertyTypes` an optional key may be absent but may not hold
+ * `undefined`.
+ *
+ * @example
+ * type Row = { id: string; nickname?: string | undefined; profile: { bio: string | undefined } };
+ * type Clearable = DotPropPathToUndefinableProperty<Row>; // 'nickname' | 'profile.bio'
+ *
+ * @remarks
+ * Paths never traverse an array, and a leaf holding an array of objects is never offered — the same
+ * prohibition {@link NonObjectArrayProperty} applies to whole-array updates. Arrays of scalars are
+ * offered as leaves. Keys holding a literal dot are spelled in the escaped grammar (`rank\.value`).
+ */
+export type DotPropPathToUndefinableProperty<T, ISD extends number = 2> = PropertyPermissionPath<T, 'undefinable', 6, ISD>;
+
+/**
+ * Union of every dot-prop path on `T` whose key is allowed to be absent.
+ *
+ * These are the properties a write may REMOVE entirely. A key qualifies when it is declared optional
+ * (`{x?: string}`), or when it belongs to an index signature (`Record<string, …>`), where any key is
+ * free to be missing. A required key never qualifies — not even one whose value admits `undefined`,
+ * since `{y: string | undefined}` promises the key is there.
+ *
+ * @example
+ * type Row = { id: string; nickname?: string; meta: Record<string, number> };
+ * // `meta` itself is required, but any key inside the record is free to be missing.
+ * type Removable = DotPropPathToOptionalProperty<Row>; // 'nickname' | `meta.${string}`
+ *
+ * @remarks
+ * Paths never traverse an array, and a leaf holding an array of objects is never offered — the same
+ * prohibition {@link NonObjectArrayProperty} applies to whole-array updates. Arrays of scalars are
+ * offered as leaves. Keys holding a literal dot are spelled in the escaped grammar (`rank\.value`).
+ */
+export type DotPropPathToOptionalProperty<T, ISD extends number = 2> = PropertyPermissionPath<T, 'optional', 6, ISD>;
+
+
 export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? EnsureRecord<ElementType> : never;
 
 

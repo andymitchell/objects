@@ -1,7 +1,5 @@
 import { mergeWith } from "lodash-es";
 import type { WritePayloadCreate, WritePayloadUpdate } from "../../types.ts";
-import deleteUnusedKeysFromDestination from "../helpers/deleteUnusedKeysFromDestination.ts";
-import { VALUE_TO_DELETE_KEY } from "../../helpers.ts";
 
 
 const writeLww: {
@@ -19,10 +17,8 @@ const writeLww: {
         }
         
         if (!writeActionPayload.method || writeActionPayload.method === 'merge') {
-            //merge(target, writeActionPayload.data) // MUTATION
-
-            // Don't merge arrays, because weird things happen. E.g. an update of ['z'] to a property that's currently ['1', '2'] would end up as ['z', '2'], which *no one would reasonably expect* (i.e. terrible DX). 
-            // Go with what a developer might expect: if you set an array, the whole array is set. 
+            // Don't merge arrays, because weird things happen. E.g. an update of ['z'] to a property that's currently ['1', '2'] would end up as ['z', '2'], which *no one would reasonably expect* (i.e. terrible DX).
+            // Go with what a developer might expect: if you set an array, the whole array is set.
             mergeWith(target, writeActionPayload.data, (objValue, srcValue) => { // MUTATION
                 if( Array.isArray(srcValue) ) {
                     return srcValue;
@@ -31,7 +27,6 @@ const writeLww: {
         } else {
             Object.assign(target, writeActionPayload.data); // MUTATION
         }
-        deleteUnusedKeysFromDestination(writeActionPayload.data, target, VALUE_TO_DELETE_KEY);
     }
 }
 

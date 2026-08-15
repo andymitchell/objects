@@ -51,6 +51,11 @@ function extractFromPayload<T extends Record<string, any>>(
             // delivers a NUMBER at runtime. String() covers that; a fractional key like 3.5
             // stringifies with a dot, which the escape then renders as the single key `3\.5`.
             return [joinKey(String(payload.path))];
+        case 'set_property_undefined':
+        case 'delete_property':
+            // `join`, not `joinKey`: unlike push/pull/inc, whose `path` is a single raw KEY that still needs
+            // escaping, these carry a whole path already written in the escaped grammar.
+            return [join(payload.path as string)];
         case 'array_scope':
             // scope: same keyof-derived widening as path above.
             return extractFromPayload(payload.action, join(payload.scope as string));

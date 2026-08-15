@@ -7,6 +7,8 @@ import type {
   WritePayloadUpdate,
   WritePayloadDelete,
   WritePayloadArrayScope,
+  WritePayloadSetPropertyUndefined,
+  WritePayloadDeleteProperty,
   WriteError,
   WriteErrorContext,
   WriteAffectedItem,
@@ -65,6 +67,23 @@ type Flat = {
   text?: string;
   count?: number;
   tags?: string[];
+};
+
+/**
+ * Shape whose properties differ in exactly which permission they carry, so the two property-targeting
+ * verbs can be shown to offer different paths. Under `exactOptionalPropertyTypes` an optional key and an
+ * undefinable value are separate permissions, and this fixture holds one of each plus one of both.
+ */
+type Profile = {
+  id: string;
+  removableOnly?: string;
+  clearableOnly: string | undefined;
+  both?: string | undefined;
+  nested: { note?: string | undefined };
+  bag: Record<string, string | undefined>;
+  "rank.value"?: string | undefined;
+  rows: { rid: string }[];
+  tags?: string[] | undefined;
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -194,6 +213,195 @@ describe("1. WritePayload<T> construction", () => {
         scope: "subtasks.items",
         action: { type: "create", data: { iid: "i1", value: 42 } },
         where: { id: "1" },
+      };
+    });
+  });
+
+  describe("1.5 Property-targeting payloads (clear a value, remove a key)", () => {
+    it("clears a property whose declared type admits undefined", () => {
+      const _clear: WritePayloadSetPropertyUndefined<Profile> = {
+        type: "set_property_undefined",
+        path: "clearableOnly",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses to clear a property that may only be absent, never undefined", () => {
+      const _clear: WritePayloadSetPropertyUndefined<Profile> = {
+        type: "set_property_undefined",
+        // @ts-expect-error: `removableOnly?: string` may lose its key, but may not hold undefined
+        path: "removableOnly",
+        where: { id: "1" },
+      };
+    });
+
+    it("removes a property declared optional", () => {
+      const _remove: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "removableOnly",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses to remove a property the shape always carries", () => {
+      const _remove: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        // @ts-expect-error: `clearableOnly: string | undefined` promises the key is present
+        path: "clearableOnly",
+        where: { id: "1" },
+      };
+    });
+
+    it("a property that is both optional and undefinable is offered to both verbs", () => {
+      const _clear: WritePayloadSetPropertyUndefined<Profile> = {
+        type: "set_property_undefined",
+        path: "both",
+        where: { id: "1" },
+      };
+      const _remove: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "both",
+        where: { id: "1" },
+      };
+    });
+
+    it("reaches a nested property, a record key, and a key holding a literal dot", () => {
+      const _nested: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "nested.note",
+        where: { id: "1" },
+      };
+      const _record: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "bag.anything",
+        where: { id: "1" },
+      };
+      const _dotted: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "rank\\.value",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses a path that travels through an array", () => {
+      const _remove: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        // @ts-expect-error: array contents are edited by scoping into the array
+        path: "rows.rid",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses a leaf holding an array of objects, while allowing one holding scalars", () => {
+      const _objects: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        // @ts-expect-error: discarding a whole collection of objects is not expressible
+        path: "rows",
+        where: { id: "1" },
+      };
+      const _scalars: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "tags",
+        where: { id: "1" },
+      };
+    });
+
+    it("rejects a where-filter with unknown keys, like every other verb", () => {
+      const _remove: WritePayloadDeleteProperty<Profile> = {
+        type: "delete_property",
+        path: "removableOnly",
+        // @ts-expect-error: 'fake' is not a key of Profile
+        where: { fake: "bad" },
+      };
+    });
+
+    it("both verbs are members of the payload union", () => {
+      const _payloads: WritePayload<Profile>[] = [
+        { type: "set_property_undefined", path: "both", where: { id: "1" } },
+        { type: "delete_property", path: "both", where: { id: "1" } },
+      ];
+    });
+  });
+
+  // Annotated with the SPECIFIC payload types throughout: `WritePayload<Profile>` widens to `unknown` for a
+  // shape carrying optional properties, which would make every positive assertion here vacuous.
+  describe("1.6 An explicit undefined value in written data", () => {
+    /** A field whose declared type includes `null`, so the contrast between a stored `null` and a refused `undefined` is expressible. */
+    type Marked = { id: string; note: string | null };
+
+    it("is refused in an update, whichever permission the field carries", () => {
+      const _clearable: WritePayloadUpdate<Profile> = {
+        type: "update",
+        // @ts-expect-error: undefined is not a value an action can carry — clear the field with set_property_undefined
+        data: { clearableOnly: undefined },
+        where: { id: "1" },
+      };
+      const _both: WritePayloadUpdate<Profile> = {
+        type: "update",
+        // @ts-expect-error: undefined is not a value an action can carry — remove the field with delete_property
+        data: { both: undefined },
+        where: { id: "1" },
+      };
+      const _removable: WritePayloadUpdate<Profile> = {
+        type: "update",
+        // @ts-expect-error: undefined is not a value an action can carry — remove the field with delete_property
+        data: { removableOnly: undefined },
+        where: { id: "1" },
+      };
+    });
+
+    it("is refused in a create, where the remedy is to omit the key", () => {
+      const _create: WritePayloadCreate<Profile> = {
+        type: "create",
+        // @ts-expect-error: undefined is not a value an action can carry — omit 'both' instead
+        data: { id: "1", clearableOnly: "x", both: undefined, nested: {}, bag: {}, rows: [] },
+      };
+    });
+
+    it("leaves omission and null alone — they are how an update says 'untouched' and 'no value'", () => {
+      const _untouched: WritePayloadUpdate<Marked> = {
+        type: "update",
+        data: {},
+        where: { id: "1" },
+      };
+      const _nulled: WritePayloadUpdate<Marked> = {
+        type: "update",
+        data: { note: null },
+        where: { id: "1" },
+      };
+      const _created: WritePayloadCreate<Marked> = {
+        type: "create",
+        data: { id: "1", note: null },
+      };
+    });
+
+    it("keeps every key of a create required, so a field that can hold no value still has to be given one", () => {
+      const _create: WritePayloadCreate<Profile> = {
+        type: "create",
+        // @ts-expect-error: 'clearableOnly' is a required key, and a create defines the whole item
+        data: { id: "1", nested: {}, bag: {}, rows: [] },
+      };
+    });
+
+    it("keeps an optional key omittable, so a create need not invent a value for it", () => {
+      const _create: WritePayloadCreate<Profile> = {
+        type: "create",
+        data: { id: "1", clearableOnly: "x", nested: {}, bag: {}, rows: [] },
+      };
+    });
+
+    // KNOWN LIMITATION, pinned deliberately: the exclusion reaches the top level of `data` only. Making it
+    // recursive costs instantiation depth and stops a caller assigning their own row-typed value straight in.
+    // The runtime value gate is the authority, and it rejects these at any depth before anything is stored.
+    it("compiles a nested undefined, which the runtime gate is what refuses", () => {
+      const _updateNested: WritePayloadUpdate<Profile> = {
+        type: "update",
+        data: { nested: { note: undefined } },
+        where: { id: "1" },
+      };
+      const _createNested: WritePayloadCreate<Profile> = {
+        type: "create",
+        data: { id: "1", clearableOnly: "x", nested: { note: undefined }, bag: { anything: undefined }, rows: [] },
       };
     });
   });
@@ -350,6 +558,8 @@ describe("4. WriteError discriminated union", () => {
         case "invalid_scope":
           break;
         case "invalid_data_value":
+          break;
+        case "invalid_property_path":
           break;
         default: {
           // If all cases are handled, this should resolve to never
@@ -550,6 +760,95 @@ describe("8. Schema <-> Type alignment", () => {
       const action = scopedAction("constructor", { type: "update", data: {}, where: { kid: "k1" } });
       expect(() => s.safeParse(action)).not.toThrow();
       expect(s.safeParse(action).success).toBe(false);
+    });
+  });
+
+  // The parse gate must agree with the write engine on which properties a caller may clear or remove: any
+  // path the engine would reject as invalid_property_path must fail safeParse here — as a value, never a
+  // throw — so a store gating on the schema admits nothing the engine will refuse.
+  describe("makeWriteActionSchema rejects an unwritable property path as a parse failure, never a throw", () => {
+    const RowSchema = z.object({
+      id: z.string(),
+      nickname: z.string().optional(),
+      profile: z.object({ note: z.string().optional() }),
+      bag: z.record(z.string(), z.string().optional()),
+      rows: z.array(z.object({ rid: z.string() })),
+    });
+    const actionSchema = makeWriteActionSchema(RowSchema);
+    const propertyAction = (type: string, path: string) => ({
+      type: "write",
+      ts: 1,
+      uuid: "u",
+      payload: { type, path, where: { id: "1" } },
+    });
+
+    it.each([
+      "constructor",
+      "bag.",
+      "nonexistent",
+      "id",
+      "rows.rid",
+      "rows",
+    ])("fails safeParse for delete_property path %j without throwing", (path) => {
+      const action = propertyAction("delete_property", path);
+      expect(() => actionSchema.safeParse(action)).not.toThrow();
+      expect(actionSchema.safeParse(action).success).toBe(false);
+    });
+
+    it("accepts the paths the engine will write through, at every depth", () => {
+      for (const path of ["nickname", "profile.note", "bag.anything"]) {
+        expect(actionSchema.safeParse(propertyAction("delete_property", path)).success).toBe(true);
+        expect(actionSchema.safeParse(propertyAction("set_property_undefined", path)).success).toBe(true);
+      }
+    });
+
+    it("holds each verb to its own permission on the same schema", () => {
+      // The record's values are optional, so its keys may be cleared; a plain required field may be neither.
+      expect(actionSchema.safeParse(propertyAction("set_property_undefined", "id")).success).toBe(false);
+      expect(actionSchema.safeParse(propertyAction("delete_property", "id")).success).toBe(false);
+    });
+
+    it("leaves the path to the engine when no row schema is supplied", () => {
+      // Without a schema there is nothing to resolve against, so the payload parses and the engine judges it.
+      const untyped = makeWriteActionSchema();
+      expect(untyped.safeParse(propertyAction("delete_property", "anything.at.all")).success).toBe(true);
+    });
+  });
+
+  describe("makeWriteActionSchema rejects an explicit undefined in written data", () => {
+    const RowSchema = z.object({
+      id: z.string(),
+      nickname: z.string().optional(),
+      profile: z.object({ note: z.string().optional() }),
+    });
+    const actionSchema = makeWriteActionSchema(RowSchema);
+    const dataAction = (payload: unknown) => ({ type: "write", ts: 1, uuid: "u", payload });
+
+    it("refuses it in an update, which the row schema on its own would admit", () => {
+      // `nickname` is declared optional, so the row schema parses the undefined happily — the gate is what refuses it.
+      expect(RowSchema.partial().safeParse({ nickname: undefined }).success).toBe(true);
+      expect(actionSchema.safeParse(dataAction({ type: "update", data: { nickname: undefined }, where: { id: "1" } })).success).toBe(false);
+    });
+
+    it("refuses it in a create", () => {
+      expect(actionSchema.safeParse(dataAction({ type: "create", data: { id: "1", nickname: undefined, profile: {} } })).success).toBe(false);
+    });
+
+    it("refuses it at any depth", () => {
+      expect(actionSchema.safeParse(dataAction({ type: "update", data: { profile: { note: undefined } }, where: { id: "1" } })).success).toBe(false);
+    });
+
+    it("refuses it with no row schema too, because the fault is in the value rather than the shape", () => {
+      const untyped = makeWriteActionSchema();
+      expect(untyped.safeParse(dataAction({ type: "update", data: { anything: undefined }, where: { id: "1" } })).success).toBe(false);
+    });
+
+    it("accepts the same data with the key omitted, and with a null value", () => {
+      expect(actionSchema.safeParse(dataAction({ type: "update", data: {}, where: { id: "1" } })).success).toBe(true);
+      expect(actionSchema.safeParse(dataAction({ type: "update", data: { nickname: "ann" }, where: { id: "1" } })).success).toBe(true);
+
+      const NullableRowSchema = z.object({ id: z.string(), note: z.string().nullable() });
+      expect(makeWriteActionSchema(NullableRowSchema).safeParse(dataAction({ type: "update", data: { note: null }, where: { id: "1" } })).success).toBe(true);
     });
   });
 

@@ -9,9 +9,11 @@
  * serialisation boundary (e.g. a stacking ICollection forwarding a write over `fetch`, or recording a write's
  * `payload` in an idempotency ledger in JSON-roundtripped form).
  *
- * `undefined` is the one position-dependent case: in a write-payload *value* it is permitted (an absent key
- * reads back as `undefined`, so it round-trips as "missing"); in a `where` operand it is excluded (`JSON.stringify`
- * drops the key, degrading `{ field: undefined }` to a match-all `{}`). Callers select via `flagUndefined`.
+ * `undefined` is the one position-dependent case, because what a dropped key degrades INTO differs by position:
+ * a `where` operand becomes a match-all (`{ field: undefined }` → `{}`, a wider match set) and a written value
+ * becomes an untouched key (a narrower write). Both are silent changes of meaning, so both gates exclude it; a
+ * position where an absent key is genuinely equivalent — a list of items already compared by deep equality —
+ * does not. Callers select via `flagUndefined`.
  *
  * Why a single walk: the two gates must agree on what "JSON-safe" means, so the predicate is defined once here
  * — a divergence would let a value pass one boundary and corrupt at the other.
@@ -21,15 +23,25 @@
 export type NonJsonValueReason = "non_finite" | "malformed";
 
 /** One non-serialisable value found by {@link findNonJsonValues}, located by its dot-path beneath the walk root (`undefined` at the root). */
-export type NonJsonValueIssue = { reason: NonJsonValueReason; path?: string | undefined };
+export type NonJsonValueIssue = {
+  reason: NonJsonValueReason;
+  path?: string | undefined;
+  /**
+   * Set when the offending value is an explicit `undefined` — only reachable under `flagUndefined`. The
+   * reason stays `malformed`, because a caller's error vocabulary should not fork over it; this marks the
+   * one fault whose remedy is about how to spell the intent rather than which JSON type to use.
+   */
+  undefined_value?: true;
+};
 
 /**
  * Collect EVERY value under `value` that cannot losslessly round-trip JSON — the `SerialisableJsonSubset` walk.
  * Schema-independent (walks the live data), so it catches values an open `.passthrough()`/`.loose()` schema
  * admits. Plain objects/arrays are traversed; a non-finite number is `non_finite`; a `Date`/`Map`/`Set`/`RegExp`/
  * `bigint`/`symbol`/`function`/class instance is `malformed`. `null` and JSON primitives are safe. `undefined`
- * is safe unless `flagUndefined` (set by the `where`-operand gate, where a dropped key silently changes the
- * match set). Collects all faults (not first-only) so a caller can surface every one at once.
+ * is safe unless `flagUndefined`, which reports it as `malformed` and additionally marks the issue
+ * `undefined_value` so a caller can offer a remedy specific to it. Collects all faults (not first-only) so a
+ * caller can surface every one at once.
  *
  * @example
  * const out: NonJsonValueIssue[] = [];
@@ -48,7 +60,7 @@ export function findNonJsonValues(
   }
   if (value === null) return;
   if (value === undefined) {
-    if (opts?.flagUndefined) out.push({ reason: "malformed", path: path || undefined });
+    if (opts?.flagUndefined) out.push({ reason: "malformed", path: path || undefined, undefined_value: true });
     return;
   }
   const t = typeof value;

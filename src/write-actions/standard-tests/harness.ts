@@ -64,6 +64,15 @@ export type WriteTestCapabilities = {
      * "dirty" marks are then unobservable, so the tests/oracles that pin engine-report observability relax. DEFAULT false.
      */
     reconstructsOutcomes?: boolean;
+    /**
+     * Impl supports `set_property_undefined` — a property whose key is PRESENT while holding `undefined`. DEFAULT true.
+     *
+     * A store whose rows are themselves JSON cannot hold that state (serialising the row erases the key), so it
+     * conforms by declaring `false` here while still supporting {@link deleteProperty}.
+     */
+    setPropertyUndefined?: boolean;
+    /** Impl supports `delete_property` — taking a property's key away from a row entirely. DEFAULT true. */
+    deleteProperty?: boolean;
 };
 
 export type StandardTestConfig = {
@@ -105,6 +114,8 @@ export const CAPABILITY_DEFAULTS: Required<WriteTestCapabilities> = {
     nonAtomicMultiAction: true,
     atomicPerAction: false,
     reconstructsOutcomes: false,
+    setPropertyUndefined: true,
+    deleteProperty: true,
 };
 
 /** Resolve a single capability flag against the defaults. */

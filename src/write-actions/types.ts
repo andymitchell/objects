@@ -3,6 +3,8 @@ import type {
   ArrayElement,
   ArrayProperty,
   DotPropPathToObjectArraySpreadingArrays,
+  DotPropPathToOptionalProperty,
+  DotPropPathToUndefinableProperty,
   DotPropPathValidArrayValue,
   NonObjectArrayProperty,
   NumberProperty,
@@ -14,17 +16,46 @@ import type {
 import { type PrimaryKeyValue } from "../utils/getKeyValue.js";
 import type { JsonValueCapped } from "@andymitchell/clone-to-json-safe";
 import type { ArrayScopeRejectionReason } from "./arrayScopeResolution.ts";
+import type { PropertyPathRejectionReason } from "./propertyPathResolution.ts";
 
 export type WritePayloadCreate<W extends Record<string, any>> = {
   type: "create";
-  data: W;
+  /**
+   * The whole new item.
+   *
+   * A key may be omitted wherever the shape allows it, but no key may be given the value `undefined`: a write
+   * action is a JSON document, and `JSON.stringify` erases such a key, so the action would define a different
+   * item after a round trip. Omitting the key says the same thing and survives the journey. A field whose type
+   * is `string | undefined` therefore has to be given a real value here — its empty state belongs to
+   * `set_property_undefined`, once the item exists.
+   *
+   * Only the top level of this restriction is expressed in the type. A nested `undefined` still compiles; the
+   * write is rejected at runtime, at any depth, before anything is stored.
+   */
+  data: { [K in keyof W]: Exclude<W[K], undefined> };
 };
 export type WritePayloadUpdate<
   W extends Record<string, any>,
   WF extends Record<string, any> = W,
 > = {
   type: "update";
-  data: Partial<Pick<W, NonObjectArrayProperty<W>>>; // Updating whole arrays is forbidden, use array_scope instead. Why? This would require the whole array to be 'set', even if its likely only a tiny part needs to change, and that makes it very hard for CRDTs to reconcile what to overwrite. One solution could be enable this by allowing it to 'diff' it against the client's current cached version to see what has changed, and convert it into array_scope actions internally. The downside, other than an additional layer of uncertainty of how a bug might sneak in (e.g. if cache is somehow not as expected at point of write), is it forces the application code to start editing arrays before passing it to an 'update' rather than directly describing the change... it's more verbose. (Also related: #VALUE_TO_DELETE_KEY).
+  /**
+   * The fields to change on every matched item. Omitting a key leaves it untouched.
+   *
+   * No key may be given the value `undefined`. A write action is a JSON document, and `JSON.stringify` erases
+   * such a key, so an update carrying one would arrive as a request to change nothing at all. Clearing a
+   * property's value is `set_property_undefined` and removing it is `delete_property` — both name the intention
+   * outright, and both survive serialisation.
+   *
+   * Only the top level of that restriction is expressed in the type. A nested `undefined` still compiles; the
+   * write is rejected at runtime, at any depth, before anything is stored.
+   *
+   * A key holding an array of objects is not offered. Setting one would replace the array wholesale, which
+   * asks the caller to edit arrays before describing the change and leaves a CRDT with no way to tell an
+   * intentional overwrite from a stale cache; `array_scope` describes the change to individual elements
+   * instead. A scalar array can be set, because replacing it carries no such ambiguity.
+   */
+  data: { [K in NonObjectArrayProperty<W>]?: Exclude<W[K], undefined> };
   where: WhereFilterDefinition<WF>;
   method?: UpdatingMethod;
 };
@@ -98,6 +129,90 @@ export type WritePayloadInc<
   where: WhereFilterDefinition<WF>;
 };
 
+/* ─── Property-targeting verbs: clearing a value, and removing a key ───
+ *
+ * A write action is a JSON document, and JSON has no `undefined` — `JSON.stringify({x: undefined})` is
+ * `"{}"`, so a payload carrying it would mean something different after a round trip. An `update` is also
+ * partial by omission, which leaves "remove this key" with no spelling at all. These two verbs give both
+ * intentions a name that survives serialisation.
+ *
+ * They differ in exactly one respect, and it is a real one: `set_property_undefined` leaves the key present
+ * holding `undefined`, while `delete_property` takes the key away. Under `exactOptionalPropertyTypes` those
+ * are separate permissions on a type, and `'x' in item` and `Object.keys(item)` tell them apart at runtime.
+ *
+ * Both `path`s use the escaped dot-prop grammar (`rank\.value` is one key named `rank.value`). A path may
+ * cross nested objects and records but never an array — an array's contents are edited by scoping into it
+ * with `array_scope`, inside which these verbs work on each element. A leaf holding an array of objects is
+ * not offered, for the same reason `update` refuses to replace one.
+ */
+
+/**
+ * Clears one property's value on every matched item: the key stays present, its value becomes `undefined`.
+ *
+ * Use it to say "this property has no value right now" while keeping the property itself part of the item.
+ * `path` names the property, `where` selects the items. Only paths whose declared type admits `undefined`
+ * are offered — a field declared `string | undefined` or `.optional()` qualifies; a plain required field
+ * does not.
+ *
+ * @example
+ * const clearNickname: WritePayloadSetPropertyUndefined<User> = {
+ *   type: 'set_property_undefined',
+ *   path: 'profile.nickname',
+ *   where: { id: '1' },
+ * };
+ *
+ * @remarks
+ * The verb alters an existing property and never creates structure. A key that is already absent is left
+ * absent, and a missing object on the way to it is not materialised; both outcomes are a successful no-op
+ * that leaves the item untouched.
+ *
+ * The difference from {@link WritePayloadDeleteProperty} is invisible to most observers: an `$exists` filter
+ * reads both states as absent, deep equality treats a present-`undefined` key as no key, and serialising the
+ * ITEM to JSON drops it — so across any JSON boundary this verb collapses into `delete_property`. Only
+ * in-memory JavaScript (`in`, `Object.keys`) sees the distinction, which is what makes it worth expressing
+ * when the item stays in the process.
+ */
+export type WritePayloadSetPropertyUndefined<
+  W extends Record<string, any>,
+  WF extends Record<string, any> = W,
+> = {
+  type: "set_property_undefined";
+  /** Escaped dot-prop path to the property whose value is cleared. */
+  path: DotPropPathToUndefinableProperty<W>;
+  where: WhereFilterDefinition<WF>;
+};
+
+/**
+ * Removes one property from every matched item: the key itself is gone afterwards.
+ *
+ * Use it to say "this item has no such property". `path` names the property, `where` selects the items.
+ * Only paths whose key may legally be absent are offered — an optional field or any key of a record
+ * qualifies; a required field does not, because the item would no longer match its own schema.
+ *
+ * @example
+ * const dropNickname: WritePayloadDeleteProperty<User> = {
+ *   type: 'delete_property',
+ *   path: 'profile.nickname',
+ *   where: { id: '1' },
+ * };
+ *
+ * @remarks
+ * The verb alters an existing property and never creates structure. A key that is already absent, or one
+ * whose parent object is missing, is a successful no-op that leaves the item untouched.
+ *
+ * This is the verb to reach for whenever the item is persisted or sent anywhere, because it is the one whose
+ * effect survives JSON — see {@link WritePayloadSetPropertyUndefined} for the distinction between them.
+ */
+export type WritePayloadDeleteProperty<
+  W extends Record<string, any>,
+  WF extends Record<string, any> = W,
+> = {
+  type: "delete_property";
+  /** Escaped dot-prop path to the property that is removed. */
+  path: DotPropPathToOptionalProperty<W>;
+  where: WhereFilterDefinition<WF>;
+};
+
 export type WritePayload<
   T extends Record<string, any>,
   W extends Record<string, any> = T,
@@ -110,12 +225,21 @@ export type WritePayload<
   | WritePayloadAddToSet<W, WF>
   | WritePayloadPush<W, WF>
   | WritePayloadPull<W, WF>
-  | WritePayloadInc<W, WF>;
+  | WritePayloadInc<W, WF>
+  | WritePayloadSetPropertyUndefined<W, WF>
+  | WritePayloadDeleteProperty<W, WF>;
 /**
- * An instruction to modify an object, using CRUD-inspired verbs.
+ * An instruction to modify an object, described as a JSON document rather than performed as a mutation.
  *
- * The only peculiar one is `array_scope` where every nested list can be treated atomically by first targetting/scoping it,
- * then applying the action at that level. It allows more granular behaviour.
+ * The `payload` names one verb and the items it applies to. `create`, `update` and `delete` are the familiar
+ * three; `push`, `pull` and `add_to_set` edit an array property; `inc` moves a number by a relative amount;
+ * and `set_property_undefined`/`delete_property` clear one property's value or remove the property outright.
+ *
+ * `array_scope` is the one that needs explaining. Rather than describing a change to a whole nested list, it
+ * targets the list and applies another payload at that level, so each element is written on its own terms.
+ *
+ * Describing the change rather than making it is what lets an action be built in one place, stored or sent,
+ * and applied in another — so every field has to survive JSON.
  *
  * @example
  * const a:WriteAction<{id:number}> = {
@@ -212,17 +336,39 @@ export type WriteError =
   | {
       /**
        * A written *data* value cannot losslessly round-trip JSON — a non-finite number (`NaN`/`±Infinity`,
-       * which serialises to `null`) or a non-JSON carrier (`bigint`/`symbol`/`function`/`Date`/`Map`/…).
-       * Caught before any mutation; the action is rejected unrecoverably and state is left unchanged.
-       * Distinct from `schema` (a Zod constraint violation on a declared field) and `invalid_filter` (a
-       * `where`-clause fault). A value can pass the Zod schema but still be non-JSON-safe because .passthrough()
-       * and .loose() preserve extra, undeclared fields that the schema would otherwise miss.
+       * which serialises to `null`), a non-JSON carrier (`bigint`/`symbol`/`function`/`Date`/`Map`/…), or an
+       * explicit `undefined` in a create's or update's `data` (the key simply vanishes). Caught before any
+       * mutation; the action is rejected unrecoverably and state is left unchanged. Distinct from `schema` (a
+       * Zod constraint violation on a declared field) and `invalid_filter` (a `where`-clause fault). A value
+       * can pass the Zod schema but still be non-JSON-safe because .passthrough() and .loose() preserve extra,
+       * undeclared fields that the schema would otherwise miss.
        */
       type: "invalid_data_value";
       /** The dot-prop path to the offending value within the payload's data, when one can be singled out. */
       data_path?: string | undefined;
       /** Why the value cannot be persisted as JSON. */
       reason: "non_finite" | "malformed";
+      /**
+       * Guidance for the caller when the fault has a specific remedy, such as the verb that expresses what an
+       * explicit `undefined` was reaching for. Never quotes the offending value, so the error stays safe to log.
+       */
+      message?: string | undefined;
+    }
+  | {
+      /**
+       * The action's `set_property_undefined`/`delete_property` path can never be a valid write target: a
+       * segment is empty or `__proto__`/`prototype`/`constructor`, the schema declares no property there,
+       * the path crosses an array, or the property exists but the schema will not let this verb change it
+       * (a required key cannot be removed; a field that does not store `undefined` cannot be cleared).
+       * Caught before any mutation; the action is rejected unrecoverably and state is left unchanged.
+       * Distinct from `invalid_scope` (which names an array to write INTO) and `invalid_filter` (a `where`
+       * fault): this names the single property being written.
+       */
+      type: "invalid_property_path";
+      /** The rejected path, prefix-joined from the action root when the fault is in a nested `array_scope` (e.g. `children.nope`). */
+      path: string;
+      /** Why the property cannot be written through. */
+      reason: PropertyPathRejectionReason;
     }
   | {
       /** The action did not run: an earlier action in the same batch failed and blocked it. */

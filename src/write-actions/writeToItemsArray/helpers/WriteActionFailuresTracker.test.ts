@@ -310,6 +310,8 @@ describe("accumulating and de-duplicating errors", () => {
     { type: "create_duplicated_key", primary_key: "id" },
     { type: "update_altered_key", primary_key: "id" },
     { type: "invalid_filter", reason: "unknown_field" },
+    { type: "invalid_scope", scope: "children", reason: "unknown_path" },
+    { type: "invalid_property_path", path: "label", reason: "not_optional" },
   ];
 
   test.each(unrecoverableErrors)(

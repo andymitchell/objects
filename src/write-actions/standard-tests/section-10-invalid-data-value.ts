@@ -5,10 +5,11 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
 /**
  * §10: invalid_data_value rejection.
  *
- * A written *value* that cannot losslessly round-trip JSON — a non-finite number (`NaN`/`±Infinity`) or a
- * non-JSON carrier (`bigint`/`Date`/`Map`/`Set`/`function`) — must be caught BEFORE any mutation, so the
- * whole action is rejected unrecoverably and state is untouched. This is distinct from a Zod `schema`
- * violation: the value gate runs even for values a loose schema would accept.
+ * A written *value* that cannot losslessly round-trip JSON — a non-finite number (`NaN`/`±Infinity`), a
+ * non-JSON carrier (`bigint`/`Date`/`Map`/`Set`/`function`), or an explicit `undefined` in a create's or
+ * update's data — must be caught BEFORE any mutation, so the whole action is rejected unrecoverably and state
+ * is untouched. This is distinct from a Zod `schema` violation: the value gate runs even for values a loose
+ * schema would accept.
  *
  * Safe for the validate-where-sync consumer: every `where` here is legitimate; only the *data* is invalid.
  */
@@ -212,10 +213,10 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
             });
         });
 
-        describe('10.5 undefined is the delete sentinel, never invalid', () => {
+        describe('10.5 an explicit undefined value', () => {
 
             // T-10.14
-            test('undefined in update data deletes the key rather than being rejected', async () => {
+            test('undefined in update data is malformed, and the field it named keeps its value', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', text: 'x', count: 5 }],
@@ -223,15 +224,14 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                    expect(r.finalItems[0]).toEqual({ id: '1', count: 5 });
-                    expect('text' in r.finalItems[0]!).toBe(false);
-                }, implName);
+                expectRejectedUnchanged(r, 'malformed', 'text', (f) => {
+                    expect(f[0]).toEqual({ id: '1', text: 'x', count: 5 });
+                    expect('text' in f[0]!).toBe(true);
+                });
             });
 
             // T-10.15
-            test('undefined nested in create data is accepted', async () => {
+            test('undefined nested in create data is malformed at its full path, and nothing is created', async () => {
                 const adapter = createAdapter(FlatWithSubItemsSchema, flatWithSubItemsDdl);
                 const r = await adapter.apply({
                     initialItems: [],
@@ -239,9 +239,7 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                     schema: FlatWithSubItemsSchema,
                     ddl: flatWithSubItemsDdl,
                 });
-                expectOrAcknowledgeUnsupported(r, (r) => {
-                    expect(r.result.ok).toBe(true);
-                }, implName);
+                expectRejectedUnchanged(r, 'malformed', 'sub_items.0.val', (f) => expect(f).toHaveLength(0));
             });
         });
     });

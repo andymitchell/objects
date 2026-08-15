@@ -20,6 +20,7 @@ import { registerDuplicateCreateEdges } from "./section-16-duplicate-create-edge
 import { registerMultiMatchPartialFailure } from "./section-17-multimatch-partial-failure.ts";
 import { registerPrototypeNamedKeys } from "./section-19-prototype-named-keys.ts";
 import { registerInvalidScope } from "./section-20-invalid-scope.ts";
+import { registerPropertyUndefinedDelete } from "./section-21-property-undefined-delete.ts";
 import { runFuzzSection } from "./fuzz.ts";
 
 /**
@@ -30,8 +31,10 @@ import { runFuzzSection } from "./fuzz.ts";
  * observable surface (`result` / `changes` / `finalItems`). A passing implementation behaves uniformly
  * with the reference engine.
  *
- * @param config The caller's `test`/`expect` (so the suite registers under the caller's runner),
- *               the adapter factory, and an optional `implementationName` used in skip diagnostics.
+ * @param config The caller's `test`/`expect` (so the suite registers under the caller's runner), the adapter
+ *               factory, an optional `implementationName` used in skip diagnostics, and optional
+ *               {@link WriteTestCapabilities} declaring which behaviours the implementation supports — each
+ *               one declared unsupported turns its tests into visible skips rather than failures.
  * @example
  * standardTests({ test, expect, createAdapter, implementationName: 'my-store' });
  */
@@ -78,6 +81,7 @@ export function standardTests(config: StandardTestConfig): void {
     registerMultiMatchPartialFailure(ctx);
     registerPrototypeNamedKeys(ctx);
     registerInvalidScope(ctx);
+    registerPropertyUndefinedDelete(ctx);
     runFuzzSection(ctx);
 }
 

@@ -1,7 +1,5 @@
-import type { WritePayloadArrayScope, WritePayloadUpdate, WritePayloadDelete, WritePayloadAddToSet, WritePayloadPush, WritePayloadPull, WritePayloadInc, WriteOutcomeFailed, WriteOutcomeOk, WriteResult, WriteErrorContext } from './types.ts';
+import type { WritePayloadArrayScope, WritePayloadUpdate, WritePayloadDelete, WritePayloadAddToSet, WritePayloadPush, WritePayloadPull, WritePayloadInc, WritePayloadSetPropertyUndefined, WritePayloadDeleteProperty, WriteOutcomeFailed, WriteOutcomeOk, WriteResult, WriteErrorContext } from './types.ts';
 import type { DotPropPathToObjectArraySpreadingArrays } from '../dot-prop-paths/types.ts';
-
-export const VALUE_TO_DELETE_KEY:undefined = undefined; // #VALUE_TO_DELETE_KEY If this is changed to null, change WritePayloadUpdate to.... data: Nullable<Partial<T>>
 
 export function assertWriteArrayScope<T extends Record<string, any>, P extends DotPropPathToObjectArraySpreadingArrays<T> = DotPropPathToObjectArraySpreadingArrays<T>, W extends Record<string, any> = T, WF extends Record<string, any> = T>(action: WritePayloadArrayScope<T, P, W, WF>):WritePayloadArrayScope<T, P, W, WF> {
     return action;
@@ -11,8 +9,21 @@ export function isWriteActionArrayScopePayload<T extends Record<string, any> = R
     return typeof x==='object' && !!x && "type" in x && x.type==='array_scope';
 }
 
-export function isUpdateOrDeleteWritePayload<T extends Record<string, any>>(x: unknown): x is WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T> | WritePayloadAddToSet<T> | WritePayloadPush<T> | WritePayloadPull<T> | WritePayloadInc<T> {
-    return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete' || x.type==='add_to_set' || x.type==='push' || x.type==='pull' || x.type==='inc');
+/**
+ * Narrows a payload to the variants that act on EXISTING items — everything except `create`.
+ *
+ * Those variants all carry a `where`, so they are the ones a writer matches against the items it already holds;
+ * `create` is the odd one out, defining a new item with nothing to match. Narrowing here is what lets a caller
+ * read `payload.where` without re-testing each discriminant.
+ *
+ * @param x - Any value; typically a `WritePayload` whose variant is not yet known.
+ * @returns `true` when `x` carries one of the existing-item discriminants, narrowing it to that union.
+ *
+ * @example
+ * if (isUpdateOrDeleteWritePayload<Row>(payload) && matchJavascriptObject(item, payload.where)) apply(item);
+ */
+export function isUpdateOrDeleteWritePayload<T extends Record<string, any>>(x: unknown): x is WritePayloadUpdate<T> | WritePayloadDelete<T> | WritePayloadArrayScope<T> | WritePayloadAddToSet<T> | WritePayloadPush<T> | WritePayloadPull<T> | WritePayloadInc<T> | WritePayloadSetPropertyUndefined<T> | WritePayloadDeleteProperty<T> {
+    return typeof x==='object' && !!x && 'type' in x && (x.type==='update' || x.type==='array_scope' || x.type==='delete' || x.type==='add_to_set' || x.type==='push' || x.type==='pull' || x.type==='inc' || x.type==='set_property_undefined' || x.type==='delete_property');
 }
 
 /**

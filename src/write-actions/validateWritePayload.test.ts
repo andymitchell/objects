@@ -184,12 +184,63 @@ describe("validateWritePayloadValues — do a payload's WRITTEN VALUES round-tri
         });
     });
 
+    describe("rejects an explicit undefined in the data a create or update writes", () => {
+        it("a cleared field in an update is reported at its path, because JSON would drop the key entirely", () => {
+            const issues = validateWritePayloadValues({ type: "update", data: { label: undefined }, where: { id: "1" } });
+            expect(issues).toHaveLength(1);
+            expect(issues[0]!.reason).toBe("malformed");
+            expect(issues[0]!.path).toBe("label");
+        });
+
+        it("an update points the caller at the verbs that express clearing and removal", () => {
+            const [issue] = validateWritePayloadValues({ type: "update", data: { label: undefined }, where: { id: "1" } });
+            expect(issue!.message).toContain("set_property_undefined");
+            expect(issue!.message).toContain("delete_property");
+        });
+
+        it("a create points the caller at omitting the key, since there is nothing yet to clear", () => {
+            const [issue] = validateWritePayloadValues({ type: "create", data: { id: "1", label: undefined } });
+            expect(issue!.path).toBe("label");
+            expect(issue!.message).toContain("omit the key");
+            expect(issue!.message).not.toContain("set_property_undefined");
+        });
+
+        it("the guidance says nothing about the data itself, so an error stays safe to log", () => {
+            const [sparse] = validateWritePayloadValues({ type: "update", data: { label: undefined }, where: { id: "1" } });
+            const [alongsideSecrets] = validateWritePayloadValues({
+                type: "update",
+                data: { label: undefined, api_key: "sk-live-9f3", email: "someone@example.com" },
+                where: { id: "1" },
+            });
+            expect(alongsideSecrets!.message).toBe(sparse!.message);
+            expect(alongsideSecrets!.message).not.toContain("sk-live-9f3");
+            expect(alongsideSecrets!.message).not.toContain("someone@example.com");
+        });
+
+        it("is caught at any depth, including inside an array, where the type system stops looking", () => {
+            expect(validateWritePayloadValues({ type: "update", data: { meta: { deep: { label: undefined } } }, where: { id: "1" } }))
+                .toMatchObject([{ reason: "malformed", path: "meta.deep.label" }]);
+            expect(validateWritePayloadValues({ type: "create", data: { id: "1", rows: [{ rid: "r1", label: undefined }] } }))
+                .toMatchObject([{ reason: "malformed", path: "rows.0.label" }]);
+        });
+
+        it("is caught inside an array_scope's nested create too", () => {
+            const payload = vp({ type: "array_scope", scope: "children", action: { type: "create", data: { cid: "c1", label: undefined } }, where: { id: "1" } });
+            expect(validateWritePayloadValues(payload)).toMatchObject([{ reason: "malformed", path: "label" }]);
+        });
+
+        it("leaves the list-valued verbs alone — their items are compared by deep equality, which reads an absent key the same way", () => {
+            expect(validateWritePayloadValues({ type: "push", path: "rows", items: [{ rid: "r1", label: undefined }], where: { id: "1" } })).toEqual([]);
+            expect(validateWritePayloadValues({ type: "add_to_set", path: "rows", items: [{ rid: "r1", label: undefined }], unique_by: "deep_equals", where: { id: "1" } })).toEqual([]);
+        });
+    });
+
     describe("accepts JSON-safe payloads, incl. round-trip-stable edge values", () => {
         it("a clean create has no issues", () => {
             expect(validateWritePayloadValues({ type: "create", data: { id: "1", n: 3, tags: ["a", "b"], meta: { ok: true } } })).toEqual([]);
         });
-        it("-0, undefined and null all round-trip safely", () => {
-            expect(validateWritePayloadValues({ type: "create", data: { id: "1", z: -0, u: undefined, nil: null } })).toEqual([]);
+        it("-0 and null both round-trip safely", () => {
+            expect(validateWritePayloadValues({ type: "create", data: { id: "1", z: -0, nil: null } })).toEqual([]);
         });
         it("delete and pull carry no written values, so never produce issues", () => {
             expect(validateWritePayloadValues({ type: "delete", where: { id: "1" } })).toEqual([]);

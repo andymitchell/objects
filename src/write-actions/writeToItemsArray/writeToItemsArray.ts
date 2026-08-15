@@ -10,12 +10,17 @@ import safeKeyValue, { type PrimaryKeyGetter, makePrimaryKeyGetter } from "../..
 import type { WriteToItemsArrayChanges, WriteToItemsArrayOptions, WriteToItemsArrayResult, ItemHash } from "./types.ts";
 import type { DDL, RootListRules } from "../../ddl/types.ts";
 import writeLww from "./writeStrategies/lww.ts";
-import getArrayScopeItemAction from "./helpers/getArrayScopeItemAction.ts";
+import getArrayScopeItemAction, { getArrayScopeSchemaAndDDL } from "./helpers/getArrayScopeItemAction.ts";
 import { z } from "zod";
 import WriteActionFailuresTracker from "./helpers/WriteActionFailuresTracker.ts";
 import equivalentCreateOccurs from "./helpers/equivalentCreateOccurs.ts";
 import { type Draft, current, isDraft } from "immer";
-import { applyAddToSet, applyPush, applyPull, applyInc } from "./helpers/mutations/index.ts";
+import {
+    applyAddToSet, applyPush, applyPull, applyInc,
+    probeSetPropertyUndefined, commitSetPropertyUndefined, probeDeleteProperty, commitDeleteProperty,
+} from "./helpers/mutations/index.ts";
+import { parseDotPropPathSegments } from "../../dot-prop-paths/dotPropPathSegments.ts";
+import { joinDotpropPath } from "../../dot-prop-paths/joinDotpropPath.ts";
 
 
 
@@ -244,7 +249,21 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
     // (validateWritePayloadSchema) — here we only gate per-write values, so the compile never throws.
     const validateWritePayload = compileValidateWritePayload(schema, { skipSchemaCheck: true });
 
-    const existingIds = new Set(wipItems.map(item => safeKeyValue(item[rules.primary_key])));
+    // The engine locates every item by its primary key — to match a `where`, to report an outcome, to
+    // reconcile the returned changes — so an item that carries no usable one cannot be written to at all.
+    // That is a fault in the supplied items rather than in any single action, and it is settled here as a
+    // failed result rather than a throw, so a caller handling ordinary write failures handles this one too.
+    // A falsy value counts as no key: an empty string is how a missing key is reported downstream, so `''`
+    // and `0` are indistinguishable from absent by the time anything else sees them.
+    const itemMissingPrimaryKey = wipItems.some(item => !item[rules.primary_key]);
+    if( itemMissingPrimaryKey ) {
+        // Recorded against the first action so the batch settles exactly as any other failure does: the
+        // shared tail below marks every later action blocked and returns no changes. The error carries no
+        // item body — an item with no key has no locator to report it by.
+        failureTracker.reportActionError(writeActions[0]!, {type: 'missing_key', primary_key: rules.primary_key});
+    }
+
+    const existingIds = new Set(itemMissingPrimaryKey? [] : wipItems.map(item => safeKeyValue(item[rules.primary_key])));
 
     // Now go through the actions
     writeActions = [...writeActions];
@@ -261,7 +280,7 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
         const dataIssues = validateWritePayload(action.payload as WritePayload<any>);
         if( dataIssues.length>0 ) {
             const issue = dataIssues[0]!;
-            failureTracker.reportActionError(action, { type: 'invalid_data_value', reason: issue.reason, data_path: issue.path });
+            failureTracker.reportActionError(action, { type: 'invalid_data_value', reason: issue.reason, data_path: issue.path, message: issue.message });
             continue;
         }
 
@@ -325,12 +344,13 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 failureTracker.report(action, action.payload.data, {type: 'missing_key', primary_key: rules.primary_key});
             }
         } else {
-            // Preflight the action's `where` filters and `array_scope` scopes before touching any item: static
-            // schema validation across the whole action tree (own `where`, every `array_scope` scope and nested
-            // `action.where`, `pull` object `items_where`) plus a runtime throw-safety dry-run. An invalid
-            // filter matches nothing and an unwritable scope can never reach its target — neither can succeed on
-            // retry — so the action is rejected unrecoverably (`invalid_filter`/`invalid_scope`) and mutates
-            // nothing, which keeps a throw-prone filter or scope from committing a partial change. Validating
+            // Preflight the action's `where` filters and write targets before touching any item: static schema
+            // validation across the whole action tree (own `where`, every `array_scope` scope, every property
+            // path, nested `action.where`, `pull` object `items_where`) plus a runtime throw-safety dry-run. An
+            // invalid filter matches nothing, and an unwritable scope or property path can never reach its
+            // target — none can succeed on retry — so the action is rejected unrecoverably
+            // (`invalid_filter`/`invalid_scope`/`invalid_property_path`) and mutates nothing, which keeps a
+            // throw-prone filter or an unreachable target from committing a partial change. Validating
             // the nested levels up-front is essential: the per-item recursion only runs for parents matching the
             // outer `where`, so an outer `where` matching nothing would otherwise let a nested fault slip
             // through as a silent no-op.
@@ -339,7 +359,18 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                 const issue = whereIssues[0]!;
                 failureTracker.reportActionError(action, issue.kind==='scope'
                     ? { type: 'invalid_scope', scope: issue.scope, reason: issue.reason }
+                    : issue.kind==='property_path'
+                    ? { type: 'invalid_property_path', path: issue.path, reason: issue.reason }
                     : { type: 'invalid_filter', where_path: issue.path, reason: issue.reason });
+                continue;
+            }
+
+            // The one target check the schema cannot make, because it is the DDL that names the primary key.
+            // Judged here rather than per matched item for the same reason as the preflight above: a write
+            // that could never be legal must fail even when the `where` matches nothing.
+            const primaryKeyPath = findPrimaryKeyTargetingPropertyPath(action, schema, ddl);
+            if( primaryKeyPath!==undefined ) {
+                failureTracker.reportActionError(action, { type: 'invalid_property_path', path: primaryKeyPath, reason: 'primary_key' });
                 continue;
             }
             for( let i = 0; i < wipItems.length; i++) {
@@ -476,6 +507,29 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                                 }
                                 break;
                             }
+                            // The property verbs probe before committing so an item they would not alter is
+                            // never cloned, keeping the item's reference stable through a no-op. The probe
+                            // reads the current state, while the commit re-resolves its target inside the
+                            // item being written: a nested write must land in the clone, not in the original
+                            // object the probe walked.
+                            case 'set_property_undefined': {
+                                const clearSource = mutableUpdatedItem ?? item;
+                                if (probeSetPropertyUndefined(clearSource, action.payload.path as string).changed) {
+                                    if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                    commitSetPropertyUndefined(mutableUpdatedItem as Record<string, unknown>, action.payload.path as string);
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                }
+                                break;
+                            }
+                            case 'delete_property': {
+                                const removeSource = mutableUpdatedItem ?? item;
+                                if (probeDeleteProperty(removeSource, action.payload.path as string).changed) {
+                                    if (!mutableUpdatedItem) mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                                    commitDeleteProperty(mutableUpdatedItem as Record<string, unknown>, action.payload.path as string);
+                                    failureTracker.testSchema(action, mutableUpdatedItem);
+                                }
+                                break;
+                            }
                         }
                     }
 
@@ -561,6 +615,60 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 
 
+}
+
+/**
+ * Find a property-targeting write anywhere in an action that names the primary key of the list it runs
+ * against, and report where it is.
+ *
+ * The engine identifies every item by its primary key: it matches `where` clauses, reports outcomes and
+ * reconciles the returned changes through that value. Clearing or removing it strands the item, so the write
+ * is refused whatever the schema permits — a schema that declares the key optional or defaulted would
+ * otherwise let it through. Each `array_scope` level is judged against its own list's key, since a scoped
+ * element is identified by that list's key rather than the outer one.
+ *
+ * @param action The action to inspect, at any nesting depth.
+ * @param schema The schema of one item at this level.
+ * @param ddl The DDL whose `'.'` entry names this level's primary key.
+ * @param prefix The scope chain already descended, so a nested path is reported from the action's root.
+ * @returns The full path of the offending write, or `undefined` when the action targets no primary key.
+ *
+ * @remarks
+ * Run before any item is matched, so an action naming the primary key is refused even against an empty list
+ * or a `where` that matches nothing — a statically invalid write fails for the same reason whatever the data
+ * happens to hold.
+ */
+function findPrimaryKeyTargetingPropertyPath<T extends Record<string, any>>(
+    action: Readonly<WriteAction<T>>,
+    schema: z.ZodType<T, any, any>,
+    ddl: DDL<T>,
+    prefix = '',
+): string | undefined {
+    const payload = action.payload;
+    const rules = ddl.lists['.'];
+
+    if( payload.type==='set_property_undefined' || payload.type==='delete_property' ) {
+        if( !rules ) return undefined;
+        const segments = parseDotPropPathSegments(payload.path as string);
+        // Only a path naming the key itself strands the item; a same-named property nested inside another
+        // object is an ordinary field.
+        if( segments.length===1 && segments[0]===String(rules.primary_key) ) {
+            return joinDotpropPath(prefix, payload.path as string);
+        }
+        return undefined;
+    }
+
+    if( payload.type==='array_scope' ) {
+        const scoped = getArrayScopeSchemaAndDDL<T>(action, schema, ddl);
+        return findPrimaryKeyTargetingPropertyPath(
+            scoped.writeAction,
+            scoped.schema,
+            scoped.ddl,
+            joinDotpropPath(prefix, payload.scope),
+        );
+    }
+
+    return undefined;
 }
 
 function generateFinalItems<T extends Record<string, any>>(addedHash:ItemHash<T>, updatedHash:ItemHash<T>, deletedHash:ItemHash<T>, originalItems:T[], pk:PrimaryKeyGetter<T>, optionsIncDefaults:OptionsWithDefaults) {

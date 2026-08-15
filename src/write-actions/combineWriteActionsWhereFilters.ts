@@ -2,7 +2,7 @@ import type { WhereFilterDefinition } from "../where-filter/types.ts";
 import type { DDL } from "../ddl/types.ts";
 import { resolveDdlListRules } from "../ddl/resolveDdlListRules.ts";
 import { isPrimaryKeyValue } from "../utils/getKeyValue.ts";
-import type { WriteAction, WriteError } from "./types.ts";
+import type { WriteAction, WriteError, WritePayload } from "./types.ts";
 
 /**
  * Outcome of {@link combineWriteActionsWhereFilters}: either a combined filter, or the errors that
@@ -45,8 +45,9 @@ export type CombineWriteActionsWhereFiltersResult<T extends Record<string, any> 
  *
  * @remarks
  * **Completeness.** The returned filter matches a *superset* of the rows any action touches. Under-selection would
- * feed a read-modify-write caller stale input, so it is a correctness bug; over-selection is only a perf cost. The
- * payload switch is exhaustive — a new arm is a compile error.
+ * feed a read-modify-write caller stale input, so it is a correctness bug; over-selection is only a perf cost. Every
+ * write-payload variant must contribute: a variant with no arm here is a compile error, so a payload can never
+ * silently contribute nothing.
  *
  * **Combining.** Distinct terms are `$or`-unioned and de-duplicated; a single distinct term is returned bare (no
  * enclosing `$or`). A match-all `where` (`{}`) makes the whole result `undefined`, and match-all terms are never
@@ -122,8 +123,16 @@ type ScopedPayload =
     | { type: "push"; where: WhereFilterDefinition }
     | { type: "pull"; where: WhereFilterDefinition }
     | { type: "inc"; where: WhereFilterDefinition }
+    | { type: "set_property_undefined"; where: WhereFilterDefinition }
+    | { type: "delete_property"; where: WhereFilterDefinition }
     | { type: "delete"; where: WhereFilterDefinition }
     | { type: "array_scope"; scope: string; where: WhereFilterDefinition; action: ScopedPayload };
+
+// Compile-time bridge: because payloads reach the walker through an `as ScopedPayload` cast, a `WritePayload`
+// variant with no arm here would slip past the switch's `never` check and only surface as a runtime
+// `assertNever` throw. Pinning the discriminants against each other turns that into a compile error.
+type _ScopedPayloadCoversAllVariants = Exclude<WritePayload<any>["type"], ScopedPayload["type"]> extends never ? true : never;
+const _scopedPayloadCoversAllVariants: _ScopedPayloadCoversAllVariants = true;
 
 type DeriveResult =
     | { kind: "filter"; filter: WhereFilterDefinition }
@@ -154,6 +163,8 @@ function deriveActionFilter<T extends Record<string, any>>(payload: ScopedPayloa
         case "push":
         case "pull":
         case "inc":
+        case "set_property_undefined":
+        case "delete_property":
             return { kind: "filter", filter: payload.where };
         case "delete":
             return includeDelete ? { kind: "filter", filter: payload.where } : { kind: "skip" };

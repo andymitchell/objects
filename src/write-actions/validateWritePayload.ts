@@ -12,7 +12,7 @@
  *   literals, or schema branches that cannot be proven JSON-safe.
  * - {@link validateWritePayloadValues} checks each write payload. It catches runtime values the schema check
  *   cannot fully cover, especially values admitted by open schemas (Zod passthrough/loose), and JSON edge cases
- *   such as `NaN` or `Infinity` serializing to `null`.
+ *   such as `NaN` or `Infinity` serializing to `null`, or an explicit `undefined` vanishing altogether.
  *
  * Use both for full coverage. The schema check proves the declared write surface is JSON-safe; the value check is
  * the per-write backstop for actual data.
@@ -63,8 +63,8 @@ export type NonJsonReason = NonJsonValueIssue["reason"];
  */
 export type WritePayloadValidationIssue = {
   reason: NonJsonReason;
-  path?: string;
-  message?: string;
+  path?: string | undefined;
+  message?: string | undefined;
 };
 
 /** The closed set of ways a SCHEMA can declare a type that will not round-trip JSON — a construction-time fault, never a runtime error. */
@@ -93,9 +93,20 @@ export type WritePayloadSchemaIssue = {
 
 // ─────────────────────────────── value safety ───────────────────────────────
 // The per-value JSON-roundtrip walk is the shared `findNonJsonValues` (the `SerialisableJsonSubset` predicate).
-// A write-payload value treats `undefined` as a recoverable missing key, so it is NOT flagged here
-// (`flagUndefined` is left off — that is the `where`-operand gate's concern, where a dropped key changes the
-// match set).
+// `create`/`update` data runs it with `flagUndefined`: those two verbs describe the item's own fields, and a
+// dropped key changes what the write means (a create loses a field, an update silently touches nothing). The
+// list-valued verbs do not — their items are compared by deep equality, which reads an absent key and an
+// `undefined` one alike, so nothing changes across the boundary.
+
+/**
+ * How to spell the intention an explicit `undefined` was reaching for, one message per verb. The value itself is
+ * never quoted — an error may be logged, and the path already locates the fault.
+ */
+const UNDEFINED_VALUE_GUIDANCE = {
+  create: "A create defines the whole item, so omit the key rather than giving it the value undefined.",
+  update:
+    "Omit the key to leave it untouched, or use the 'set_property_undefined' / 'delete_property' verbs to clear or remove it.",
+} as const;
 
 /**
  * Checks whether the actual values in one `WritePayload` can cross JSON serialization boundaries losslessly.
@@ -103,15 +114,23 @@ export type WritePayloadSchemaIssue = {
  *
  * Run this for every write before the payload is serialized or applied. It is schema-agnostic and walks the
  * written data directly: create/update data, inc amounts, push/add_to_set items, and nested array_scope actions.
- * Delete and pull payloads carry no written values.
+ * Delete, pull, and the property verbs carry no written values.
  *
  * This is the required backstop for what schema validation cannot fully cover: values admitted by open schemas
  * (Zod passthrough/loose), plus JSON edge cases such as `NaN` and `Infinity`, which JSON would silently turn into
  * `null`.
  *
+ * An explicit `undefined` anywhere in create or update `data` is one of those faults: `JSON.stringify` drops the
+ * key, so the same action means something different once it has crossed a boundary. Those issues carry a
+ * `message` naming the JSON-safe way to express what was intended.
+ *
  * @example
  * validateWritePayloadValues({ type: "create", data: { id: "x", n: Infinity } });
  * // -> [{ reason: "non_finite", path: "n" }]
+ *
+ * @example
+ * validateWritePayloadValues({ type: "update", data: { label: undefined }, where: { id: "x" } });
+ * // -> [{ reason: "malformed", path: "label", message: "Omit the key to leave it untouched, or use …" }]
  */
 export function validateWritePayloadValues(
   payload: WritePayload<any>,
@@ -119,9 +138,18 @@ export function validateWritePayloadValues(
   const out: WritePayloadValidationIssue[] = [];
   switch (payload.type) {
     case "create":
-    case "update":
-      findNonJsonValues(payload.data, "", out);
+    case "update": {
+      const walked: NonJsonValueIssue[] = [];
+      findNonJsonValues(payload.data, "", walked, { flagUndefined: true });
+      for (const issue of walked) {
+        out.push(
+          issue.undefined_value
+            ? { reason: issue.reason, path: issue.path, message: UNDEFINED_VALUE_GUIDANCE[payload.type] }
+            : { reason: issue.reason, path: issue.path },
+        );
+      }
       break;
+    }
     case "inc":
       findNonJsonValues(payload.amount, String(payload.path), out);
       break;
@@ -131,6 +159,10 @@ export function validateWritePayloadValues(
       break;
     case "array_scope":
       return validateWritePayloadValues(payload.action as WritePayload<any>);
+    case "set_property_undefined":
+    case "delete_property":
+      // These verbs write no value at all — they name a `path` and a `where`, both gated elsewhere.
+      break;
     default:
       break; // delete / pull carry no written data
   }

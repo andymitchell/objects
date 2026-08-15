@@ -57,13 +57,19 @@ describe("findNonJsonValues — the SerialisableJsonSubset value walk", () => {
     });
 
     describe("undefined is position-dependent via flagUndefined", () => {
-        it("safe by default — a payload value treats undefined as a recoverable missing key", () => {
+        it("safe by default — a position where an absent key means the same thing lets undefined through", () => {
             expect(collect(undefined)).toEqual([]);
             expect(collect({ a: undefined })).toEqual([]);
         });
-        it("malformed when flagUndefined is set — a where operand's dropped key degrades to match-all", () => {
-            expect(collect(undefined, { flagUndefined: true })).toEqual([{ reason: "malformed" }]);
-            expect(collect({ a: undefined }, { flagUndefined: true })).toEqual([{ reason: "malformed", path: "a" }]);
+        it("malformed when flagUndefined is set — a dropped key silently changes what the value means", () => {
+            expect(collect(undefined, { flagUndefined: true })).toEqual([{ reason: "malformed", undefined_value: true }]);
+            expect(collect({ a: undefined }, { flagUndefined: true })).toEqual([{ reason: "malformed", path: "a", undefined_value: true }]);
+        });
+        it("marks only the undefined values, so a caller can offer a remedy specific to them", () => {
+            expect(collect({ a: undefined, big: 5n }, { flagUndefined: true })).toEqual([
+                { reason: "malformed", path: "a", undefined_value: true },
+                { reason: "malformed", path: "big" },
+            ]);
         });
     });
 

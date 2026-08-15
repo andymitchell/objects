@@ -97,12 +97,14 @@ export function wa(payload: WritePayload<Obj>): WriteAction<Obj> {
 }
 
 /**
- * The 8 payload discriminants, spelled literally: `WritePayload<Obj>["type"]` collapses to `unknown` for
- * a nested-array `T` (the recursive `array_scope.action` hits TS's instantiation cap). The 8-arm canary in
+ * Every payload discriminant, spelled literally: `WritePayload<Obj>["type"]` collapses to `unknown` for
+ * a nested-array `T` (the recursive `array_scope.action` hits TS's instantiation cap). The arm canary in
  * the test file pins this list to the real union via a shallow single-array type where it resolves cleanly.
  */
-export type Arm = "create" | "update" | "delete" | "array_scope" | "add_to_set" | "push" | "pull" | "inc";
-export const ALL_ARMS: readonly Arm[] = ["create", "update", "delete", "array_scope", "add_to_set", "push", "pull", "inc"];
+export type Arm = "create" | "update" | "delete" | "array_scope" | "add_to_set" | "push" | "pull" | "inc"
+    | "set_property_undefined" | "delete_property";
+export const ALL_ARMS: readonly Arm[] = ["create", "update", "delete", "array_scope", "add_to_set", "push", "pull", "inc",
+    "set_property_undefined", "delete_property"];
 
 /** A pool member: an action plus static metadata the property loops use for sampling and coverage checks. */
 export type PoolEntry = {
@@ -136,6 +138,8 @@ export const POOL: PoolEntry[] = [
     { arm: "push", flat: true, action: wa({ type: "push", path: "children", items: [{ cid: "z", age: 0, children: [] }], where: { id: "r5" } }) },
     { arm: "pull", flat: true, action: wa({ type: "pull", path: "children", items_where: { cid: "a1" }, where: { id: "r1" } }) },
     { arm: "inc", flat: true, action: wa({ type: "inc", path: "score", amount: 1, where: { score: { $gte: 40 } } }) },
+    { arm: "set_property_undefined", flat: true, action: wa({ type: "set_property_undefined", path: "text", where: { id: "r2" } }) },
+    { arm: "delete_property", flat: true, action: wa({ type: "delete_property", path: "text", where: { score: { $lte: 20 } } }) },
 
     // ── scoped (array_scope) ──
     { arm: "array_scope", flat: false, action: wa(assertWriteArrayScope<Obj, "children">({
@@ -195,6 +199,8 @@ type OraclePayload =
     | { type: "push"; where: WhereFilterDefinition }
     | { type: "pull"; where: WhereFilterDefinition }
     | { type: "inc"; where: WhereFilterDefinition }
+    | { type: "set_property_undefined"; where: WhereFilterDefinition }
+    | { type: "delete_property"; where: WhereFilterDefinition }
     | { type: "delete"; where: WhereFilterDefinition }
     | { type: "array_scope"; scope: string; where: WhereFilterDefinition; action: OraclePayload };
 
@@ -233,7 +239,9 @@ function touchableIndices(items: Record<string, any>[], payload: OraclePayload, 
         case "add_to_set":
         case "push":
         case "pull":
-        case "inc": {
+        case "inc":
+        case "set_property_undefined":
+        case "delete_property": {
             items.forEach((it, i) => { if (matchJavascriptObject(it, payload.where)) idx.push(i); });
             return idx;
         }

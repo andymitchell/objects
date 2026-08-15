@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { objectRejectsUnknownKeys, getSchemaChildren, getLiteralValues, getEnumValues, getZodKind } from "./introspection.ts";
+import { objectRejectsUnknownKeys, getSchemaChildren, getLiteralValues, getEnumValues, getZodKind, getRecordKeyType } from "./introspection.ts";
 
 /**
  * `objectRejectsUnknownKeys` reads zod's UNDOCUMENTED `_zod.def.catchall`. These tests pin its behaviour to
@@ -164,5 +164,37 @@ describe("getEnumValues (pinned to the installed zod)", () => {
         expect(vals).toContain("a");
         expect(vals).toContain(1);
         expect(new Set(vals.map((v) => typeof v))).toEqual(new Set(["string", "number"]));
+    });
+});
+
+/**
+ * `getRecordKeyType` reads zod's UNDOCUMENTED `_zod.def.keyType`. These pins assert it against the installed
+ * zod so a version bump that renames the field fails loudly here — rather than silently widening which keys a
+ * caller believes a record admits.
+ */
+describe("getRecordKeyType (pinned to the installed zod)", () => {
+    it("returns the key schema of a plain string-keyed record, which admits any key", () => {
+        const keyType = getRecordKeyType(z.record(z.string(), z.number()));
+        expect(getZodKind(keyType)).toBe("string");
+        expect(keyType.safeParse("anything").success).toBe(true);
+    });
+
+    it("returns an enumerated key schema, which admits only the enumerated names", () => {
+        const keyType = getRecordKeyType(z.record(z.enum(["a", "b"]), z.number()));
+        expect(getZodKind(keyType)).toBe("enum");
+        expect(keyType.safeParse("a").success).toBe(true);
+        expect(keyType.safeParse("zzz").success).toBe(false);
+    });
+
+    it("returns a refined key schema, which narrows the admissible keys", () => {
+        const keyType = getRecordKeyType(z.record(z.string().min(2), z.number()));
+        expect(keyType.safeParse("a").success).toBe(false);
+        expect(keyType.safeParse("abc").success).toBe(true);
+    });
+
+    it("returns the key schema of a partial record too", () => {
+        const keyType = getRecordKeyType(z.partialRecord(z.enum(["a", "b"]), z.number()));
+        expect(keyType.safeParse("a").success).toBe(true);
+        expect(keyType.safeParse("zzz").success).toBe(false);
     });
 });

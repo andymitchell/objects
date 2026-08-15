@@ -73,6 +73,8 @@ export type {
     WritePayloadPush,
     WritePayloadPull,
     WritePayloadInc,
+    WritePayloadSetPropertyUndefined,
+    WritePayloadDeleteProperty,
     WriteError,
     WriteErrorContext,
     WriteAffectedItem,
@@ -84,6 +86,12 @@ export type {
     WriteOutcomeCore,
     WriteResult,
 } from "./types.ts";
+
+// The `reason` vocabularies carried by the `invalid_scope` and `invalid_property_path` errors. Published
+// so a caller can name the type when branching on a rejection, or map it to its own diagnostics; the
+// resolvers that produce them stay internal, because a caller reaches them by submitting an action.
+export type { ArrayScopeRejectionReason } from "./arrayScopeResolution.ts";
+export type { PropertyPathRejectionReason } from "./propertyPathResolution.ts";
 
 export type {
     WriteChanges,

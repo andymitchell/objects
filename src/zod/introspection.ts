@@ -210,6 +210,23 @@ export function getRecordValueType(schema: AnyZodSchema): AnyZodSchema {
 }
 
 /**
+ * Return the key schema of a record.
+ *
+ * A record's keys are not always "any string": `z.record(z.enum([...]), v)` accepts only the enumerated
+ * names, and a refined key schema (`z.string().min(2)`) narrows them further. Callers deciding whether a
+ * particular key can exist on a record ask this schema, rather than assuming every string is admissible.
+ *
+ * Reads private `_zod.def.keyType`; pinned tests guard the installed Zod shape.
+ *
+ * @example
+ * getRecordKeyType(z.record(z.string(), z.number())).safeParse('anything').success; // true
+ * getRecordKeyType(z.record(z.enum(['a', 'b']), z.number())).safeParse('zzz').success; // false
+ */
+export function getRecordKeyType(schema: AnyZodSchema): AnyZodSchema {
+    return (schema._zod.def as z.core.$ZodTypeDef & { keyType: AnyZodSchema }).keyType;
+}
+
+/**
  * Return the schema produced by a `z.lazy` thunk.
  *
  * This invokes private `_zod.def.getter()`. A self-referential lazy schema can return itself, so any

@@ -168,6 +168,56 @@ describe('1. Per-payload-type behaviour', () => {
             expect(getWrittenPaths(action)).toEqual(['subtasks.items']);
         });
     });
+
+    describe('1.6 set_property_undefined / delete_property', () => {
+
+        // Unlike push/pull/inc, whose `path` names a single raw key, these verbs carry a whole PATH already
+        // written in the escaped grammar — so it is passed through as-is rather than escaped again.
+        type Doc = {
+            id: string;
+            label?: string;
+            note: string | undefined;
+            meta?: { badge?: string };
+            rows: { rid: string; hint?: string }[];
+        };
+
+        it('returns the cleared property', () => {
+            const action: WriteAction<Doc> = {
+                ...baseEnvelope,
+                payload: { type: 'set_property_undefined', path: 'note', where: { id: '1' } },
+            };
+            expect(getWrittenPaths(action)).toEqual(['note']);
+        });
+
+        it('returns the removed property', () => {
+            const action: WriteAction<Doc> = {
+                ...baseEnvelope,
+                payload: { type: 'delete_property', path: 'label', where: { id: '1' } },
+            };
+            expect(getWrittenPaths(action)).toEqual(['label']);
+        });
+
+        it('returns a nested property path whole, rather than only its final key', () => {
+            const action: WriteAction<Doc> = {
+                ...baseEnvelope,
+                payload: { type: 'delete_property', path: 'meta.badge', where: { id: '1' } },
+            };
+            expect(getWrittenPaths(action)).toEqual(['meta.badge']);
+        });
+
+        it('prefixes the property path with the enclosing array scope', () => {
+            const action: WriteAction<Doc> = {
+                ...baseEnvelope,
+                payload: assertWriteArrayScope<Doc, 'rows'>({
+                    type: 'array_scope',
+                    scope: 'rows',
+                    action: { type: 'delete_property', path: 'hint', where: { rid: 'r1' } },
+                    where: { id: '1' },
+                }),
+            };
+            expect(getWrittenPaths(action)).toEqual(['rows.hint']);
+        });
+    });
 });
 
 
@@ -437,6 +487,16 @@ describe('5. The escaped-path grammar (dotted and numeric keys)', () => {
             payload: { type: 'push', path: 3.5, items: [], where: { id: '1' } },
         };
         expect(getWrittenPaths(action)).toEqual(['3\\.5']);
+    });
+
+    it('leaves a property-verb path alone — it is already spelled in the escaped grammar', () => {
+        // Escaping it a second time would render `rank\\.value`, which splits back into two keys.
+        type DottedOptional = { id: string; 'rank.value'?: number };
+        const action: WriteAction<DottedOptional> = {
+            ...baseEnvelope,
+            payload: { type: 'delete_property', path: 'rank\\.value', where: { id: '1' } },
+        };
+        expect(getWrittenPaths(action)).toEqual(['rank\\.value']);
     });
 
     it('a dotted array scope arrives already escaped and prefixes the inner paths', () => {

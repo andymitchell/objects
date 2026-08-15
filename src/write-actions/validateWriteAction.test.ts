@@ -42,6 +42,19 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
             expect(validateWriteAction(wa({ type: "create", data: { id: "1", count: Infinity, label: "a" } }), Schema))
                 .toMatchObject([{ type: "invalid_data_value", reason: "non_finite", data_path: "count" }]);
         });
+
+        it("flags an explicit undefined written value as invalid_data_value/malformed at its path", () => {
+            expect(validateWriteAction(wa({ type: "update", data: { label: undefined }, where: { id: "1" } }), Schema))
+                .toMatchObject([{ type: "invalid_data_value", reason: "malformed", data_path: "label" }]);
+        });
+
+        it("passes the remedy through to the caller, so the guidance reaches whoever handles the error", () => {
+            const [updateError] = validateWriteAction(wa({ type: "update", data: { label: undefined }, where: { id: "1" } }), Schema);
+            expect(updateError?.type === "invalid_data_value" && updateError.message).toContain("set_property_undefined");
+
+            const [createError] = validateWriteAction(wa({ type: "create", data: { id: "1", count: 3, label: undefined } }), Schema);
+            expect(createError?.type === "invalid_data_value" && createError.message).toContain("omit the key");
+        });
     });
 
     describe("top-level where — held to the serialisable subset only when the flag is set", () => {
@@ -205,6 +218,85 @@ describe("validateWriteAction — runtime gate for a whole WriteAction (written 
 
         it("leaves the value-list opaque without the flag — the subset narrowing is off by default", () => {
             expect(validateWriteAction(pullTags([Infinity]), NestedSchema)).toEqual([]);
+        });
+    });
+
+    // `set_property_undefined`/`delete_property` name a write TARGET rather than a match condition, so an
+    // unwritable `path` is its own fault class: it can never succeed, however the data changes, and the gate
+    // must say so before anything is mutated — including for a path buried in an `array_scope`, which the
+    // per-item recursion would only reach if the outer `where` happened to match.
+    describe("property-verb paths — an unwritable target is rejected up-front as invalid_property_path", () => {
+        const PropertySchema = z.object({
+            id: z.string(),
+            label: z.string().optional(),
+            required: z.string(),
+            bag: z.record(z.string(), z.string()),
+            children: z.array(z.object({ cid: z.string(), score: z.number().optional() }).strict()).optional(),
+        }).strict();
+        type PropertyRow = z.infer<typeof PropertySchema>;
+        const wp = (payload: unknown): WriteAction<PropertyRow> => ({ type: "write", ts: 0, uuid: "U", payload: payload as WriteAction<PropertyRow>["payload"] });
+
+        const clear = (path: string, where: unknown = {}) => wp({ type: "set_property_undefined", path, where });
+        const remove = (path: string, where: unknown = {}) => wp({ type: "delete_property", path, where });
+
+        it("accepts a path the schema can both clear and remove", () => {
+            expect(validateWriteAction(clear("label"), PropertySchema, SUBSET)).toEqual([]);
+            expect(validateWriteAction(remove("label"), PropertySchema, SUBSET)).toEqual([]);
+        });
+
+        it("rejects clearing a value the schema requires, naming the reason", () => {
+            expect(validateWriteAction(clear("required"), PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "required", reason: "not_undefinable" }]);
+        });
+
+        it("rejects removing a key the schema requires, naming the reason", () => {
+            expect(validateWriteAction(remove("required"), PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "required", reason: "not_optional" }]);
+        });
+
+        it("separates the two permissions on one path: a record entry is removable but not clearable", () => {
+            expect(validateWriteAction(remove("bag.anything"), PropertySchema, SUBSET)).toEqual([]);
+            expect(validateWriteAction(clear("bag.anything"), PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "bag.anything", reason: "not_undefinable" }]);
+        });
+
+        it("rejects a path the schema never declares", () => {
+            expect(validateWriteAction(remove("nope"), PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "nope", reason: "unknown_path" }]);
+        });
+
+        it("rejects a path that would reach into an array instead of composing with an array_scope", () => {
+            expect(validateWriteAction(remove("children.cid"), PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "children.cid", reason: "traverses_array" }]);
+        });
+
+        it("rejects targeting a whole array of objects", () => {
+            expect(validateWriteAction(remove("children"), PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "children", reason: "object_array_property" }]);
+        });
+
+        it("rejects a segment naming an inherited member, at any depth, without crashing", () => {
+            for (const path of ["__proto__", "bag.constructor"]) {
+                expect(() => validateWriteAction(remove(path), PropertySchema, SUBSET)).not.toThrow();
+                expect(validateWriteAction(remove(path), PropertySchema, SUBSET))
+                    .toEqual([{ type: "invalid_property_path", path, reason: "disallowed_segment" }]);
+            }
+        });
+
+        it("judges a nested path against the element schema, reporting the full scope-chain path", () => {
+            const a = wp({ type: "array_scope", scope: "children", where: {}, action: { type: "delete_property", path: "cid", where: {} } });
+            expect(validateWriteAction(a, PropertySchema, SUBSET))
+                .toEqual([{ type: "invalid_property_path", path: "children.cid", reason: "not_optional" }]);
+        });
+
+        it("accepts a nested path the element schema does allow", () => {
+            const a = wp({ type: "array_scope", scope: "children", where: {}, action: { type: "delete_property", path: "score", where: {} } });
+            expect(validateWriteAction(a, PropertySchema, SUBSET)).toEqual([]);
+        });
+
+        it("still holds a property verb's own where to the filter gate", () => {
+            expect(validateWriteAction(clear("label", { required: new Date() }), PropertySchema, SUBSET))
+                .toMatchObject([{ type: "invalid_filter", reason: "malformed", where_path: "required" }]);
         });
     });
 

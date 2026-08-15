@@ -69,7 +69,7 @@ export function makeWriteAction(uuid: string, payload: WriteAction<FuzzItem>['pa
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Generators (all values JSON-safe; `undefined` only as a rare update delete-sentinel)
+// Generators (every value JSON-safe, so a generated action is always one the engine will accept)
 // ═══════════════════════════════════════════════════════════════════
 
 /**
@@ -128,7 +128,7 @@ export function genWhere(rng: Rng, world: FuzzItem[]): WhereFilterDefinition<Fuz
 const genUpdateData = (rng: Rng): Partial<FuzzItem> => {
     const data: Partial<FuzzItem> = {};
     do {
-        if (rng.bool(0.5)) data.text = rng.bool(0.05) ? undefined : rng.pick(TEXT_POOL);
+        if (rng.bool(0.5)) data.text = rng.pick(TEXT_POOL);
         if (rng.bool(0.5)) data.count = rng.intRange(-10, 10);
         if (rng.bool(0.4)) data.tags = Array.from({ length: rng.int(4) }, () => rng.pick(TAG_POOL));
     } while (Object.keys(data).length === 0);
@@ -141,20 +141,34 @@ const genSubItem = (rng: Rng): SubItem => {
     return si;
 };
 
-const WEIGHTED_VERBS: readonly ['create' | 'update' | 'delete' | 'array_scope' | 'add_to_set' | 'push' | 'pull' | 'inc', number][] = [
-    ['create', 2], ['update', 3], ['delete', 2], ['array_scope', 2], ['add_to_set', 2], ['push', 2], ['pull', 2], ['inc', 2],
+type FuzzVerb = 'create' | 'update' | 'delete' | 'array_scope' | 'add_to_set' | 'push' | 'pull' | 'inc' | 'delete_property';
+
+const WEIGHTED_VERBS: readonly [FuzzVerb, number][] = [
+    ['create', 2], ['update', 3], ['delete', 2], ['array_scope', 2], ['add_to_set', 2], ['push', 2], ['pull', 2], ['inc', 2], ['delete_property', 2],
 ];
 
-const pickVerb = (rng: Rng): (typeof WEIGHTED_VERBS)[number][0] => {
-    const total = WEIGHTED_VERBS.reduce((s, [, w]) => s + w, 0);
+/**
+ * Fields a `delete_property` may target. `sub_items` is an array of objects, which no property verb may
+ * remove, and `id` is the primary key — both are refusals rather than writes, and P10 is where deliberate
+ * refusals belong.
+ */
+const REMOVABLE_PATHS = ['text', 'count', 'tags'] as const;
+
+const pickVerb = (rng: Rng, deleteProperty: boolean): FuzzVerb => {
+    const verbs = deleteProperty ? WEIGHTED_VERBS : WEIGHTED_VERBS.filter(([verb]) => verb !== 'delete_property');
+    const total = verbs.reduce((s, [, w]) => s + w, 0);
     let r = rng.int(total);
-    for (const [verb, w] of WEIGHTED_VERBS) { if (r < w) return verb; r -= w; }
+    for (const [verb, w] of verbs) { if (r < w) return verb; r -= w; }
     return 'update';
 };
 
-export function genWriteAction(rng: Rng, world: FuzzItem[], uuid: string): WriteAction<FuzzItem> {
+/**
+ * @param deleteProperty Whether the implementation under test supports `delete_property`; when it does not,
+ *                       the verb is left out of the pool rather than generating actions it cannot perform.
+ */
+export function genWriteAction(rng: Rng, world: FuzzItem[], uuid: string, deleteProperty: boolean): WriteAction<FuzzItem> {
     const where = genWhere(rng, world);
-    switch (pickVerb(rng)) {
+    switch (pickVerb(rng, deleteProperty)) {
         case 'create': {
             const dup = world.length > 0 && rng.bool(0.15);
             // A fresh create sometimes takes a prototype-member name, so the insert path meets the same trap as
@@ -200,14 +214,16 @@ export function genWriteAction(rng: Rng, world: FuzzItem[], uuid: string): Write
             const iw = rng.bool(0.5) ? { val: rng.intRange(-10, 10) } : { sid: 's' + rng.int(4) };
             return makeWriteAction(uuid, { type: 'pull', path: 'sub_items', items_where: iw as WhereFilterDefinition<SubItem>, where });
         }
+        case 'delete_property':
+            return makeWriteAction(uuid, { type: 'delete_property', path: rng.pick(REMOVABLE_PATHS), where });
         default:
             return makeWriteAction(uuid, { type: 'inc', path: 'count', amount: rng.intRange(-10, 10), where });
     }
 }
 
-export function genBatch(rng: Rng, world: FuzzItem[]): WriteAction<FuzzItem>[] {
+export function genBatch(rng: Rng, world: FuzzItem[], deleteProperty: boolean): WriteAction<FuzzItem>[] {
     const n = rng.intRange(1, 6);
-    return Array.from({ length: n }, (_, i) => genWriteAction(rng, world, 'u' + i));
+    return Array.from({ length: n }, (_, i) => genWriteAction(rng, world, 'u' + i, deleteProperty));
 }
 
 /**
@@ -216,11 +232,14 @@ export function genBatch(rng: Rng, world: FuzzItem[]): WriteAction<FuzzItem>[] {
  * `invalid_filter` and is included ONLY when the caller supports the invalid-where corpus.
  */
 export function genInvalidAction(rng: Rng, invalidWhereCorpus: boolean): WriteAction<FuzzItem> {
-    const variants = invalidWhereCorpus ? 4 : 3;
+    const variants = invalidWhereCorpus ? 5 : 4;
     switch (rng.int(variants)) {
         case 0: return makeWriteAction('bad', { type: 'inc', path: 'count', amount: NaN, where: {} });
         case 1: return makeWriteAction('bad', { type: 'inc', path: 'count', amount: Infinity, where: {} });
         case 2: return makeWriteAction('bad', { type: 'create', data: { id: 'z' + rng.int(1000), count: NaN } });
+        // An explicit `undefined` value: JSON drops the key, so the action would mean nothing at all on the far
+        // side of a boundary. Guaranteed-failing like its peers, whatever the world holds.
+        case 3: return makeWriteAction('bad', { type: 'update', data: { text: undefined }, where: {} });
         default: return makeWriteAction('bad', { type: 'update', data: { text: 'z' }, where: { nope: 1 } as WhereFilterDefinition<FuzzItem> });
     }
 }
@@ -239,7 +258,7 @@ export const sortByPk = (items: FuzzItem[]): FuzzItem[] => [...items].sort((a, b
  */
 type PayloadView =
     | { type: 'create'; data: { id: string } }
-    | { type: 'update' | 'delete' | 'array_scope' | 'add_to_set' | 'push' | 'pull' | 'inc'; where?: unknown };
+    | { type: 'update' | 'delete' | 'array_scope' | 'add_to_set' | 'push' | 'pull' | 'inc' | 'delete_property'; where?: unknown };
 
 export function touchedPks(action: WriteAction<FuzzItem>, world: FuzzItem[]): Set<string> {
     const p = action.payload as PayloadView;

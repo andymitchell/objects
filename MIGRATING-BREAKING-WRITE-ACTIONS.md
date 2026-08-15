@@ -8,6 +8,8 @@ It is written as instructions for an LLM performing the migration, but is equall
 
 > ⚠️ **Superseded — ownership/permissions fully removed.** A later **major** version removed the built-in ownership/permission layer entirely; authorization now lives upstream in Casl (compiled to `WhereFilterDefinition` + `WriteActions`, which reach this library already authorized). The following no longer exist: the `ddl.ownership` field, the `@andyrmitchell/objects/ownership` sub-path, `checkOwnership` / `prepareOwnershipWhereClause` / `OwnershipRule` / `IUser` / `isIUser` / `checkWritePermission`, the `user` parameter on `writeToItemsArray` and `writeToItemsArrayPreserveInputType`, the `enforce_ownership` option, and the `permission_denied` `WriteError` (and `CorePermissionDeniedReason`). Items 15–18 below introduced ownership and are kept only as history — any example that passes a `user` argument, sets `ddl.ownership`, references `checkWritePermission` / `checkOwnership`, or inspects a `permission_denied` error reflects that interim state and no longer applies.
 
+> ⚠️ **Breaking (`undefined` no longer removes a key).** An `undefined` value in `update.data` used to delete that key, via the exported sentinel `VALUE_TO_DELETE_KEY`. Both are gone: `VALUE_TO_DELETE_KEY` is no longer exported, and an explicit `undefined` at any depth of `create.data` or `update.data` is rejected up-front as an unrecoverable `invalid_data_value` — nothing is written, and the error carries the offending `data_path` plus a `message` naming the remedy. Rewrite each call site to the verb that says what it meant: `{ type: 'delete_property', path, where }` removes the key, and `{ type: 'set_property_undefined', path, where }` keeps the key present holding `undefined`. Both survive JSON, which the old spelling did not — `JSON.stringify` erased the key, so a stored or forwarded action silently degraded into one that changed nothing; such an action now fails loudly instead of quietly doing nothing. Both verbs take a full escaped dot-prop path and refuse a property the schema requires, a property holding an array of objects, or the primary key (`invalid_property_path`). See the README section "Writes, `undefined`, `null`, and removing a property" for the whole contract.
+
 ## Overview of the Change
 
 The response type system was redesigned for ergonomic, flat access. The key changes:
@@ -17,7 +19,7 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 3. **Error details flattened** — old `FailedWriteAction.error_details` + `FailedWriteActionAffectedItem.error_details` duplication replaced by a single `errors: WriteErrorContext<T>[]` on `WriteOutcomeFailed`.
 4. **Affected item types unified** — `WriteActionAffectedItem` and `FailedWriteActionAffectedItem` merged into one generic `WriteAffectedItem<T>`.
 5. **`referential_comparison_ok` removed** from `WriteToItemsArrayChanges` (was `ApplyWritesToItemsChanges`).
-6. **`CombineWriteActionsWhereFiltersResponse` dropped** (was unused dead code).
+6. **`CombineWriteActionsWhereFiltersResponse` replaced by `CombineWriteActionsWhereFiltersResult`** — the function is unchanged in purpose; only its result type was renamed and reshaped.
 7. **`SerializableCommonError` removed** from the response surface — replaced by a lightweight `error?: { message: string }`.
 8. **Deprecated type aliases removed** — `WriteCommonError`, `SuccessfulWriteAction`, `FailedWriteAction`, `FailedWriteActionAffectedItem`, `WriteActionsResponse`, `WriteActionsResponseOk`, `WriteActionsResponseError`, `ApplyWritesToItemsResponse` are no longer exported. Use the new names directly.
 9. **Deprecated schema aliases removed** — `WriteCommonErrorSchema`, `SuccessfulWriteActionSchema`, `FailedWriteActionSchema`, `WriteActionsResponseSchema`, `WriteActionsResponseOkSchema`, `WriteActionsResponseErrorSchema` are no longer exported. Use the new names directly.
@@ -51,7 +53,7 @@ The response type system was redesigned for ergonomic, flat access. The key chan
 | `ApplyWritesToItemsChanges<T>` | `WriteToItemsArrayChanges<T>` | `referential_comparison_ok` removed. |
 | `ApplyWritesToItemsOptions<T>` | `WriteToItemsArrayOptions<T>` | Renamed for consistency |
 | `WriteActionPayload<T>` | `WritePayload<T>` | Renamed |
-| `CombineWriteActionsWhereFiltersResponse<T>` | _(dropped)_ | Dead code, no replacement. |
+| `CombineWriteActionsWhereFiltersResponse<T>` | `CombineWriteActionsWhereFiltersResult<T>` | Renamed and reshaped to `{ success: true, filter } \| { success: false, errors }`. |
 
 ### Function Mapping
 
@@ -85,7 +87,7 @@ Note: `WriteActionSchema`, `makeWriteActionSchema`, `WriteResultSchema`, and `ma
 These are the primary ergonomic API. Import them alongside `writeToItemsArray`:
 
 ```ts
-import { getWriteFailures, getWriteSuccesses, getWriteErrors } from '@andyrmitchell/objects/write-actions';
+import { getWriteFailures, getWriteSuccesses, getWriteErrors } from '@andymitchell/objects/write-actions';
 
 // Returns WriteOutcomeFailed<T>[] — already narrowed
 getWriteFailures(result)
@@ -93,7 +95,7 @@ getWriteFailures(result)
 // Returns WriteOutcomeOk<T>[] — already narrowed
 getWriteSuccesses(result)
 
-// Returns WriteErrorContext<T>[] — all errors flattened across all failed actions
+// Returns WriteErrorContext[] — all errors flattened across all failed actions
 getWriteErrors(result)
 ```
 
@@ -451,9 +453,23 @@ const denied = checkWritePermission(item, ddl, user);
 const payload = assertWriteArrayScope(action);
 ```
 
-### Step 13: Remove `combineWriteActionsWhereFilters` usage
+### Step 13: Update the `combineWriteActionsWhereFilters` result type
 
-If any code imports or calls `combineWriteActionsWhereFilters`, it must be removed or replaced. This function and its response type `CombineWriteActionsWhereFiltersResponse` have been dropped entirely.
+`combineWriteActionsWhereFilters` is exported and supported — it builds one `WhereFilterDefinition` matching every existing row a batch could touch. Only its result type changed:
+
+**Old:**
+```ts
+import { combineWriteActionsWhereFilters, type CombineWriteActionsWhereFiltersResponse } from '...';
+```
+
+**New:**
+```ts
+import { combineWriteActionsWhereFilters, type CombineWriteActionsWhereFiltersResult } from '...';
+
+const r = combineWriteActionsWhereFilters(ddl, actions);
+if (r.success) r.filter;   // WhereFilterDefinition<T> | undefined — undefined means "constrains nothing"
+else r.errors;             // WriteError[]
+```
 
 ---
 
@@ -528,7 +544,7 @@ expect(result.changes.final_items.length).toBe(1);
 
 **After:**
 ```ts
-const result = writeToItemsArray(actions, items, schema, ddl, user, { atomic: false });
+const result = writeToItemsArray(actions, items, schema, ddl, { atomic: false });
 expect(result.ok).toBe(false);
 expect(getWriteFailures(result).length).toBe(1);
 expect(getWriteSuccesses(result).length).toBe(2);

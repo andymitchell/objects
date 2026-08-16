@@ -1,3 +1,4 @@
+import { isTypeEqual } from "@andyrmitchell/utils";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
 import type { DDL } from "../ddl/types.ts";
 import { resolveDdlListRules } from "../ddl/resolveDdlListRules.ts";
@@ -131,8 +132,7 @@ type ScopedPayload =
 // Compile-time bridge: because payloads reach the walker through an `as ScopedPayload` cast, a `WritePayload`
 // variant with no arm here would slip past the switch's `never` check and only surface as a runtime
 // `assertNever` throw. Pinning the discriminants against each other turns that into a compile error.
-type _ScopedPayloadCoversAllVariants = Exclude<WritePayload<any>["type"], ScopedPayload["type"]> extends never ? true : never;
-const _scopedPayloadCoversAllVariants: _ScopedPayloadCoversAllVariants = true;
+isTypeEqual<Exclude<WritePayload<any>["type"], ScopedPayload["type"]>, never>(true);
 
 type DeriveResult =
     | { kind: "filter"; filter: WhereFilterDefinition }

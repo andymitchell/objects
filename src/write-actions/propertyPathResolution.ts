@@ -95,9 +95,13 @@ function parses(schema: AnyZodSchema, value: unknown): { success: boolean; data?
     }
 }
 
-/** Find the schema declared at one segment of a container, or the reason the container has nothing there. */
-function lookupSegment(container: AnyZodSchema, segment: string): SegmentLookup {
-    const core = toCoreShape(container);
+/**
+ * Find the schema declared at one segment of a container, or the reason the container has nothing there.
+ *
+ * Takes a container already reduced to its core shape, and an intersection is resolved by its caller — a
+ * segment declared by more than one side has more than one answer, which a single lookup cannot carry.
+ */
+function lookupSegment(core: AnyZodSchema, segment: string): SegmentLookup {
     switch (getZodKind(core)) {
         case 'object': {
             const shape = getObjectShape(core);
@@ -114,21 +118,15 @@ function lookupSegment(container: AnyZodSchema, segment: string): SegmentLookup 
         }
         case 'record': {
             if (!parses(getRecordKeyType(core), segment).success) return { ok: false, reason: 'unknown_path' };
-            // Whether a record requires its keys is a property of the whole record: an enumerated key schema
-            // makes every name mandatory, while an open or partial record makes them all optional. Parsing an
-            // empty object asks that question directly, without depending on how the record was declared.
-            const absence = parses(core, {}).success ? 'container_allows' : 'container_forbids';
+            // Whether a record tolerates a missing key is a property of the whole record, so parsing an empty
+            // object asks the question directly rather than reading it off the declaration. Success alone is
+            // not the answer: an enumerated key schema materialises every name it declares, putting back the
+            // very key a removal took away, so the key must still be missing from what the parse returns.
+            const empty = parses(core, {});
+            const restored = empty.success
+                && Object.prototype.hasOwnProperty.call(empty.data as Record<string, unknown>, segment);
+            const absence = empty.success && !restored ? 'container_allows' : 'container_forbids';
             return { ok: true, schema: getRecordValueType(core), absence };
-        }
-        case 'intersection': {
-            // Callers graft fields onto a row shape with an intersection, so a segment may be declared by
-            // either side. The side that declares it answers; a refusal is reported only when neither does.
-            const { left, right } = getIntersectionParts(core);
-            const results = [lookupSegment(left, segment), lookupSegment(right, segment)];
-            const found = results.find(r => r.ok);
-            if (found) return found;
-            const specific = results.find(r => !r.ok && r.reason !== 'unknown_path');
-            return specific ?? { ok: false, reason: 'unknown_path' };
         }
         case 'array':
             return { ok: false, reason: 'traverses_array' };
@@ -138,13 +136,43 @@ function lookupSegment(container: AnyZodSchema, segment: string): SegmentLookup 
     }
 }
 
-/** Whether a schema can carry objects, judged the way a whole-array write judges its element type. */
-function carriesObjects(schema: AnyZodSchema): boolean {
+/**
+ * Whether a schema can carry objects, judged the way a whole-array write judges its element type.
+ *
+ * A union or intersection is judged by its branches, because a shape offered by any one of them is a shape
+ * the value can hold. The `seen` set stops a lazily-declared schema that reaches itself from recurring.
+ */
+function carriesObjects(schema: AnyZodSchema, seen: Set<AnyZodSchema>): boolean {
     const core = toCoreShape(schema);
+    if (seen.has(core)) return false;
+    seen.add(core);
     const kind = getZodKind(core);
-    if (kind === 'union') return getUnionOptions(core).some(carriesObjects);
-    return kind === 'object' || kind === 'record' || kind === 'intersection'
+    if (kind === 'union') return getUnionOptions(core).some(option => carriesObjects(option, seen));
+    if (kind === 'intersection') {
+        const { left, right } = getIntersectionParts(core);
+        return carriesObjects(left, seen) || carriesObjects(right, seen);
+    }
+    return kind === 'object' || kind === 'record'
         || kind === 'tuple' || kind === 'map' || kind === 'set';
+}
+
+/**
+ * Whether a leaf holds an array of objects, wherever that array sits among the branches of its declaration.
+ *
+ * The array need not be the leaf's outermost shape: offering it as one member of a union describes the same
+ * stored value as wrapping it does, and either way the write would discard a whole collection of objects.
+ */
+function carriesObjectArray(schema: AnyZodSchema, seen: Set<AnyZodSchema>): boolean {
+    const core = toCoreShape(schema);
+    if (seen.has(core)) return false;
+    seen.add(core);
+    const kind = getZodKind(core);
+    if (kind === 'union') return getUnionOptions(core).some(option => carriesObjectArray(option, seen));
+    if (kind === 'intersection') {
+        const { left, right } = getIntersectionParts(core);
+        return carriesObjectArray(left, seen) || carriesObjectArray(right, seen);
+    }
+    return kind === 'array' && carriesObjects((core as z.ZodArray).element as AnyZodSchema, new Set());
 }
 
 /**
@@ -169,6 +197,51 @@ function storesUndefined(leaf: AnyZodSchema): boolean {
 function toleratesAbsence(leaf: AnyZodSchema): boolean {
     const result = parses(z.object({ probe: leaf }), {});
     return result.success && !('probe' in (result.data as Record<string, unknown>));
+}
+
+/** Judge the property a path landed on: may this verb touch it, given how the schema declares it? */
+function judgeLeaf(leaf: { schema: AnyZodSchema; absence: AbsenceAuthority }, verb: PropertyWriteVerb): PropertyPathResolution {
+    if (carriesObjectArray(leaf.schema, new Set())) return { ok: false, reason: 'object_array_property' };
+
+    if (verb === 'set_property_undefined') {
+        return storesUndefined(leaf.schema) ? { ok: true } : { ok: false, reason: 'not_undefinable' };
+    }
+
+    if (leaf.absence === 'container_allows') return { ok: true };
+    if (leaf.absence === 'container_forbids') return { ok: false, reason: 'not_optional' };
+    return toleratesAbsence(leaf.schema) ? { ok: true } : { ok: false, reason: 'not_optional' };
+}
+
+/**
+ * Combine the answers the sides of an intersection gave about the same path.
+ *
+ * A value satisfies every side at once, so permission is what they all agree on: one refusal settles it. A
+ * side that does not declare the path has no opinion to contribute rather than an objection, so the path is
+ * unknown only when no side declared it.
+ */
+function conjoinArms(arms: PropertyPathResolution[]): PropertyPathResolution {
+    const declaring = arms.filter(arm => arm.ok || arm.reason !== 'unknown_path');
+    if (declaring.length === 0) return { ok: false, reason: 'unknown_path' };
+    return declaring.find(arm => !arm.ok) ?? { ok: true };
+}
+
+/**
+ * Walk the remaining segments from one container, and judge whatever the last of them lands on.
+ *
+ * Each side of an intersection walks the whole remaining path itself, so a path whose segments are declared
+ * across different sides still resolves, and every side that declares it gets to refuse it.
+ */
+function resolveFrom(container: AnyZodSchema, segments: string[], verb: PropertyWriteVerb): PropertyPathResolution {
+    const core = toCoreShape(container);
+    if (getZodKind(core) === 'intersection') {
+        const { left, right } = getIntersectionParts(core);
+        return conjoinArms([resolveFrom(left, segments, verb), resolveFrom(right, segments, verb)]);
+    }
+
+    const [segment, ...rest] = segments;
+    const found = lookupSegment(core, segment!);
+    if (!found.ok) return found;
+    return rest.length > 0 ? resolveFrom(found.schema, rest, verb) : judgeLeaf(found, verb);
 }
 
 /**
@@ -201,7 +274,12 @@ function toleratesAbsence(leaf: AnyZodSchema): boolean {
  * @remarks
  * The path may cross nested objects, intersections and records, but never an array: an array's contents are
  * edited by scoping into it. A leaf holding an array of objects is refused outright, mirroring the same
- * prohibition on updating a whole object array.
+ * prohibition on updating a whole object array — including one offered as a member of a union, which
+ * describes the same stored collection.
+ *
+ * An intersection is held to every side that declares the path, since a value has to satisfy all of them: a
+ * side that permits the write cannot license what another side forbids. Sides that do not declare the path
+ * simply have no say, so a field grafted on by one side still resolves.
  *
  * `__proto__`, `prototype` and `constructor` are refused even where the schema declares such a field, because
  * the runtime property reader will not traverse them. An empty segment — what a leading, trailing or doubled
@@ -222,26 +300,5 @@ export function resolvePropertyPathTarget(
         return { ok: false, reason: 'disallowed_segment' };
     }
 
-    let container: AnyZodSchema = schema;
-    let leaf: SegmentLookup | undefined;
-    for (const segment of segments) {
-        leaf = lookupSegment(container, segment);
-        if (!leaf.ok) return leaf;
-        container = leaf.schema;
-    }
-    // `parseDotPropPathSegments` always returns at least one segment, so the loop always assigns.
-    if (!leaf?.ok) return { ok: false, reason: 'unknown_path' };
-
-    const core = toCoreShape(leaf.schema);
-    if (getZodKind(core) === 'array' && carriesObjects((core as z.ZodArray).element as AnyZodSchema)) {
-        return { ok: false, reason: 'object_array_property' };
-    }
-
-    if (verb === 'set_property_undefined') {
-        return storesUndefined(leaf.schema) ? { ok: true } : { ok: false, reason: 'not_undefinable' };
-    }
-
-    if (leaf.absence === 'container_allows') return { ok: true };
-    if (leaf.absence === 'container_forbids') return { ok: false, reason: 'not_optional' };
-    return toleratesAbsence(leaf.schema) ? { ok: true } : { ok: false, reason: 'not_optional' };
+    return resolveFrom(schema, segments, verb);
 }

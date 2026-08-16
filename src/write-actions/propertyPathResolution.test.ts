@@ -86,10 +86,33 @@ describe('a leaf holding an array of objects is refused by both verbs', () => {
         expect(resolvePropertyPathTarget(mixed, 'rows', REMOVE)).toEqual({ ok: false, reason: 'object_array_property' });
     });
 
+    test('an object array offered as one member of a union is still an object array', () => {
+        // Spelling the array as a union rather than wrapping it changes how the leaf reads at its surface,
+        // not what it holds — and the union arm accepting `undefined` is what would otherwise let it through.
+        const unioned = z.object({ rows: z.union([z.array(z.object({ v: z.string() })), z.undefined()]) });
+        expect(resolvePropertyPathTarget(unioned, 'rows', CLEAR)).toEqual({ ok: false, reason: 'object_array_property' });
+        expect(resolvePropertyPathTarget(unioned, 'rows', REMOVE)).toEqual({ ok: false, reason: 'object_array_property' });
+
+        const wrappedUnion = z.object({ rows: z.union([z.array(z.object({ v: z.string() })), z.null()]).optional() });
+        expect(resolvePropertyPathTarget(wrappedUnion, 'rows', CLEAR)).toEqual({ ok: false, reason: 'object_array_property' });
+        expect(resolvePropertyPathTarget(wrappedUnion, 'rows', REMOVE)).toEqual({ ok: false, reason: 'object_array_property' });
+    });
+
     test('an array of scalars is an ordinary leaf', () => {
         const scalars = z.object({ tags: z.array(z.string()).optional() });
         expect(resolvePropertyPathTarget(scalars, 'tags', CLEAR)).toEqual({ ok: true });
         expect(resolvePropertyPathTarget(scalars, 'tags', REMOVE)).toEqual({ ok: true });
+    });
+
+    test('an array whose elements intersect scalars is an ordinary leaf, unlike one that intersects shapes', () => {
+        const scalarElements = z.object({ codes: z.array(z.intersection(z.string(), z.string())).optional() });
+        expect(resolvePropertyPathTarget(scalarElements, 'codes', CLEAR)).toEqual({ ok: true });
+        expect(resolvePropertyPathTarget(scalarElements, 'codes', REMOVE)).toEqual({ ok: true });
+
+        const shapeElements = z.object({
+            rows: z.array(z.intersection(z.object({ v: z.string() }), z.object({ w: z.string() }))).optional(),
+        });
+        expect(resolvePropertyPathTarget(shapeElements, 'rows', REMOVE)).toEqual({ ok: false, reason: 'object_array_property' });
     });
 });
 
@@ -183,6 +206,26 @@ describe('paths reach through the containers a caller actually nests data in', (
         expect(resolvePropertyPathTarget(schema, 'ghost', REMOVE)).toEqual({ ok: false, reason: 'unknown_path' });
     });
 
+    test('a field both sides of an intersection declare is held to the stricter declaration', () => {
+        // An intersected value satisfies every side at once, so the permissive side cannot license what the
+        // strict one forbids — whichever order the sides happen to be written in.
+        const schema = z.object({ tag: z.string().optional() }).and(z.object({ tag: z.string() }));
+        expect(resolvePropertyPathTarget(schema, 'tag', REMOVE)).toEqual({ ok: false, reason: 'not_optional' });
+        expect(resolvePropertyPathTarget(schema, 'tag', CLEAR)).toEqual({ ok: false, reason: 'not_undefinable' });
+
+        const reversed = z.object({ tag: z.string() }).and(z.object({ tag: z.string().optional() }));
+        expect(resolvePropertyPathTarget(reversed, 'tag', REMOVE)).toEqual({ ok: false, reason: 'not_optional' });
+    });
+
+    test('each side of an intersection resolves the rest of the path for itself', () => {
+        // The sides declare different children of the same key, so neither one holds the whole path alone.
+        const schema = z.object({ a: z.object({ p: z.string().optional() }) })
+            .and(z.object({ a: z.object({ q: z.string().optional() }) }));
+        expect(resolvePropertyPathTarget(schema, 'a.p', REMOVE)).toEqual({ ok: true });
+        expect(resolvePropertyPathTarget(schema, 'a.q', REMOVE)).toEqual({ ok: true });
+        expect(resolvePropertyPathTarget(schema, 'a.ghost', REMOVE)).toEqual({ ok: false, reason: 'unknown_path' });
+    });
+
     test('a key holding a literal dot resolves through its escaped spelling', () => {
         const schema = z.object({ 'rank.value': z.string().optional() });
         expect(resolvePropertyPathTarget(schema, 'rank\\.value', REMOVE)).toEqual({ ok: true });
@@ -231,10 +274,20 @@ describe('a record decides for its own keys, because its keys share one declarat
         expect(resolvePropertyPathTarget(schema, 'scores.zzz', REMOVE)).toEqual({ ok: false, reason: 'unknown_path' });
     });
 
-    test('a record whose values are optional lets its keys go, enum-keyed or not', () => {
-        // Absence is legal for the whole record, so the container answers for every key it admits.
-        const schema = z.object({ scores: z.record(z.enum(['home', 'away']), z.number().optional()) });
-        expect(resolvePropertyPathTarget(schema, 'scores.home', REMOVE)).toEqual({ ok: true });
+    test('an enum-keyed record puts its keys straight back, so optional values do not make them removable', () => {
+        // The empty object parses, but only because the record MATERIALISES every declared name — so a removed
+        // key returns on the item's next parse, holding undefined. Zod types the record's keys as required to
+        // match, which is why no such path is offered at the type level either.
+        const scores = z.record(z.enum(['home', 'away']), z.number().optional());
+        expect(Object.getOwnPropertyNames(scores.parse({}))).toEqual(['home', 'away']);
+        const _keyIsRequired: {} extends Pick<z.infer<typeof scores>, 'home'> ? false : true = true;
+        expect(_keyIsRequired).toBe(true);
+
+        const schema = z.object({ scores });
+        expect(resolvePropertyPathTarget(schema, 'scores.home', REMOVE)).toEqual({ ok: false, reason: 'not_optional' });
+        // An open record makes no such promise about any particular name, and stays removable.
+        const open = z.object({ scores: z.record(z.string(), z.number().optional()) });
+        expect(resolvePropertyPathTarget(open, 'scores.home', REMOVE)).toEqual({ ok: true });
     });
 
     test('a record with a narrowed key type admits only the keys it accepts', () => {

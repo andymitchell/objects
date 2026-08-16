@@ -37,7 +37,7 @@ export function makeWritePayloadSchema(objectSchema?: z.ZodObject<any>) {
 
 /**
  * Whether `data` holds an explicit `undefined` at any depth. Row schemas cannot answer this — an optional or
- * `.any()` field parses `undefined` happily — so the two data-carrying verbs are refined with it, and the parse
+ * `.any()` field parses `undefined` happily — so the two data-carrying verbs are guarded with it, and the parse
  * gate then admits exactly what the write engine will accept. Single-sourced with the engine's value walk.
  */
 function holdsExplicitUndefined(data: unknown): boolean {
@@ -53,29 +53,47 @@ const UNDEFINED_DATA_MESSAGE = {
     "Clearing or removing a property is 'set_property_undefined' / 'delete_property'; an update cannot carry the value undefined",
 } as const;
 
+/**
+ * Guard a row schema so the written data is judged as the caller wrote it, then validated as usual.
+ *
+ * A row schema renders `data` before anything downstream sees it: a default replaces an explicit `undefined`
+ * with a value the write language forbids asking for, and an exhaustively-keyed record invents present-undefined
+ * keys the caller never wrote. Reading the raw input settles both, and matches what the write engine — which
+ * walks the submitted values — will accept.
+ *
+ * @param dataSchema The row schema the data must satisfy.
+ * @param message Rejection wording naming this verb's JSON-safe alternative.
+ * @returns A schema that refuses an explicit `undefined` at any depth of the input, and otherwise parses as
+ * `dataSchema` does.
+ */
+function withoutExplicitUndefined<S extends z.ZodType>(dataSchema: S, message: string) {
+  return z
+    .unknown()
+    .superRefine((raw, ctx) => {
+      if (holdsExplicitUndefined(raw)) ctx.addIssue({ code: "custom", message });
+    })
+    .pipe(dataSchema);
+}
+
 function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
   const schema: z.ZodTypeAny = objectSchema ?? z.record(z.string(), z.any());
-  const WritePayloadCreateSchema = z
-    .object({
-      type: z.literal("create"),
-      data: objectSchema ? objectSchema.strict() : schema,
-    })
-    .refine((data) => !holdsExplicitUndefined(data.data), {
-      message: UNDEFINED_DATA_MESSAGE.create,
-      path: ["data"],
-    });
+  const WritePayloadCreateSchema = z.object({
+    type: z.literal("create"),
+    data: withoutExplicitUndefined(
+      objectSchema ? objectSchema.strict() : schema,
+      UNDEFINED_DATA_MESSAGE.create,
+    ),
+  });
 
-  const WritePayloadUpdateSchema = z
-    .object({
-      type: z.literal("update"),
-      data: objectSchema ? objectSchema.partial().strict() : schema,
-      where: WhereFilterSchema,
-      method: UpdatingMethodSchema.optional(),
-    })
-    .refine((data) => !holdsExplicitUndefined(data.data), {
-      message: UNDEFINED_DATA_MESSAGE.update,
-      path: ["data"],
-    });
+  const WritePayloadUpdateSchema = z.object({
+    type: z.literal("update"),
+    data: withoutExplicitUndefined(
+      objectSchema ? objectSchema.partial().strict() : schema,
+      UNDEFINED_DATA_MESSAGE.update,
+    ),
+    where: WhereFilterSchema,
+    method: UpdatingMethodSchema.optional(),
+  });
   isTypeEqual<
     z.infer<typeof WritePayloadUpdateSchema>["where"],
     WritePayloadUpdate<any>["where"]

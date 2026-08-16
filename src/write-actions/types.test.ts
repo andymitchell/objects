@@ -31,6 +31,7 @@ import {
   getWriteSuccesses,
   getWriteErrors,
 } from "./helpers.ts";
+import { validateWriteAction } from "./validateWriteAction.ts";
 import {
   WriteErrorSchema,
   WriteActionSchema,
@@ -849,6 +850,59 @@ describe("8. Schema <-> Type alignment", () => {
 
       const NullableRowSchema = z.object({ id: z.string(), note: z.string().nullable() });
       expect(makeWriteActionSchema(NullableRowSchema).safeParse(dataAction({ type: "update", data: { note: null }, where: { id: "1" } })).success).toBe(true);
+    });
+
+    /**
+     * The gate reads what the caller wrote, not what the row schema makes of it.
+     *
+     * A row schema is free to invent values a caller never supplied and to replace ones it did, so judging
+     * the parsed data asks the wrong question in both directions. Each case states the engine's own verdict
+     * beside the gate's, because the two agreeing is the whole point of having the gate.
+     */
+    describe("judging the caller's own data, not the row schema's rendering of it", () => {
+      const HouseSchema = z.object({
+        id: z.string(),
+        scores: z.record(z.enum(["home", "away"]), z.number().optional()),
+        tag: z.string().default("x"),
+      });
+      const houseAction = makeWriteActionSchema(HouseSchema);
+
+      it("accepts data whose undefined values the row schema invents", () => {
+        // Parsing `{}` against this record materialises every declared name, holding undefined — values the
+        // caller never wrote, and which the gate must not attribute to them.
+        expect(Object.getOwnPropertyNames(HouseSchema.shape.scores.parse({}))).toEqual(["home", "away"]);
+
+        const action = dataAction({ type: "update", data: { scores: {} }, where: { id: "1" } });
+        expect(houseAction.safeParse(action).success).toBe(true);
+        expect(validateWriteAction(action as WriteAction<any>, HouseSchema)).toEqual([]);
+      });
+
+      it("refuses an undefined the row schema would quietly replace with a default", () => {
+        // The default fires during parsing, so a gate reading the parsed data sees `tag: 'x'` — a value the
+        // write language forbids the caller from asking for, laundered into one it allows.
+        expect(HouseSchema.partial().parse({ tag: undefined })).toEqual({ tag: "x" });
+
+        for (const payload of [
+          { type: "update", data: { tag: undefined }, where: { id: "1" } },
+          { type: "create", data: { id: "1", scores: {}, tag: undefined } },
+        ]) {
+          const action = dataAction(payload);
+          expect(houseAction.safeParse(action).success).toBe(false);
+          expect(validateWriteAction(action as WriteAction<any>, HouseSchema)[0]?.type).toBe("invalid_data_value");
+        }
+      });
+
+      it("refuses it behind a prefault, which substitutes just as a default does", () => {
+        const PrefaultSchema = z.object({ id: z.string(), tag: z.string().prefault("x") });
+        const action = dataAction({ type: "update", data: { tag: undefined }, where: { id: "1" } });
+        expect(makeWriteActionSchema(PrefaultSchema).safeParse(action).success).toBe(false);
+        expect(validateWriteAction(action as WriteAction<any>, PrefaultSchema)[0]?.type).toBe("invalid_data_value");
+      });
+
+      it("still enforces the row's shape, so checking the raw value costs no validation", () => {
+        expect(houseAction.safeParse(dataAction({ type: "update", data: { tag: 5 }, where: { id: "1" } })).success).toBe(false);
+        expect(houseAction.safeParse(dataAction({ type: "update", data: { unknown: "k" }, where: { id: "1" } })).success).toBe(false);
+      });
     });
   });
 

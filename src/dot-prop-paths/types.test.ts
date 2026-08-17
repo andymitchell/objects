@@ -1,5 +1,6 @@
+import { describe, test, expectTypeOf } from "vitest";
 import { z } from "zod";
-import type { DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathToArraySpreadingArrays, NonObjectArrayProperty, PathValue } from "./types.ts";
+import type { ArrayProperty, DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathToArraySpreadingArrays, NonArrayProperty, NonObjectArrayProperty, NumberProperty, PathValue, PrimaryKeyProperties, ScalarProperties } from "./types.ts";
 
 it('no test just type errors', () => {
     type Example = {
@@ -138,6 +139,65 @@ it('no test just type errors', () => {
     conf1.set('location.city', 'London');
     const val = conf1.get('location.city');
 })
+
+/**
+ * The key-filter utilities answer "which keys of `T` qualify?" — and nothing else.
+ *
+ * Every answer is a union of literal keys. `undefined` is not a key, so it must never appear in one:
+ * downstream types index a mapped type by these unions, and an `undefined` member resolves to
+ * `unknown`, which silently swallows whatever union it lands in.
+ *
+ * The fixture carries every awkward declaration shape at once — required, optional, explicitly
+ * undefinable, null-only, and arrays in each of those flavours — so a filter that mis-sorts any one
+ * of them fails here rather than downstream.
+ */
+describe('key filters answer with literal keys only', () => {
+
+    type Mixed = {
+        id: string;
+        score: number;
+        label?: string;
+        count: number | undefined;
+        nullOnly: null;
+        tags?: string[];
+        rows: { rid: string }[];
+        maybe_rows?: { rid: string }[];
+        undefinable_rows: { rid: string }[] | undefined;
+    };
+
+    /** Keys that may be written wholesale, in any of the declaration flavours. */
+    type MixedNonArrayKeys = 'id' | 'score' | 'label' | 'count' | 'nullOnly';
+
+    test('an array key is an array key however it is declared', () => {
+        expectTypeOf<ArrayProperty<Mixed>>().toEqualTypeOf<'tags' | 'rows' | 'maybe_rows' | 'undefinable_rows'>();
+    });
+
+    test('a number key is a number key even when it may hold undefined', () => {
+        expectTypeOf<NumberProperty<Mixed>>().toEqualTypeOf<'score' | 'count'>();
+    });
+
+    test('scalar keys cover every scalar flavour and no array', () => {
+        expectTypeOf<ScalarProperties<Mixed>>().toEqualTypeOf<MixedNonArrayKeys>();
+    });
+
+    test('an optional or undefinable array is still an array, so it is not wholesale-writable', () => {
+        expectTypeOf<NonArrayProperty<Mixed>>().toEqualTypeOf<MixedNonArrayKeys>();
+    });
+
+    test('a null-only key stays wholesale-writable', () => {
+        // `NonNullable<null>` is `never`, and `never` satisfies every constraint including `Array<any>`,
+        // so a key whose only value is `null` needs deciding before the array question is asked.
+        expectTypeOf<NonArrayProperty<{ id: string; nullOnly: null }>>().toEqualTypeOf<'id' | 'nullOnly'>();
+    });
+
+    test('arrays of scalars join the wholesale-writable keys; arrays of objects do not', () => {
+        expectTypeOf<NonObjectArrayProperty<Mixed>>().toEqualTypeOf<MixedNonArrayKeys | 'tags'>();
+    });
+
+    test('only an always-present string or number key can identify an item', () => {
+        expectTypeOf<PrimaryKeyProperties<Mixed>>().toEqualTypeOf<'id' | 'score'>();
+    });
+});
 
 /*
 //I also tried to make AutoPath work (https://github.com/millsp/ts-toolbelt / https://millsp.github.io/ts-toolbelt/modules/function_autopath.html / https://www.reddit.com/r/typescript/comments/lbuhbt/productionready_typesafe_dotted_path_notation/), but it didn't seem to do anything. 

@@ -169,6 +169,25 @@ describe("A list's primary key", () => {
     >();
   });
 
+  it("names one of the collection's fields and nothing else", () => {
+    expectTypeOf<DDL<Flat>["lists"]["."]["primary_key"]>().toEqualTypeOf<
+      "id" | "name" | "rank"
+    >();
+  });
+
+  it("rejects an absent primary key", () => {
+    const _ddl: DDL<Flat> = {
+      version: 1,
+      lists: {
+        ".": {
+          // @ts-expect-error: every list must name a field that identifies its items
+          primary_key: undefined,
+          default_ordering_key: { key: "id", direction: 1 },
+        },
+      },
+    };
+  });
+
   it("accepts a string identifier field", () => {
     const _ddl: DDL<Flat> = {
       version: 1,

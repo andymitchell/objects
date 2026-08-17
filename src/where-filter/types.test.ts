@@ -1112,6 +1112,119 @@ describe('PartialObjectFilterStrict types', () => {
 });
 
 
+/**
+ * The filter key domain reaches every scalar the matcher can resolve, and a bare `null` is a question
+ * any non-array path may be asked.
+ *
+ * A path that crosses an array of objects (`sub_items.val`) is resolved by every engine — it spreads
+ * the array and asks the question of each element — so the type offers it. A bare `null` asks whether
+ * the field is null or absent, which is meaningful on any field regardless of how its schema declares
+ * nullability, so it is offered everywhere the value is compared directly.
+ */
+describe('filter keys reach scalars inside arrays of objects, and any non-array path accepts a bare null', () => {
+
+    type Row = {
+        id: string;
+        note: string | null;
+        sub_items: { val: number; label?: string }[];
+        msgs: { labelIds: string[] }[];
+    };
+
+    describe('a scalar leaf inside an array of objects is addressable', () => {
+
+        it('accepts a spread path to a scalar leaf', () => {
+            ({ 'sub_items.val': 5 }) satisfies WhereFilterDefinition<Row>;
+            ({ 'sub_items.val': 5 }) satisfies PartialObjectFilter<Row>;
+            ({ 'sub_items.val': 5 }) satisfies PartialObjectFilterStrict<Row>;
+        });
+
+        it('accepts operators on a spread path', () => {
+            ({ 'sub_items.val': { $gte: 5 } }) satisfies WhereFilterDefinition<Row>;
+            ({ 'sub_items.label': { $regex: 'a' } }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('refuses a value of the wrong type on a spread path', () => {
+            // @ts-expect-error a string is not assignable to the number leaf `sub_items.val`
+            ({ 'sub_items.val': 'five' }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('refuses a spread path the element does not declare', () => {
+            // @ts-expect-error `nope` is not a key of the `sub_items` element
+            ({ 'sub_items.nope': 5 }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('reads a spread path that ends at a scalar array as an array filter', () => {
+            ({ 'msgs.labelIds': { $all: ['x'] } }) satisfies WhereFilterDefinition<Row>;
+            ({ 'msgs.labelIds': 'x' }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('spells a dotted key inside an element in the escaped grammar', () => {
+            type DottedElementRow = { rows: { 'a.b': number }[] };
+            ({ 'rows.a\\.b': 1 }) satisfies WhereFilterDefinition<DottedElementRow>;
+            // @ts-expect-error raw 'rows.a.b' reads rows → a → b, which the element does not declare
+            ({ 'rows.a.b': 1 }) satisfies WhereFilterDefinition<DottedElementRow>;
+        });
+    });
+
+    describe('an array of mixed elements offers what its object members declare', () => {
+
+        type MixedRow = { entries: ({ city?: string } | string | number)[] };
+
+        it('accepts a spread path to a leaf an object member declares', () => {
+            ({ 'entries.city': 'London' }) satisfies WhereFilterDefinition<MixedRow>;
+        });
+
+        it('refuses a spread path no object member declares', () => {
+            // @ts-expect-error `nope` is not a key of any object member of `entries`
+            ({ 'entries.nope': 'x' }) satisfies WhereFilterDefinition<MixedRow>;
+        });
+
+        it('still offers the scalar members their own containment test on the array itself', () => {
+            ({ entries: 'London' }) satisfies WhereFilterDefinition<MixedRow>;
+        });
+    });
+
+    describe('a bare null asks the null-or-missing question', () => {
+
+        it('accepts null on a nullable field', () => {
+            ({ note: null }) satisfies WhereFilterDefinition<Row>;
+            ({ note: null }) satisfies PartialObjectFilterStrict<Row>;
+        });
+
+        it('accepts null on a field whose declared type is not nullable, because the field can still be missing', () => {
+            ({ id: null }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('accepts null on a spread path to a scalar leaf', () => {
+            ({ 'sub_items.val': null }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('accepts null inside an $elemMatch body', () => {
+            ({ sub_items: { $elemMatch: { val: null } } }) satisfies WhereFilterDefinition<Row>;
+        });
+
+        it('accepts null inside a compound object filter on an array of objects', () => {
+            ({ sub_items: { val: null } }) satisfies WhereFilterDefinition<Row>;
+        });
+    });
+
+    describe('a self-referential row keeps a bounded, literal key domain', () => {
+
+        type Node = { id: string; children: Node[] };
+
+        it('accepts a top-level key and a spread path through the recursion', () => {
+            ({ id: 'x' }) satisfies WhereFilterDefinition<Node>;
+            ({ 'children.id': 'x' }) satisfies WhereFilterDefinition<Node>;
+        });
+
+        it('refuses an unknown key, proving the key domain has not degraded to a wildcard', () => {
+            // @ts-expect-error `nope` is not a path on Node; a key domain that had collapsed to `any` would admit it
+            ({ nope: 'x' }) satisfies WhereFilterDefinition<Node>;
+        });
+    });
+});
+
+
 describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
     // Each @ts-expect-error below pins a CURRENT gap between the type and the runtime/spec: it is GREEN today
     // (the type wrongly REJECTS a shape the matcher supports, which a section test pins at runtime), and it
@@ -1120,10 +1233,10 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
     // exercise the same shape against the running matcher.
 
     type NullableAgeDoc = { contact: { name: string; age?: number | null } };
-    type SpreadDoc = { contact: { name: string; locations?: ({ city?: string; country?: string } | string | number)[] } };
     type NumberDoc = { name: string; age: number };
+    type ScalarArrayDoc = { tags: string[] };
 
-    describe('null equality on a nullable field is unmodelled', () => {
+    describe('null inside an operator payload is unmodelled', () => {
         it('control: $eq with a concrete value on the same nullable field type-checks', () => {
             const ok: WhereFilterDefinition<NullableAgeDoc> = { 'contact.age': { $eq: 5 } };
         });
@@ -1135,19 +1248,23 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
             };
         });
 
-        it('gap: bare null equality — ValueComparisonFlexi drops null; the matcher treats it as IS NULL (§2 pins runtime)', () => {
-            const a: WhereFilterDefinition<NullableAgeDoc> = {
-                // @ts-expect-error TODO ValueComparisonFlexi doesn't include null for nullable fields
-                'contact.age': null
+        it('gap: $elemMatch null on a scalar array — ValueComparisonFlexi of the element drops null; the gate accepts it', () => {
+            const a: WhereFilterDefinition<ScalarArrayDoc> = {
+                // @ts-expect-error TODO the element's value comparison doesn't include null
+                tags: { $elemMatch: null }
             };
         });
     });
 
-    describe('scalar-leaf paths through an array are not generated', () => {
-        it('gap: spread-leaf dot-prop path — DotPropPathsIncArrayUnion stops at arrays; the matcher spreads a generous $or (§3/§4 pin runtime)', () => {
-            const a: WhereFilterDefinition<SpreadDoc> = {
-                // @ts-expect-error TODO DotPropPathsIncArrayUnion doesn't generate dot-prop paths through arrays
-                'contact.locations.city': 'London'
+    describe('bare null on a path that holds an array is not modelled', () => {
+        it('control: a bare null on a non-array path type-checks', () => {
+            const ok: WhereFilterDefinition<NullableAgeDoc> = { 'contact.age': null };
+        });
+
+        it('gap: bare null on an array path — the array branch has no null member; the gate accepts it and reads it as broadening', () => {
+            const a: WhereFilterDefinition<ScalarArrayDoc> = {
+                // @ts-expect-error TODO the array filter branch doesn't include null
+                tags: null
             };
         });
     });

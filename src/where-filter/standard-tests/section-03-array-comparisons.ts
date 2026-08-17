@@ -170,7 +170,6 @@ export function registerArrayComparisonsA(ctx: SectionCtx): void {
                             locations: [{ city: 'London', country: 'UK' }, { city: 'NYC', country: 'US' }]
                         }
                     },
-                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
                     { 'contact.locations.city': 'London', 'contact.locations.country': 'US' },
                     ContactSchema
                 );

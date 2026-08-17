@@ -136,10 +136,23 @@ type ArrayElementFilter<T = any, ISD extends number = 2> =
     | ArrayValueComparison<T, ISD>;
 export type ArrayFilter<T extends [], ISD extends number = 2> = ArrayElementFilter<T[number], ISD> | T;
 
+/*
+The value branch offers a bare `null` on every path it covers. `null` asks whether the field is null
+or absent — a question any field can be asked, however its schema declares nullability, and one every
+engine answers. The path's own value type cannot supply the answer: {@link PathValueIncDiscrimatedUnions}
+strips `null` at every leaf, and its walk is contractually kept in lockstep with `PathValue`, so it
+cannot be forked to preserve nullability. The `null` therefore belongs here, at the one position where
+a value is compared directly. Array paths take the array branch instead, where the question is asked
+of elements.
+
+`undefined` is deliberately NOT offered: under `exactOptionalPropertyTypes` the surrounding `Partial`
+admits an absent key without admitting a present `undefined`, and a present-undefined filter value
+matches nothing.
+*/
 export type PartialObjectFilter<T extends Record<string, any>, ISD extends number = 2> = Partial<{
     [P in DotPropPathsIncArrayUnion<T, ISD>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
         ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>, ISD>
-        : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>>
+        : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>> | null
 }>;
 
 
@@ -203,7 +216,7 @@ type ArrayFilterStrict<T extends [], ISD extends number = 2> = ArrayElementFilte
 export type PartialObjectFilterStrict<T extends Record<string, any>, ISD extends number = 2> = Partial<{
     [P in DotPropPathsIncArrayUnion<T, ISD>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
         ? ArrayFilterStrict<PathValueIncDiscrimatedUnions<T, P>, ISD>
-        : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>>
+        : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>> | null
 }>;
 
 
@@ -286,6 +299,7 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * | Form | Example | Behaviour |
  * |------|---------|-----------|
  * | **Exact scalar** | `'Andy'`, `100`, `true` | Strict equality (`===`) for string, number, boolean |
+ * | **Bare null** | `null` | Matches a field that is null OR missing. Offered on every path whose value is compared directly, whether or not the schema declares the field nullable — a field can always be absent. |
  * | **Deep object equality** | `{ name: 'Andy', age: 30 }` | Deep equality (all keys must match) |
  * | **Range operators** | `{ $gt: 10, $lte: 100 }` | `$gt`, `$lt`, `$gte`, `$lte`. Multiple operators are ANDed. Works on numbers (numeric) and strings (lexicographic by Unicode code point = UTF-8 byte order; case-sensitive). |
  * | **$eq** | `{ $eq: 'Andy' }` | Explicit equality (`===`). `{ $eq: null }` matches null/missing. |
@@ -473,7 +487,9 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  *    won't catch future regressions if the path becomes valid).
  *
  * Normal (non-index-sig) properties are always traversed to the full depth of 6
- * regardless of this limit.
+ * regardless of this limit. The limit applies wherever a path can reach an index
+ * signature, including inside the element of an array of objects
+ * (`items.meta.${string}`).
  */
 export type WhereFilterDefinition<T extends Record<string, any> = any> =
     PartialObjectFilter<T>

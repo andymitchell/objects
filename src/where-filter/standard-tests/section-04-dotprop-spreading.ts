@@ -6,10 +6,10 @@ import type { SectionCtx } from "./harness.ts";
 export function registerDotPropSpreading(ctx: SectionCtx): void {
     const { describe, test, matchJavascriptObject, expectOrAcknowledgeUnsupported } = ctx;
 
-    // A dotted path into an array of objects is not expressible in a schema-derived filter type, though the
-    // validity gate accepts it — as MongoDB does. The battery holds every engine to it regardless.
-    const objLeaf = (row: ObjArray, filter: unknown) =>
-        matchJavascriptObject(row, filter as WhereFilterDefinition<ObjArray>, ObjArraySchema);
+    // A dotted path into an array of objects reads the leaf of every element — the same question MongoDB
+    // answers. Every engine is held to it through the row's own filter type.
+    const objLeaf = (row: ObjArray, filter: WhereFilterDefinition<ObjArray>) =>
+        matchJavascriptObject(row, filter, ObjArraySchema);
 
     describe('4. Dot-prop paths and array spreading', () => {
 

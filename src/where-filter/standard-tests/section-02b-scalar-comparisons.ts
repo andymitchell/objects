@@ -465,7 +465,6 @@ export function registerScalarComparisonsB(ctx: SectionCtx): void {
                 // SQL must translate this to IS NULL, not `= NULL` (which yields UNKNOWN).
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy', age: null } },
-                    // @ts-expect-error — TODO: ValueComparisonFlexi doesn't include null for nullable fields
                     { 'contact.age': null },
                     NullableAgeContactSchema
                 );

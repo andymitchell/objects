@@ -8,7 +8,15 @@ import type { DDL } from "../../ddl/types.ts";
 // Adapter Types
 // ═══════════════════════════════════════════════════════════════════
 
-/** Result of a single adapter.apply() call. Return undefined if the implementation doesn't support this operation. */
+/**
+ * Result of a single adapter.apply() call. Return undefined if the implementation doesn't support this operation.
+ *
+ * @remarks
+ * The ORDER of `finalItems` is not part of the contract. A data source is free to return rows in any
+ * order — an unordered SQL `SELECT` makes no promise, and no write verb specifies one — so a test that
+ * compares more than one row must sort by primary key before asserting, and an implementation is never
+ * held to a row order it did not promise.
+ */
 export type WriteTestAdapterResult<T extends Record<string, any>> = {
     result: WriteResult<T>,
     changes: WriteChanges<T>,

@@ -12,6 +12,11 @@ export type { PrimaryKeyValue } from '../utils/getKeyValue.ts';
 
 /**
  * A single sort entry: key + direction. Mongo-style: 1 = ascending, -1 = descending.
+ *
+ * @remarks
+ * A sort key must resolve to ONE value per row, so the key domain is the plain dot-prop path union —
+ * narrower than a filter's, which also offers paths that step into an array and fan out to a value per
+ * element. Such a path has no single value to order rows by, so it is deliberately not offered here.
  */
 export type SortEntry<T> = { key: DotPropPathsUnion<T>; direction: 1 | -1 };
 

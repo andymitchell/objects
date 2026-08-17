@@ -1,6 +1,5 @@
 import { MatchSchema, matchDdl, type Match } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
-import type { WhereFilterDefinition } from "../../where-filter/types.ts";
 
 /**
  * §15: where-filter behaviour in a write context.
@@ -14,16 +13,6 @@ import type { WhereFilterDefinition } from "../../where-filter/types.ts";
 export function registerWhereBehavioural(ctx: SectionCtx): void {
     const { describe, test, expect, createAdapter, implName } = ctx;
 
-    /**
-     * A filter every engine resolves, spelled past the edge of what `WhereFilterDefinition` offers.
-     *
-     * The type is narrower than the matchers in two places this section exercises: a nullable field is
-     * offered without its `null`, and a dotted path into an object array is not offered at all. Both
-     * filters are legitimate — the assertions below are what say so — and the cast is confined to the
-     * two of them, so a filter that is genuinely malformed still fails to compile.
-     */
-    const runtimeWhere = (w: Record<string, unknown>): WhereFilterDefinition<Match> => w as WhereFilterDefinition<Match>;
-
     describe('15. Where-filter behaviour (write targeting)', () => {
 
         describe('15.1 null & missing semantics', () => {
@@ -33,7 +22,7 @@ export function registerWhereBehavioural(ctx: SectionCtx): void {
                 const adapter = createAdapter(MatchSchema, matchDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', note: null }, { id: '2' }, { id: '3', note: 'x' }],
-                    writeActions: [makeAction<Match>('a1', { type: 'update', data: { text: 'M' }, where: runtimeWhere({ note: null }) })],
+                    writeActions: [makeAction<Match>('a1', { type: 'update', data: { text: 'M' }, where: { note: null } })],
                     schema: MatchSchema,
                     ddl: matchDdl,
                 });
@@ -202,7 +191,7 @@ export function registerWhereBehavioural(ctx: SectionCtx): void {
                         { id: '1', sub_items: [{ sid: 's1', val: 5 }] },
                         { id: '2', sub_items: [{ sid: 's2', val: 9 }] },
                     ],
-                    writeActions: [makeAction<Match>('a1', { type: 'delete', where: runtimeWhere({ 'sub_items.val': 5 }) })],
+                    writeActions: [makeAction<Match>('a1', { type: 'delete', where: { 'sub_items.val': 5 } })],
                     schema: MatchSchema,
                     ddl: matchDdl,
                 });

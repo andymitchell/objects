@@ -209,7 +209,6 @@ export function registerCompositePatterns(ctx: SectionCtx): void {
             test('messages.rfc822msgid scalar match: thread1 passes', async () => {
                 const result = await matchJavascriptObject(
                     thread1,
-                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
                     { 'messages.rfc822msgid': 'abc@example.com' },
                     CachedGmailThreadSchema
                 );
@@ -219,7 +218,6 @@ export function registerCompositePatterns(ctx: SectionCtx): void {
             test('messages.rfc822msgid scalar match: thread2 fails', async () => {
                 const result = await matchJavascriptObject(
                     thread2,
-                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
                     { 'messages.rfc822msgid': 'abc@example.com' },
                     CachedGmailThreadSchema
                 );
@@ -229,7 +227,6 @@ export function registerCompositePatterns(ctx: SectionCtx): void {
             test('messages.labelIds double-nested spread: thread1 passes', async () => {
                 const result = await matchJavascriptObject(
                     thread1,
-                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
                     { 'messages.labelIds': 'INBOX' },
                     CachedGmailThreadSchema
                 );
@@ -239,7 +236,6 @@ export function registerCompositePatterns(ctx: SectionCtx): void {
             test('messages.labelIds double-nested spread: thread2 fails', async () => {
                 const result = await matchJavascriptObject(
                     thread2,
-                    // @ts-expect-error — TODO: DotPropPathsIncArrayUnion doesn't generate paths through arrays
                     { 'messages.labelIds': 'INBOX' },
                     CachedGmailThreadSchema
                 );

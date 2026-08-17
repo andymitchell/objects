@@ -48,6 +48,29 @@ describe('WhereFilterDefinition types', () => {
                     message: 'a'
                 };
             })
+
+            it('accepts a variable holding a discriminant value, not just an inline literal', () => {
+                type Union = { type: 'a', payload: string } | { type: 'b' };
+
+                const fromVariable = (type: Union['type']) => {
+                    const a: WhereFilterDefinition<{ error: Union }> = { 'error.type': type };
+                    return a;
+                };
+
+                expect(fromVariable('a')).toEqual({ 'error.type': 'a' });
+            })
+
+            it('rejects a variable holding the union\'s key names in place of a discriminant value', () => {
+                type Union = { type: 'a', payload: string } | { type: 'b' };
+
+                const fromKeyof = (type: keyof Union) => {
+                    const a: WhereFilterDefinition<{ error: Union }> = {
+                        // @ts-expect-error: 'error.type' compares against the discriminant's values, not the union's key names
+                        'error.type': type
+                    };
+                    return a;
+                };
+            })
         })
 
         describe('1b. Logic Filter', () => {
@@ -879,41 +902,6 @@ describe('WhereFilterDefinition types', () => {
     })
 
     describe('Known limitations (documentation)', () => {
-        it('handles a variable of the same type', () => {
-
-            type MessagingError = NoListenerError | TimeOutError;
-
-            type MessagingErrorLocation = 'sendMessage' | 'onMessage';
-            type Message = {};
-
-            interface BaseMessagingError {
-                type: string,
-                location: MessagingErrorLocation;
-                description: string;
-                message: Message;
-            }
-
-            interface NoListenerError extends BaseMessagingError {
-                type: 'missing-or-stolen-listener';
-            }
-
-            interface TimeOutError extends Omit<BaseMessagingError, 'message'> {
-                type: 'time-out';
-                message?: Message
-            }
-
-            function test(type: keyof MessagingError) {
-                const b: WhereFilterDefinition<{error: MessagingError}> = {
-                    // @ts-ignore The types are the same. It should work
-                    'error.type': type
-                    //'error.type': 'missing-or-stolen-listener' // DOing it inline does work
-                }
-
-            }
-
-
-        })
-
         it('handles top level array', () => {
 
             type Obj = {name: string};

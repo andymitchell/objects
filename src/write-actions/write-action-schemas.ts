@@ -22,7 +22,7 @@ import type {
 } from "./types.ts";
 import { resolveArrayScope } from "./arrayScopeResolution.ts";
 import { resolvePropertyPathTarget } from "./propertyPathResolution.ts";
-import { findUnwritableDataValues } from "./validateWritePayload.ts";
+import { findUnwritableDataValues, findUnwritableItemValues } from "./validateWritePayload.ts";
 import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
@@ -36,9 +36,9 @@ import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
  * envelope and the verb's own grammar are checked, and the verbs that carry item data have that data checked
  * against `objectSchema`.
  *
- * Parsing judges and never rewrites. An accepted action carries its item data exactly as it was written: a
- * default, prefault, coercion, catch or transform in the row schema is something the data is measured against,
- * never something applied to it. That is what makes the answer worth trusting — the write engine stores the
+ * Parsing judges and never rewrites. An accepted action carries the values it writes exactly as they were
+ * written: a default, prefault, coercion, catch or transform in the row schema is something the data is measured
+ * against, never something applied to it. That is what makes the answer worth trusting — the write engine stores the
  * values submitted to it, so a gate answering for a rewritten version would be answering about a different
  * write.
  *
@@ -63,17 +63,23 @@ import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
  * (`.default()`, `.prefault()`, `z.coerce`, `.catch()`, `.transform()`). The input type is what a caller may
  * write, and therefore what an accepted action carries.
  *
- * Values a write action cannot carry are refused however tolerantly the row schema treats them: an explicit
- * `undefined`, a non-finite number, anything with no JSON form, or a structure that leads back into itself, at
- * any depth of the data. The write engine refuses the same values for the same reason, so neither can admit a
- * write the other would turn away.
+ * Values a write action cannot carry are refused however tolerantly the row schema treats them: a non-finite
+ * number, anything with no JSON form, or a structure that leads back into itself, at any depth of a create's or
+ * update's `data` and of a push's or add_to_set's `items`. The write engine refuses the same values for the same
+ * reason, so neither can admit a write the other would turn away.
+ *
+ * An explicit `undefined` is refused in the positions where `JSON.stringify` changes what the write says: any key
+ * of `data`, whose absence a create or update would then mean, and any element of `items`, which becomes a `null`
+ * the list never held. An `undefined` key inside a list element is admitted, because those elements are compared
+ * by deep equality, which reads an absent key and an `undefined` one alike.
  *
  * A row schema's own rejections belong to the parse that asked for them: an error map passed to `parse` words
  * them alongside the envelope's, and `reportInput` attaches the field's own value.
  *
- * The as-written guarantee is about item data — a create's or update's `data`, including the nested action of
- * an `array_scope`. The rest of a payload is rebuilt by its own schema: unrecognised keys are dropped, and a
- * `where` clause comes back meaning the same thing without necessarily holding its keys in the same order.
+ * The as-written guarantee is about written values — a create's or update's `data`, a push's or add_to_set's
+ * `items`, and the nested action of an `array_scope`. The rest of a payload is rebuilt by its own schema:
+ * unrecognised keys are dropped, and a `where` clause comes back meaning the same thing without necessarily
+ * holding its keys in the same order.
  */
 export function makeWriteActionSchema<
   T extends Record<string, any> = Record<string, any>,
@@ -118,6 +124,67 @@ const UNWRITABLE_VALUE_MESSAGE = {
   non_finite: "A written value must survive a JSON round trip, and a non-finite number does not",
   malformed: "A written value must survive a JSON round trip, and this value has no JSON form",
 } as const;
+
+/** Rejection wording for an element position, which no verb may fill with an absence. */
+const UNDEFINED_ELEMENT_MESSAGE =
+  "A list has no absent positions, so JSON writes an undefined element as null; leave the element out of the list, or write null if that is the value you mean";
+
+/** Rejection wording for `items` that is not a list at all, and so names no elements to write. */
+const NON_LIST_ITEMS_MESSAGE = "The elements a push or an add_to_set writes must be given as a list";
+
+/**
+ * A dot-path segment as an issue-path segment, reading an index as the number it names.
+ *
+ * `items` is a field of the action document rather than a path into an object only the caller knows, so a
+ * rejection locates an element the way Zod locates one — `['items', 0]` — and a caller can follow the path
+ * straight to the value that failed. A key that merely looks like an index reaches the same property either way.
+ *
+ * Only a segment that reads back as itself is converted, so a key like `01` or one longer than a number can hold
+ * stays the string it was written as — read as a number it would name a property that does not exist.
+ */
+function asIssuePathSegment(segment: string): string | number {
+  return String(Number(segment)) === segment ? Number(segment) : segment;
+}
+
+/**
+ * Judge the elements a list-writing verb carries, without rebuilding the list.
+ *
+ * A list element is written data: it is stored, reloaded, and compared against later writes, so the values it may
+ * hold are the values any write may carry. Every element is walked to any depth, and one that cannot cross a JSON
+ * boundary is refused however tolerantly the row schema treats the list — the write engine refuses it too, so
+ * neither layer can admit a write the other would turn away.
+ *
+ * An `undefined` is the one value read differently here than in a create's or an update's `data`. A dropped KEY is
+ * left alone: these items are compared by deep equality, which reads an absent key and an `undefined` one alike.
+ * A dropped ELEMENT is refused, because a list has no absent positions for it to become — `JSON.stringify` writes
+ * `null` in its place, and the list arrives holding a value it never held.
+ *
+ * @returns A schema that refuses values a write action cannot carry, requires `items` to be a list at all, and
+ * carries the caller's own list through unchanged.
+ *
+ * @remarks
+ * Every offending element is reported, each located by its own index, because which position to fix is the whole
+ * remedy — where a create collapses to one answer, the same undefined being written anywhere in `data` calling for
+ * the same fix.
+ *
+ * The elements are not measured against the array's own element schema. What a list may hold is the row schema's
+ * question, asked of the item as a whole once the write has landed.
+ */
+function validatedItemsAsWritten() {
+  return z.custom<unknown[]>().superRefine((raw, ctx) => {
+    if (!Array.isArray(raw)) {
+      ctx.addIssue({ code: "custom", message: NON_LIST_ITEMS_MESSAGE });
+      return;
+    }
+    for (const issue of findUnwritableItemValues(raw)) {
+      ctx.addIssue({
+        code: "custom",
+        message: issue.undefined_value ? UNDEFINED_ELEMENT_MESSAGE : UNWRITABLE_VALUE_MESSAGE[issue.reason],
+        path: issue.path ? parseDotPropPathSegments(issue.path).map(asIssuePathSegment) : [],
+      });
+    }
+  });
+}
 
 /**
  * Judge written data against a row schema without letting the schema rewrite it.
@@ -261,7 +328,7 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
   const WritePayloadAddToSetSchema = z.object({
     type: z.literal("add_to_set"),
     path: z.string(),
-    items: z.array(z.any()),
+    items: validatedItemsAsWritten(),
     unique_by: z.enum(["deep_equals", "pk"]),
     where: WhereFilterSchema,
   });
@@ -269,7 +336,7 @@ function makeWriteActionAndPayloadSchema(objectSchema?: z.ZodObject<any>) {
   const WritePayloadPushSchema = z.object({
     type: z.literal("push"),
     path: z.string(),
-    items: z.array(z.any()),
+    items: validatedItemsAsWritten(),
     where: WhereFilterSchema,
   });
 

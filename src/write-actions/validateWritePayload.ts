@@ -12,7 +12,8 @@
  *   literals, or schema branches that cannot be proven JSON-safe.
  * - {@link validateWritePayloadValues} checks each write payload. It catches runtime values the schema check
  *   cannot fully cover, especially values admitted by open schemas (Zod passthrough/loose), and JSON edge cases
- *   such as `NaN` or `Infinity` serializing to `null`, or an explicit `undefined` vanishing altogether.
+ *   such as `NaN` or `Infinity` serializing to `null`, or an explicit `undefined` — which vanishes as a key in the
+ *   data a create or update writes, and becomes `null` as an element in the list a push or add_to_set writes.
  *
  * Use both for full coverage. The schema check proves the declared write surface is JSON-safe; the value check is
  * the per-write backstop for actual data.
@@ -93,10 +94,14 @@ export type WritePayloadSchemaIssue = {
 
 // ─────────────────────────────── value safety ───────────────────────────────
 // The per-value JSON-roundtrip walk is the shared `findNonJsonValues` (the `SerialisableJsonSubset` predicate).
-// `create`/`update` data runs it with `flagUndefined`: those two verbs describe the item's own fields, and a
-// dropped key changes what the write means (a create loses a field, an update silently touches nothing). The
-// list-valued verbs do not — their items are compared by deep equality, which reads an absent key and an
-// `undefined` one alike, so nothing changes across the boundary.
+// Which positions an explicit `undefined` is a fault in is what the verbs differ on, and it follows from what
+// `JSON.stringify` does to one:
+//   - A KEY is dropped. `create`/`update` data therefore flags it everywhere, because those two verbs describe
+//     the item's own fields and an absent key changes what the write means (a create loses a field, an update
+//     silently touches nothing). A list item does not: its keys are compared by deep equality, which reads an
+//     absent key and an `undefined` one alike, so nothing changes across the boundary.
+//   - An ELEMENT is rewritten as `null`, because a list has no absent positions. That substitutes a value the
+//     list never held, so it is a fault in every verb that writes one.
 
 /**
  * Every value in a create's or an update's `data` that a write action cannot carry.
@@ -124,6 +129,38 @@ export function findUnwritableDataValues(data: unknown): NonJsonValueIssue[] {
 }
 
 /**
+ * Every value in a push's or an add_to_set's `items` that a write action cannot carry.
+ *
+ * These verbs write list elements, so an explicit `undefined` is a fault in the elements themselves rather than
+ * in the keys of an item: a list has no absent positions, and `JSON.stringify` writes `null` where the undefined
+ * was. An `undefined` KEY inside an item is left alone, because these items are compared by deep equality, which
+ * reads an absent key and an `undefined` one alike.
+ *
+ * Everything that judges written data before it is stored reads this one answer, so the writes a caller can get
+ * past a parse gate are exactly the writes the engine will accept.
+ *
+ * @param items The `items` of a push or add_to_set payload.
+ * @param pathPrefix What the returned paths are written relative to. The engine locates a fault within the whole
+ * item (`tags.0`) by passing the array's own path; a caller locating it within `items` itself passes nothing.
+ * @returns One issue per offending value, each carrying its reason and its dot-path. An explicit `undefined`
+ * element is additionally marked `undefined_value`, so a caller can answer it with advice about how to spell the
+ * intent rather than which JSON type to use.
+ *
+ * @example
+ * findUnwritableItemValues([{ rid: "r1", label: undefined }, undefined], "rows");
+ * // -> [{ reason: 'malformed', path: 'rows.1', undefined_value: true }] — the key inside the first item is fine
+ */
+export function findUnwritableItemValues(items: unknown, pathPrefix = ""): NonJsonValueIssue[] {
+  const issues: NonJsonValueIssue[] = [];
+  findNonJsonValues(items, pathPrefix, issues, { flagUndefined: "array_elements" });
+  return issues;
+}
+
+/** The remedy for an element position, which is the same whichever verb was writing the list. */
+const UNDEFINED_ELEMENT_GUIDANCE =
+  "A list has no absent positions, so JSON writes an undefined element as null: leave the element out of the list, or write null if that is the value you mean.";
+
+/**
  * How to spell the intention an explicit `undefined` was reaching for, one message per verb. The value itself is
  * never quoted — an error may be logged, and the path already locates the fault.
  */
@@ -131,6 +168,8 @@ const UNDEFINED_VALUE_GUIDANCE = {
   create: "A create defines the whole item, so omit the key rather than giving it the value undefined.",
   update:
     "Omit the key to leave it untouched, or use the 'set_property_undefined' / 'delete_property' verbs to clear or remove it.",
+  push: UNDEFINED_ELEMENT_GUIDANCE,
+  add_to_set: UNDEFINED_ELEMENT_GUIDANCE,
 } as const;
 
 /**
@@ -145,9 +184,12 @@ const UNDEFINED_VALUE_GUIDANCE = {
  * (Zod passthrough/loose), plus JSON edge cases such as `NaN` and `Infinity`, which JSON would silently turn into
  * `null`.
  *
- * An explicit `undefined` anywhere in create or update `data` is one of those faults: `JSON.stringify` drops the
- * key, so the same action means something different once it has crossed a boundary. Those issues carry a
- * `message` naming the JSON-safe way to express what was intended.
+ * An explicit `undefined` is one of those faults wherever the same action would mean something different once it
+ * has crossed a boundary. In create or update `data` that is any key, at any depth: `JSON.stringify` drops it. In
+ * a push's or add_to_set's `items` it is an element, at any depth, because a list has no absent position to drop
+ * to and `null` is written instead; an `undefined` key inside such an item is left alone, since those items are
+ * compared by deep equality. Every one of these issues carries a `message` naming the JSON-safe way to express
+ * what was intended.
  *
  * @example
  * validateWritePayloadValues({ type: "create", data: { id: "x", n: Infinity } });
@@ -156,6 +198,10 @@ const UNDEFINED_VALUE_GUIDANCE = {
  * @example
  * validateWritePayloadValues({ type: "update", data: { label: undefined }, where: { id: "x" } });
  * // -> [{ reason: "malformed", path: "label", message: "Omit the key to leave it untouched, or use …" }]
+ *
+ * @example
+ * validateWritePayloadValues({ type: "push", path: "tags", items: [undefined], where: { id: "x" } });
+ * // -> [{ reason: "malformed", path: "tags.0", message: "A list has no absent positions, so JSON writes …" }]
  */
 export function validateWritePayloadValues(
   payload: WritePayload<any>,
@@ -177,9 +223,16 @@ export function validateWritePayloadValues(
       findNonJsonValues(payload.amount, String(payload.path), out);
       break;
     case "push":
-    case "add_to_set":
-      findNonJsonValues(payload.items, String(payload.path), out);
+    case "add_to_set": {
+      for (const issue of findUnwritableItemValues(payload.items, String(payload.path))) {
+        out.push(
+          issue.undefined_value
+            ? { reason: issue.reason, path: issue.path, message: UNDEFINED_VALUE_GUIDANCE[payload.type] }
+            : { reason: issue.reason, path: issue.path },
+        );
+      }
       break;
+    }
     case "array_scope":
       return validateWritePayloadValues(payload.action as WritePayload<any>);
     case "set_property_undefined":

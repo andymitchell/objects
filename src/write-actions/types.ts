@@ -115,6 +115,24 @@ export type WritePayloadDelete<WF extends Record<string, any>> = {
 };
 
 /**
+ * The list a verb writes into an array of `E`.
+ *
+ * `undefined` is withheld even where the shape admits it. A list has no absent positions, so `JSON.stringify`
+ * writes `null` where an undefined element was, and the list arrives holding a value it never held — one the row
+ * schema may refuse on reload, and one that counts as already present next to an existing `null` where the
+ * undefined did not. Leaving the element out of the list says the same thing and survives the journey; writing
+ * `null` says the substituted thing on purpose.
+ *
+ * @example
+ * type WritableTags = WrittenItems<string | undefined>; // string[]
+ *
+ * @remarks
+ * Only the element itself is narrowed. An `undefined` nested deeper inside an element still compiles; the write
+ * is rejected at runtime, at any depth, before anything is stored.
+ */
+type WrittenItems<E> = Exclude<E, undefined>[];
+
+/**
  * The rules for deciding whether an item is already in the array at an element type of `E`.
  *
  * `deep_equals` compares whole values: an item counts as present when an existing element is
@@ -156,8 +174,14 @@ export type WritePayloadAddToSet<
   [P in ArrayProperty<W>]: {
     type: "add_to_set";
     path: P;
-    items: ArrayElement<W, P>[];
-    /** How membership is decided — see {@link AddToSetUniqueBy}. There is no default. */
+    /** The candidate elements — see {@link WrittenItems}. Each is added only if not already present. */
+    items: WrittenItems<ArrayElement<W, P>>;
+    /**
+     * How membership is decided — see {@link AddToSetUniqueBy}. There is no default.
+     *
+     * Read from the element type as the shape declares it, so a field whose elements may be absent still has
+     * its own rule offered — what may be written into such a list is a separate question.
+     */
     unique_by: AddToSetUniqueBy<ArrayElement<W, P>>;
     where: WhereFilterDefinition<WF>;
   };
@@ -170,7 +194,8 @@ export type WritePayloadPush<
   [P in ArrayProperty<W>]: {
     type: "push";
     path: P;
-    items: ArrayElement<W, P>[];
+    /** The elements to append, in order — see {@link WrittenItems}. */
+    items: WrittenItems<ArrayElement<W, P>>;
     where: WhereFilterDefinition<WF>;
   };
 }[ArrayProperty<W>];

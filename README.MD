@@ -76,7 +76,15 @@ Both verbs take a full path, so they reach properties inside nested objects — 
 
 **The rejection reaches any depth, but the types only reach the top level.** A nested `undefined` such as `{ meta: { badge: undefined } }` compiles, because excluding it recursively would cost more in type machinery than it buys. The runtime gate is the authority and rejects it at any depth, before anything is stored.
 
-**The list-valued verbs are a deliberate exception.** `push` and `add_to_set` items may contain `undefined`, because those items are compared by deep equality, which reads an absent key and an `undefined` one as the same thing. Nothing about such an item changes when it crosses a JSON boundary, so there is nothing to protect it from.
+**The list-valued verbs make a deliberate exception, for keys only.** An item a `push` or `add_to_set` writes may hold an `undefined` **key**, because those items are compared by deep equality, which reads an absent key and an `undefined` one as the same thing — nothing about the item changes when it crosses a JSON boundary, so there is nothing to protect it from.
+
+An `undefined` **element** is refused, in the same list. A list has no absent positions, so `JSON.stringify` cannot drop one and writes `null` instead:
+
+```ts
+JSON.stringify([undefined]);   // '[null]'
+```
+
+The list would then hold a value it never held — one the row schema may refuse on reload, and one that deep equality counts as already present next to an existing `null` where the `undefined` did not. Leave the element out of the list, or write `null` if that is the value you mean.
 
 ## Which one do I want?
 

@@ -38,6 +38,9 @@ type ScalarOnly = { id: string; label?: string; score: number };
 /** An array reachable only through a parent that may be absent. */
 type OptParent = { id: string; box?: { rows: { rid: string }[] } };
 
+/** An array whose element type admits `undefined`, as a row read back from a sparse source may declare. */
+type SparseElements = { id: string; tags: (string | undefined)[] };
+
 /** An array whose element arrives as either an object or a scalar. */
 type MixedElements = { id: string; mix: ({ tag: string } | string)[] };
 
@@ -151,6 +154,33 @@ describe("Array verbs", () => {
       path: "tags",
       // @ts-expect-error: 'tags' holds strings
       items: [1],
+      where: { id: "1" },
+    };
+  });
+
+  it("refuses an undefined element even where the element type admits one", () => {
+    // A list position cannot be left empty, so JSON writes an undefined element as null — a value the list did
+    // not hold. A field that may hold one is still not a field a write may put one into.
+    const _push: WritePayload<SparseElements> = {
+      type: "push",
+      path: "tags",
+      // @ts-expect-error: a written element cannot be undefined; leave it out, or write the null JSON would
+      items: ["a", undefined],
+      where: { id: "1" },
+    };
+    const _addToSet: WritePayload<SparseElements> = {
+      type: "add_to_set",
+      path: "tags",
+      // @ts-expect-error: a written element cannot be undefined; leave it out, or write the null JSON would
+      items: [undefined],
+      unique_by: "deep_equals",
+      where: { id: "1" },
+    };
+    // The control: only the undefined half of the element type is withheld, not the element type itself.
+    const _defined: WritePayload<SparseElements> = {
+      type: "push",
+      path: "tags",
+      items: ["a"],
       where: { id: "1" },
     };
   });

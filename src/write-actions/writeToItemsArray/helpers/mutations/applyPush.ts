@@ -1,3 +1,5 @@
+import { cloneDeep } from "lodash-es";
+
 import type { WriteError } from "../../../types.ts";
 
 type PushResult = { value: unknown[]; changed: boolean } | { error: WriteError };
@@ -27,6 +29,11 @@ export function applyPush<T extends Record<string, any>>(
     }
 
     const base: unknown[] = existing ?? [];
-    const clonedItems = structuredClone(items);
+    // A copy, so a stored element and the action that wrote it lead separate lives: items are edited in place as
+    // later writes land on them, and an element installed from the action would let a future write rewrite a
+    // document its author may still retry, log or replay. Reading the values rather than transferring them also
+    // copies a list composed behind a proxy — an Immer draft, a reactive object — as the plain data it stands for;
+    // every value that could not be copied faithfully has already been refused by the payload value gate.
+    const clonedItems = cloneDeep(items);
     return { value: [...base, ...clonedItems], changed: true };
 }

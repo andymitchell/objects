@@ -229,9 +229,61 @@ describe("validateWritePayloadValues — do a payload's WRITTEN VALUES round-tri
             expect(validateWritePayloadValues(payload)).toMatchObject([{ reason: "malformed", path: "label" }]);
         });
 
-        it("leaves the list-valued verbs alone — their items are compared by deep equality, which reads an absent key the same way", () => {
+        it("leaves an undefined key inside a list item alone — those items are compared by deep equality, which reads an absent key the same way", () => {
             expect(validateWritePayloadValues({ type: "push", path: "rows", items: [{ rid: "r1", label: undefined }], where: { id: "1" } })).toEqual([]);
             expect(validateWritePayloadValues({ type: "add_to_set", path: "rows", items: [{ rid: "r1", label: undefined }], unique_by: "deep_equals", where: { id: "1" } })).toEqual([]);
+        });
+    });
+
+    /**
+     * A list position cannot be left empty. `JSON.stringify` writes an undefined element as `null`, so the list
+     * arrives holding a value it never held — one the row schema may refuse on reload, and one that compares as
+     * equal to an existing `null` where the undefined did not.
+     */
+    describe("rejects an explicit undefined element in the list a push or an add_to_set writes", () => {
+        it("reports the element at its index beneath the array's own path", () => {
+            const issues = validateWritePayloadValues({ type: "push", path: "tags", items: ["a", undefined], where: { id: "1" } });
+            expect(issues).toHaveLength(1);
+            expect(issues[0]!.reason).toBe("malformed");
+            expect(issues[0]!.path).toBe("tags.1");
+        });
+
+        it("points the caller at leaving the element out, or writing the null that JSON would substitute", () => {
+            const [issue] = validateWritePayloadValues({ type: "add_to_set", path: "tags", items: [undefined], unique_by: "deep_equals", where: { id: "1" } });
+            expect(issue!.message).toContain("leave the element out");
+            expect(issue!.message).toContain("null");
+        });
+
+        it("names every offending index, since which element to fix is the whole remedy", () => {
+            const issues = validateWritePayloadValues({ type: "push", path: "tags", items: [undefined, "b", undefined], where: { id: "1" } });
+            expect(issues.map((issue) => issue.path)).toEqual(["tags.0", "tags.2"]);
+        });
+
+        it("reaches an element nested inside an item, not only the outermost list", () => {
+            const issues = validateWritePayloadValues({ type: "push", path: "rows", items: [{ rid: "r1", tags: ["a", undefined] }], where: { id: "1" } });
+            expect(issues.map((issue) => issue.path)).toEqual(["rows.0.tags.1"]);
+        });
+
+        it("is caught inside an array_scope's nested push too, so both depths agree", () => {
+            const payload = vp({ type: "array_scope", scope: "children", action: { type: "push", path: "tags", items: [undefined], where: { cid: "c1" } }, where: { id: "1" } });
+            expect(validateWritePayloadValues(payload)).toMatchObject([{ reason: "malformed", path: "tags.0" }]);
+        });
+
+        it("says nothing about the data itself, so an error stays safe to log", () => {
+            const [issue] = validateWritePayloadValues({ type: "push", path: "tags", items: [undefined, "sk-live-9f3"], where: { id: "1" } });
+            expect(issue!.message).not.toContain("sk-live-9f3");
+        });
+
+        it("refuses the element before the substitution it would become can change an answer", () => {
+            // What the refusal is worth: an undefined element becomes the null a list may already hold, and
+            // add_to_set decides membership by comparing values. So the same action asked on either side of a
+            // serialisation boundary gives different answers — appending an element where the list held null, and
+            // finding it already present once JSON has rewritten it. (That null and undefined are distinct to
+            // that comparison is pinned by the engine's own add_to_set semantics.)
+            expect(JSON.parse(JSON.stringify([undefined]))).toEqual([null]);
+
+            expect(validateWritePayloadValues({ type: "add_to_set", path: "entries", items: [undefined], unique_by: "deep_equals", where: { id: "1" } }))
+                .toMatchObject([{ reason: "malformed", path: "entries.0" }]);
         });
     });
 

@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { makeWriteActionSchema } from "./write-action-schemas.ts";
 import { writeToItemsArray } from "./writeToItemsArray/writeToItemsArray.ts";
 import { getWriteErrors } from "./helpers.ts";
-import type { WriteAction, WriteErrorContext, WritePayloadCreate, WritePayloadUpdate } from "./types.ts";
+import type { WriteAction, WriteErrorContext, WritePayloadAddToSet, WritePayloadCreate, WritePayloadPush, WritePayloadUpdate } from "./types.ts";
 import type { DDL } from "../ddl/types.ts";
 import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 import { isDraft, produce } from "immer";
@@ -70,28 +70,37 @@ function carriedData(result: z.ZodSafeParseResult<WriteAction<Record<string, unk
 // written?" states both.
 
 /** Every field the engine-backed cases below write, so one item type serves them all. */
-type EngineRow = { id: string; tag?: string; n?: unknown; s?: string; meta?: Record<string, unknown>; when?: unknown; tags?: string[]; "when.at"?: unknown };
+type EngineRow = { id: string; tag?: string; n?: unknown; s?: string; meta?: Record<string, unknown>; when?: unknown; tags?: string[]; bag?: unknown[]; rows?: { rid: string }[]; "when.at"?: unknown };
 
 /** The two verbs that carry written data. */
 type DataPayload = WritePayloadCreate<EngineRow> | WritePayloadUpdate<EngineRow>;
 
-/** A single root list keyed by `id` — the whole DDL a one-collection case needs. */
-const idKeyedDdl: DDL<EngineRow> = { version: 1, lists: { ".": { primary_key: "id", default_ordering_key: { key: "id", direction: 1 } } } };
+/** Every verb that carries written values: an item's own fields, or the elements of one of its lists. */
+type WritingPayload = DataPayload | WritePayloadPush<EngineRow> | WritePayloadAddToSet<EngineRow>;
+
+/** The root list keyed by `id`, and its one nested list keyed by `rid` — every list the cases below write to. */
+const idKeyedDdl: DDL<EngineRow> = {
+    version: 1,
+    lists: {
+        ".": { primary_key: "id", default_ordering_key: { key: "id", direction: 1 } },
+        rows: { primary_key: "rid" },
+    },
+};
 
 /** Apply one action to `items` with the real engine. */
-function engineWrite(rowSchema: z.ZodObject, payload: DataPayload, items: EngineRow[] = []) {
+function engineWrite(rowSchema: z.ZodObject, payload: WritingPayload, items: EngineRow[] = []) {
     return writeToItemsArray<EngineRow>([{ type: "write", ts: 1, uuid: "u1", payload }], items, rowSchema, idKeyedDdl);
 }
 
 /** The items the engine commits, failing the test if it refused the write. */
-function storedBy(rowSchema: z.ZodObject, payload: DataPayload, items: EngineRow[] = []): EngineRow[] {
+function storedBy(rowSchema: z.ZodObject, payload: WritingPayload, items: EngineRow[] = []): EngineRow[] {
     const result = engineWrite(rowSchema, payload, items);
     if (!result.ok) throw new Error(`the engine refused the write: ${JSON.stringify(getWriteErrors(result))}`);
     return result.changes.final_items;
 }
 
 /** Every error the engine raised for one action — empty when it accepted the write. */
-function engineErrors(rowSchema: z.ZodObject, payload: DataPayload, items: EngineRow[] = []): WriteErrorContext[] {
+function engineErrors(rowSchema: z.ZodObject, payload: WritingPayload, items: EngineRow[] = []): WriteErrorContext[] {
     return getWriteErrors(engineWrite(rowSchema, payload, items));
 }
 
@@ -513,6 +522,152 @@ describe("values that cannot survive a JSON round trip are refused, as the engin
 });
 
 /**
+ * The elements a push or an add_to_set writes are judged as closely as a create's fields.
+ *
+ * A list element is written data too: it is stored, reloaded, and compared against later writes. So the same
+ * question applies — will this value still say what it says once the action has crossed a JSON boundary? — and the
+ * engine answers it for every element before it appends one. The gate agrees, element by element, or a caller is
+ * told a write may proceed that the engine then refuses.
+ *
+ * An `undefined` is the one value the two verbs read differently from a create. A create's undefined KEY is dropped
+ * by `JSON.stringify`, so it is refused; a list item's undefined key is left alone, because these items are
+ * compared by deep equality, which reads an absent key the same way. But an undefined ELEMENT has no absence to
+ * degrade to: `null` is written in its place, and the list arrives holding a value it never held.
+ */
+describe("the elements a list-writing verb carries are judged as the engine judges them", () => {
+
+    /** A row with a list that names no element type, so nothing below is refused for the shape of an element. */
+    const ListRowSchema = z.object({ id: z.string(), bag: z.array(z.any()).optional() });
+    const listAction = makeWriteActionSchema<EngineRow>(ListRowSchema);
+    const existing: EngineRow[] = [{ id: "a" }];
+
+    const UNDEFINED_ELEMENT_MESSAGE =
+        "A list has no absent positions, so JSON writes an undefined element as null; leave the element out of the list, or write null if that is the value you mean";
+
+    /** The engine's verdict on one payload: the reason it refused, and where, or nothing if it accepted. */
+    function engineVerdict(payload: WritingPayload): { reason: string; data_path?: string | undefined } | undefined {
+        const [error] = engineErrors(ListRowSchema, payload, existing);
+        if (!error) return undefined;
+        if (error.type !== "invalid_data_value") throw new Error(`expected a value refusal, got '${error.type}'`);
+        return { reason: error.reason, data_path: error.data_path };
+    }
+
+    it("refuses an element with no JSON form, where the engine refuses the same element", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [new Date()], where: { id: "a" } };
+        expect(ListRowSchema.safeParse({ id: "a", bag: payload.items }).success).toBe(true); // the row schema is content with it
+
+        const issue = onlyIssue(listAction.safeParse(action(payload)));
+        expect(issue.path).toEqual(["payload", "items", 0]);
+        expect(issue.message).toContain("JSON");
+
+        expect(engineVerdict(payload)).toEqual({ reason: "malformed", data_path: "bag.0" });
+    });
+
+    it("refuses a number JSON cannot represent, naming the element it sits in", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [1, Number.NaN], where: { id: "a" } };
+
+        expect(onlyIssue(listAction.safeParse(action(payload))).path).toEqual(["payload", "items", 1]);
+
+        expect(engineVerdict(payload)).toEqual({ reason: "non_finite", data_path: "bag.1" });
+    });
+
+    it("refuses an add_to_set's candidate elements on the same terms as a push's", () => {
+        const payload: WritingPayload = { type: "add_to_set", path: "bag", items: [5n], unique_by: "deep_equals", where: { id: "a" } };
+
+        expect(onlyIssue(listAction.safeParse(action(payload))).path).toEqual(["payload", "items", 0]);
+
+        expect(engineVerdict(payload)).toEqual({ reason: "malformed", data_path: "bag.0" });
+    });
+
+    it("locates a fault nested inside an element, rather than blaming the element as a whole", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [{ ok: 1 }, { when: new Date() }], where: { id: "a" } };
+
+        expect(onlyIssue(listAction.safeParse(action(payload))).path).toEqual(["payload", "items", 1, "when"]);
+
+        expect(engineVerdict(payload)).toEqual({ reason: "malformed", data_path: "bag.1.when" });
+    });
+
+    it("reports every offending element at once, where the engine names only the first", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [new Date(), "ok", Number.NaN], where: { id: "a" } };
+
+        const result = listAction.safeParse(action(payload));
+        if (result.success) throw new Error("expected the parse to be rejected");
+        expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(["payload.items.0", "payload.items.2"]);
+
+        expect(engineVerdict(payload)).toEqual({ reason: "malformed", data_path: "bag.0" });
+    });
+
+    it("admits an undefined key inside an element, which deep equality reads as the absence it becomes", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [{ ok: 1, label: undefined }], where: { id: "a" } };
+
+        expect(listAction.safeParse(action(payload)).success).toBe(true);
+
+        expect(engineVerdict(payload)).toBeUndefined();
+        expect(storedBy(ListRowSchema, payload, existing)[0]?.bag).toStrictEqual([{ ok: 1, label: undefined }]);
+    });
+
+    it("refuses an undefined element, naming the way to say what was meant", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [undefined], where: { id: "a" } };
+
+        const issue = onlyIssue(listAction.safeParse(action(payload)));
+        expect(issue.path).toEqual(["payload", "items", 0]);
+        expect(issue.message).toBe(UNDEFINED_ELEMENT_MESSAGE);
+
+        expect(engineVerdict(payload)).toEqual({ reason: "malformed", data_path: "bag.0" });
+    });
+
+    it("names every undefined element, since which position to fix is the whole remedy", () => {
+        // Where a create collapses to one answer — the remedy is the same wherever in `data` the undefined was —
+        // a list needs the indices: each is a separate element to leave out or spell as null.
+        const payload: WritingPayload = { type: "add_to_set", path: "bag", items: [undefined, "ok", undefined], unique_by: "deep_equals", where: { id: "a" } };
+
+        const result = listAction.safeParse(action(payload));
+        if (result.success) throw new Error("expected the parse to be rejected");
+        expect(result.error.issues.map((issue) => issue.path.join("."))).toEqual(["payload.items.0", "payload.items.2"]);
+        expect(result.error.issues.every((issue) => issue.message === UNDEFINED_ELEMENT_MESSAGE)).toBe(true);
+    });
+
+    it("refuses an undefined element nested inside one, at the depth it was written", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [{ tags: ["a", undefined] }], where: { id: "a" } };
+
+        expect(onlyIssue(listAction.safeParse(action(payload))).path).toEqual(["payload", "items", 0, "tags", 1]);
+
+        expect(engineVerdict(payload)).toEqual({ reason: "malformed", data_path: "bag.0.tags.1" });
+    });
+
+    it("names an element by the number of its position, and a key that merely looks like one by its own name", () => {
+        // `items` is a field of the action document, so a rejection locates an element the way Zod locates one and
+        // a caller can follow the path to the value that failed. A key is only read as a position if it reads back
+        // as itself: `01` is a key, and the property a caller would reach for the number 1 does not exist.
+        const payload: WritingPayload = { type: "push", path: "bag", items: [{ "01": new Date(), "1": "ok" }], where: { id: "a" } };
+
+        expect(onlyIssue(listAction.safeParse(action(payload))).path).toEqual(["payload", "items", 0, "01"]);
+
+        const numbered: WritingPayload = { type: "push", path: "bag", items: [{ "1": new Date() }], where: { id: "a" } };
+        expect(onlyIssue(listAction.safeParse(action(numbered))).path).toEqual(["payload", "items", 0, 1]);
+    });
+
+    it("carries the caller's own list, so nothing downstream reads a value the caller cannot see", () => {
+        const items = ["a", { b: 1 }];
+        const parsed = accepted<EngineRow>(listAction.safeParse(action({ type: "push", path: "bag", items, where: { id: "a" } }))).payload;
+        if (parsed.type !== "push") throw new Error("expected the push verb");
+        expect(parsed.items).toBe(items);
+    });
+
+    it("refuses a list that is not a list at all", () => {
+        expect(onlyIssue(listAction.safeParse(action({ type: "push", path: "bag", items: 5, where: { id: "a" } }))).path).toEqual(["payload", "items"]);
+        expect(listAction.safeParse(action({ type: "push", path: "bag", where: { id: "a" } })).success).toBe(false);
+    });
+
+    it("still admits the elements JSON does carry, including null and a nested list", () => {
+        const payload: WritingPayload = { type: "push", path: "bag", items: [null, "two", { nested: [1, null] }], where: { id: "a" } };
+
+        expect(listAction.safeParse(action(payload)).success).toBe(true);
+        expect(storedBy(ListRowSchema, payload, existing)[0]?.bag).toStrictEqual([null, "two", { nested: [1, null] }]);
+    });
+});
+
+/**
  * Row schemas that can only answer asynchronously.
  *
  * A row schema may check something it cannot know on the spot — that a handle is still free, that a reference
@@ -693,6 +848,12 @@ describe("a stored item never aliases the action that wrote it", () => {
         tags: z.array(z.string()).optional(),
     });
 
+    /** A row whose list holds objects, so an appended element has an interior of its own to be copied. */
+    const ObjectListRowSchema = z.object({
+        id: z.string(),
+        rows: z.array(z.object({ rid: z.string() })).optional(),
+    });
+
     it("leaves an earlier create action untouched when a later write in the same batch changes the item", () => {
         const written = { id: "a", meta: { tag: "as written" } };
         const batch: WriteAction<EngineRow>[] = [
@@ -763,6 +924,58 @@ describe("a stored item never aliases the action that wrote it", () => {
 
             expect(stored[0]?.meta).toStrictEqual({ tag: "new" });
             expect(stored[0]?.meta).not.toBe(behind.meta);
+        });
+
+        it("appends elements composed inside a draft, which the draft cannot be asked for once it is done", () => {
+            let stored: EngineRow[] = [];
+            produce({ id: "a", tags: ["kept"] }, (draft) => {
+                stored = storedBy(AliasRowSchema, { type: "push", path: "tags", items: draft.tags, where: { id: "a" } }, [{ id: "a", tags: [] }]);
+            });
+
+            expect(stored[0]?.tags).toStrictEqual(["kept"]);
+            expect(isDraft(stored[0]?.tags)).toBe(false);
+        });
+
+        it("adds elements composed inside a draft, deciding what is already there before taking the copy", () => {
+            let stored: EngineRow[] = [];
+            produce({ id: "a", rows: [{ rid: "r1" }, { rid: "r2" }] }, (draft) => {
+                stored = storedBy(
+                    ObjectListRowSchema,
+                    { type: "add_to_set", path: "rows", items: draft.rows, unique_by: "deep_equals", where: { id: "a" } },
+                    [{ id: "a", rows: [{ rid: "r1" }] }],
+                );
+            });
+
+            // The element already present is recognised through the proxy, so only the new one is appended.
+            expect(stored[0]?.rows).toStrictEqual([{ rid: "r1" }, { rid: "r2" }]);
+            expect(isDraft(stored[0]?.rows?.[1])).toBe(false);
+        });
+    });
+
+    /**
+     * A list the caller keeps writing to is not the list that was stored.
+     *
+     * `items` is carried by reference all the way to the engine, which is what lets a caller compare the action it
+     * sent against the outcome it got. The copy the engine takes is therefore the only thing standing between a
+     * later edit of that action and a silent rewrite of a record already written.
+     */
+    describe("even when the caller goes on editing the list it wrote", () => {
+
+        it("stores elements held separately from the ones the action carries", () => {
+            const items = [{ rid: "r1" }];
+            const stored = storedBy(ObjectListRowSchema, { type: "push", path: "rows", items, where: { id: "a" } }, [{ id: "a", rows: [] }]);
+
+            expect(stored[0]?.rows).toStrictEqual([{ rid: "r1" }]);
+            expect(stored[0]?.rows?.[0]).not.toBe(items[0]);
+        });
+
+        it("leaves the stored elements as they were when a later edit changes the action's own", () => {
+            const items = [{ rid: "r1" }];
+            const stored = storedBy(ObjectListRowSchema, { type: "add_to_set", path: "rows", items, unique_by: "deep_equals", where: { id: "a" } }, [{ id: "a", rows: [] }]);
+
+            items[0]!.rid = "changed after the write";
+
+            expect(stored[0]?.rows).toStrictEqual([{ rid: "r1" }]);
         });
     });
 });

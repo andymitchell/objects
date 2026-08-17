@@ -1,3 +1,5 @@
+import { cloneDeep } from "lodash-es";
+
 import type { WriteError } from "../../../types.ts";
 import type { DDL, ListRules } from "../../../../ddl/types.ts";
 import { deepEquals } from "./deepEquals.ts";
@@ -11,6 +13,17 @@ type AddToSetResult = { value: unknown[]; changed: boolean } | { error: WriteErr
  *
  * @example
  * applyAddToSet(item, 'tags', ['a', 'b'], 'deep_equals', ddl) // deduplicates by value
+ *
+ * @remarks
+ * An appended element is a copy. A stored element and the action that wrote it lead separate lives: items are
+ * edited in place as later writes land on them, so an element installed from the action would let a future write
+ * rewrite a document its author may still retry, log or replay. The copy reads the element rather than
+ * transferring it, so one composed behind a proxy — an Immer draft, a framework's reactive object — is copied as
+ * the plain data it stands for instead of refused. Every value it could not copy faithfully has already been
+ * refused by the payload value gate, which runs before any mutation.
+ *
+ * Membership is decided before the copy is taken, which is sound for either rule: both read values, and both read
+ * them through a proxy as the data it stands for.
  */
 export function applyAddToSet<T extends Record<string, any>>(
     item: T,
@@ -54,7 +67,7 @@ function addToSetByDeepEquals(base: unknown[], items: unknown[]): AddToSetResult
     const newItems: unknown[] = [];
     for (const item of deduped) {
         if (!base.some(existing => deepEquals(existing, item))) {
-            newItems.push(structuredClone(item));
+            newItems.push(cloneDeep(item));
         }
     }
 
@@ -78,6 +91,10 @@ function addToSetByPk<T extends Record<string, any>>(
     const pkField = listRules.primary_key as string;
 
     // Validate that items are objects (pk mode requires object arrays)
+    // Known edge, deliberately not judged here: a key present but holding `undefined` at the pk position counts as
+    // present for `pkField in item`, while a JSON round trip drops the key and the same item then has no pk at all.
+    // Such a write is accepted before serialisation and refused after it — the one place where an `undefined` key
+    // inside an item is not equivalent to an absent one.
     for (const item of items) {
         if (typeof item !== 'object' || item === null) {
             return { error: { type: 'custom', message: `'pk' uniqueness requires object arrays, but got scalar at path '${path}'` } };
@@ -102,7 +119,7 @@ function addToSetByPk<T extends Record<string, any>>(
         const pkValue = (item as Record<string, unknown>)[pkField];
         if (!seenPks.has(pkValue)) {
             seenPks.add(pkValue);
-            newItems.push(structuredClone(item));
+            newItems.push(cloneDeep(item));
         }
     }
 

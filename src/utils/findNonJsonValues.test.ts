@@ -3,7 +3,7 @@ import { findNonJsonValues, type NonJsonValueIssue } from "./findNonJsonValues.t
 import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 
 /** Walk `value` and return the collected issues — the test-friendly shape over the mutate-an-out-array API. */
-function collect(value: unknown, opts?: { flagUndefined?: boolean }): NonJsonValueIssue[] {
+function collect(value: unknown, opts?: { flagUndefined?: boolean | "array_elements" }): NonJsonValueIssue[] {
     const out: NonJsonValueIssue[] = [];
     findNonJsonValues(value, "", out, opts);
     return out;
@@ -71,6 +71,42 @@ describe("findNonJsonValues — the SerialisableJsonSubset value walk", () => {
                 { reason: "malformed", path: "a", undefined_value: true },
                 { reason: "malformed", path: "big" },
             ]);
+        });
+    });
+
+    /**
+     * A dropped key and a dropped element degrade differently, so a caller may want the second flagged without the
+     * first: `JSON.stringify` erases an undefined KEY, which reads back as the absent key it already resembles,
+     * but rewrites an undefined ELEMENT as `null` — a value the list did not hold before.
+     */
+    describe("an undefined list element is its own fault, separable from an undefined key", () => {
+        it("flags an element under either setting, since a list position cannot be left out", () => {
+            expect(collect(["ok", undefined], { flagUndefined: true })).toEqual([{ reason: "malformed", path: "1", undefined_value: true }]);
+            expect(collect(["ok", undefined], { flagUndefined: "array_elements" })).toEqual([{ reason: "malformed", path: "1", undefined_value: true }]);
+        });
+
+        it("leaves an undefined key alone under the element-only setting, wherever the key sits", () => {
+            expect(collect({ a: undefined }, { flagUndefined: "array_elements" })).toEqual([]);
+            expect(collect([{ a: undefined }], { flagUndefined: "array_elements" })).toEqual([]);
+            expect(collect({ rows: [{ a: undefined }] }, { flagUndefined: "array_elements" })).toEqual([]);
+        });
+
+        it("flags an element nested at any depth, and names it by its index path", () => {
+            expect(collect({ rows: [{ tags: ["a", undefined] }] }, { flagUndefined: "array_elements" }))
+                .toEqual([{ reason: "malformed", path: "rows.0.tags.1", undefined_value: true }]);
+        });
+
+        it("leaves the walk root alone under the element-only setting, since a root is no list position", () => {
+            expect(collect(undefined, { flagUndefined: "array_elements" })).toEqual([]);
+        });
+
+        it("flags a gap in a sparse list, which is the same absence and serialises the same way", () => {
+            // eslint-disable-next-line no-sparse-arrays -- a hole is exactly the input under test: it reads as undefined and JSON writes it as null
+            expect(collect([, 1], { flagUndefined: "array_elements" })).toEqual([{ reason: "malformed", path: "0", undefined_value: true }]);
+        });
+
+        it("still flags nothing when undefined is not being flagged at all", () => {
+            expect(collect(["ok", undefined])).toEqual([]);
         });
     });
 

@@ -6,10 +6,10 @@ import { getWriteErrors, getWriteFailures } from "../helpers.ts";
  * §10: invalid_data_value rejection.
  *
  * A written *value* that cannot losslessly round-trip JSON — a non-finite number (`NaN`/`±Infinity`), a
- * non-JSON carrier (`bigint`/`Date`/`Map`/`Set`/`function`), or an explicit `undefined` in a create's or
- * update's data — must be caught BEFORE any mutation, so the whole action is rejected unrecoverably and state
- * is untouched. This is distinct from a Zod `schema` violation: the value gate runs even for values a loose
- * schema would accept.
+ * non-JSON carrier (`bigint`/`Date`/`Map`/`Set`/`function`), an explicit `undefined` key in a create's or
+ * update's data, or an explicit `undefined` element in the list a push or add_to_set writes — must be caught
+ * BEFORE any mutation, so the whole action is rejected unrecoverably and state is untouched. This is distinct
+ * from a Zod `schema` violation: the value gate runs even for values a loose schema would accept.
  *
  * Safe for the validate-where-sync consumer: every `where` here is legitimate; only the *data* is invalid.
  */
@@ -241,6 +241,34 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                     ddl: flatWithSubItemsDdl,
                 });
                 expectRejectedUnchanged(r, 'malformed', 'sub_items.0.val', (f) => expect(f).toHaveLength(0));
+            });
+
+            // T-10.16 — an ELEMENT, not a key. A list has no absent position for an undefined to become, so JSON
+            // writes `null` in its place; contrast T-12.10, where an undefined KEY inside an item is admitted
+            // because deep equality reads it as the absence it degrades to.
+            test('an undefined item in a push is malformed at its index, leaving the array untouched', async () => {
+                const adapter = createAdapter(FlatSchema, flatDdl);
+                const r = await adapter.apply({
+                    initialItems: [{ id: '1', tags: ['a'] }],
+                    // @ts-expect-error: a written element cannot be undefined; the payload type refuses it, and the runtime answers for an untyped caller
+                    writeActions: [makeAction<Flat>('a1', { type: 'push', path: 'tags', items: ['b', undefined], where: { id: '1' } })],
+                    schema: FlatSchema,
+                    ddl: flatDdl,
+                });
+                expectRejectedUnchanged(r, 'malformed', 'tags.1', (f) => expect(f[0]!.tags).toEqual(['a']));
+            });
+
+            // T-10.17
+            test('an undefined item in an add_to_set is malformed before membership is decided', async () => {
+                const adapter = createAdapter(FlatSchema, flatDdl);
+                const r = await adapter.apply({
+                    initialItems: [{ id: '1', tags: ['a'] }],
+                    // @ts-expect-error: a written element cannot be undefined; the payload type refuses it, and the runtime answers for an untyped caller
+                    writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: [undefined], unique_by: 'deep_equals', where: { id: '1' } })],
+                    schema: FlatSchema,
+                    ddl: flatDdl,
+                });
+                expectRejectedUnchanged(r, 'malformed', 'tags.0', (f) => expect(f[0]!.tags).toEqual(['a']));
             });
         });
     });

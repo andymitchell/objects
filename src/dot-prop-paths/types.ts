@@ -229,20 +229,34 @@ T extends unknown
 // Helper type to decrement depth
 type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];
 
+/**
+ * Every path on `T` that ends at an array, of scalars or of objects alike.
+ *
+ * A path is offered whenever the runtime can walk it, so an optional or nullable object along the
+ * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
+ * escaped grammar (`rank\.value`).
+ */
 export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
-    [K in keyof T]?: K extends string
+    [K in keyof T]-?: K extends string
         ? string extends K
             ? never // Skip index-sig keys: can't enumerate array paths through an index signature
             : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
                 ? U extends object
                     ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
                     : `${Prefix}${EscapeSegment<K>}`
-                : T[K] extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`)
+                : NonNullable<T[K]> extends object
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<NonNullable<T[K]>, Prev[Depth], ''>}`)
                     : never
         : never;
 }[keyof T] : '';
 
+/**
+ * Every path on `T` that ends at an array of objects — the paths a scoped write may target.
+ *
+ * A path is offered whenever the runtime can walk it, so an optional or nullable object along the
+ * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
+ * escaped grammar (`rank\.value`).
+ */
 export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
     [K in keyof T]-?: K extends string
         ? string extends K
@@ -251,8 +265,8 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
                 ? U extends object // Check if the elements of array are objects
                     ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
                     : never // Exclude if the elements are not objects
-                : T[K] extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`)
+                : NonNullable<T[K]> extends object
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<NonNullable<T[K]>, Prev[Depth], ''>}`)
                     : never
         : never;
 }[keyof T] : '';

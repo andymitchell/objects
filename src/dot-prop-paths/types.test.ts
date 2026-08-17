@@ -1,6 +1,6 @@
 import { describe, test, expectTypeOf } from "vitest";
 import { z } from "zod";
-import type { ArrayProperty, DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathToArraySpreadingArrays, NonArrayProperty, NonObjectArrayProperty, NumberProperty, PathValue, PrimaryKeyProperties, ScalarProperties } from "./types.ts";
+import type { ArrayProperty, DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, NonArrayProperty, NonObjectArrayProperty, NumberProperty, PathValue, PrimaryKeyProperties, ScalarProperties } from "./types.ts";
 
 it('no test just type errors', () => {
     type Example = {
@@ -196,6 +196,39 @@ describe('key filters answer with literal keys only', () => {
 
     test('only an always-present string or number key can identify an item', () => {
         expectTypeOf<PrimaryKeyProperties<Mixed>>().toEqualTypeOf<'id' | 'score'>();
+    });
+});
+
+/**
+ * The array-path unions offer exactly the paths the runtime resolves.
+ *
+ * `convertSchemaToDotPropPathTree` unwraps an optional, nullable or defaulted wrapper at every step
+ * of a walk, so a path is resolvable whether or not the objects along it are guaranteed to be there.
+ * The type half has to agree: a path the types withhold is one no caller can write, and a path the
+ * types invent is one the runtime will reject.
+ */
+describe('array paths are offered wherever the runtime can walk to them', () => {
+
+    type Mixed = {
+        id: string;
+        label?: string;
+        tags?: string[];
+        rows: { rid: string }[];
+        maybe_rows?: { rid: string }[];
+        undefinable_rows: { rid: string }[] | undefined;
+    };
+
+    /** An array whose only route is through a parent that may be absent. */
+    type OptParent = { id: string; box?: { rows: { rid: string }[] } };
+
+    test('every array is reachable, in any declaration flavour, and nothing else is', () => {
+        expectTypeOf<DotPropPathToArraySpreadingArrays<Mixed>>()
+            .toEqualTypeOf<'tags' | 'rows' | 'maybe_rows' | 'undefinable_rows'>();
+    });
+
+    test('an array under an optional parent is reachable through that parent', () => {
+        expectTypeOf<DotPropPathToObjectArraySpreadingArrays<OptParent>>().toEqualTypeOf<'box.rows'>();
+        expectTypeOf<DotPropPathToArraySpreadingArrays<OptParent>>().toEqualTypeOf<'box.rows'>();
     });
 });
 

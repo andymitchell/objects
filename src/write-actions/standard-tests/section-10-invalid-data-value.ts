@@ -79,8 +79,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    // @ts-ignore wilfully injecting a bigint (non-JSON) into a number field
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', count: 5n } })],
+                    // @ts-expect-error: wilfully injecting a bigint (non-JSON) into a number field
+                    writeActions: [makeAction<Flat>('a1', { type: 'create', data: { id: '1', count: 5n } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -94,8 +94,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                     const adapter = createAdapter(FlatSchema, flatDdl);
                     const r = await adapter.apply({
                         initialItems: [],
-                        // @ts-ignore wilfully injecting a non-JSON carrier into a string field
-                        writeActions: [makeAction('a1', { type: 'create', data: { id: '1', text: carrier } })],
+                        // @ts-expect-error: wilfully injecting a non-JSON carrier into a string field
+                        writeActions: [makeAction<Flat>('a1', { type: 'create', data: { id: '1', text: carrier } })],
                         schema: FlatSchema,
                         ddl: flatDdl,
                     });
@@ -135,8 +135,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1' }],
-                    // @ts-ignore wilfully injecting a Date (non-JSON) into a string field
-                    writeActions: [makeAction('a1', { type: 'update', data: { text: new Date() }, where: { id: '1' } })],
+                    // @ts-expect-error: wilfully injecting a Date (non-JSON) into a string field
+                    writeActions: [makeAction<Flat>('a1', { type: 'update', data: { text: new Date() }, where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -151,8 +151,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // @ts-ignore wilfully pushing a non-finite number into a string array
-                    writeActions: [makeAction('a1', { type: 'push', path: 'tags', items: ['b', Infinity], where: { id: '1' } })],
+                    // @ts-expect-error: wilfully pushing a non-finite number into a string array
+                    writeActions: [makeAction<Flat>('a1', { type: 'push', path: 'tags', items: ['b', Infinity], where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -164,8 +164,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // @ts-ignore wilfully adding a non-finite number into a string array
-                    writeActions: [makeAction('a1', { type: 'add_to_set', path: 'tags', items: [NaN], unique_by: 'deep_equals', where: { id: '1' } })],
+                    // @ts-expect-error: wilfully adding a non-finite number into a string array
+                    writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: [NaN], unique_by: 'deep_equals', where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -177,8 +177,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // @ts-ignore wilfully adding a bigint (non-JSON) into a string array
-                    writeActions: [makeAction('a1', { type: 'add_to_set', path: 'tags', items: [5n], unique_by: 'deep_equals', where: { id: '1' } })],
+                    // @ts-expect-error: wilfully adding a bigint (non-JSON) into a string array
+                    writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: [5n], unique_by: 'deep_equals', where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });

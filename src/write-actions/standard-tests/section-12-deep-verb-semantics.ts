@@ -1,11 +1,11 @@
 import {
-    FlatSchema, flatDdl,
-    FlatWithSubItemsSchema, flatWithSubItemsDdl,
+    FlatSchema, flatDdl, type Flat,
+    FlatWithSubItemsSchema, flatWithSubItemsDdl, type FlatWithSubItems,
     NestedSchema, nestedDdl, type Nested,
     NestedObjSchema, nestedObjDdl, type NestedObj,
     DeepSetSchema, deepSetDdl,
     NullableFieldsSchema, nullableFieldsDdl, type NullableFields,
-    MatchSchema, matchDdl,
+    MatchSchema, matchDdl, type Match,
     NumericPkSchema, numericPkDdl,
 } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
@@ -263,8 +263,9 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // @ts-ignore pk-mode is invalid on a scalar array — asserting the engine rejects it
-                    writeActions: [makeAction('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
+                    // `unique_by` offers 'pk' for every array path, so pairing it with a scalar array is a rule
+                    // the engine enforces at runtime rather than one the payload type expresses.
+                    writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -281,8 +282,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatWithSubItemsSchema, flatWithSubItemsDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', sub_items: [{ sid: 's1', val: 1 }] }],
-                    // @ts-ignore item is missing its pk field — asserting the engine rejects it
-                    writeActions: [makeAction('a1', { type: 'add_to_set', path: 'sub_items', items: [{ val: 5 }], unique_by: 'pk', where: { id: '1' } })],
+                    // @ts-expect-error: item is missing its pk field — asserting the engine rejects it
+                    writeActions: [makeAction<FlatWithSubItems>('a1', { type: 'add_to_set', path: 'sub_items', items: [{ val: 5 }], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatWithSubItemsSchema,
                     ddl: flatWithSubItemsDdl,
                 });
@@ -418,8 +419,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(MatchSchema, matchDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a', 'b'] }],
-                    // @ts-ignore feeding an object where a scalar value-list is expected — asserting it is a harmless no-op
-                    writeActions: [makeAction('a1', { type: 'pull', path: 'tags', items_where: { foo: 'bar' }, where: { id: '1' } })],
+                    // @ts-expect-error: feeding an object where a scalar value-list is expected — asserting it is a harmless no-op
+                    writeActions: [makeAction<Match>('a1', { type: 'pull', path: 'tags', items_where: { foo: 'bar' }, where: { id: '1' } })],
                     schema: MatchSchema,
                     ddl: matchDdl,
                 });

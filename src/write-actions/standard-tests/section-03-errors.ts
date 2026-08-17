@@ -14,9 +14,9 @@ export function registerErrors(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    writeActions: [makeAction('a1', {
+                    writeActions: [makeAction<Flat>('a1', {
                         type: 'create',
-                        // @ts-ignore wilfully breaking schema
+                        // @ts-expect-error: probing the runtime's response to a create carrying a field the schema does not declare
                         data: { id: '1', unknown_field: 'bad' },
                     })],
                     schema: FlatSchema,
@@ -35,9 +35,9 @@ export function registerErrors(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1' }],
-                    writeActions: [makeAction('a1', {
+                    writeActions: [makeAction<Flat>('a1', {
                         type: 'update',
-                        // @ts-ignore wilfully breaking schema
+                        // @ts-expect-error: probing the runtime's response to an update naming a field the schema does not declare
                         data: { bad_field: 'oops' },
                         where: { id: '1' },
                     })],
@@ -55,9 +55,9 @@ export function registerErrors(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1' }],
-                    writeActions: [makeAction('a1', {
+                    writeActions: [makeAction<Flat>('a1', {
                         type: 'update',
-                        // @ts-ignore wilfully breaking schema
+                        // @ts-expect-error: probing the runtime's response to an update naming a field the schema does not declare
                         data: { bad_field: 'oops' },
                         where: { id: '1' },
                     })],

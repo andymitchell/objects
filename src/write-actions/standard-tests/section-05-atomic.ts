@@ -135,7 +135,7 @@ export function registerAtomic(ctx: SectionCtx): void {
                             scope: 'children',
                             action: {
                                 type: 'create',
-                                // @ts-ignore
+                                // @ts-expect-error: probing the runtime's response to a scoped create carrying a field the element schema does not declare
                                 data: { bad_key: 'fail' },
                             },
                             where: { id: '1' },
@@ -169,7 +169,7 @@ export function registerAtomic(ctx: SectionCtx): void {
                             scope: 'children',
                             action: {
                                 type: 'create',
-                                // @ts-ignore
+                                // @ts-expect-error: probing the runtime's response to a scoped create carrying a field the element schema does not declare
                                 data: { bad_key: 'fail' },
                             },
                             where: { id: '1' },

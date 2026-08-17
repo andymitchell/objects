@@ -223,7 +223,7 @@ describe('writeToItemsArray', () => {
                 const result = writeToItemsArray(
                     [
                         { type: 'write', ts: 0, uuid: '0', payload: { type: 'create', data: { id: '2' } } },
-                        // @ts-ignore wilfully breaking schema
+                        // @ts-expect-error: wilfully breaking schema
                         { type: 'write', ts: 0, uuid: '1', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
                     ],
                     items, ObjSchema, ddl, { atomic: true },
@@ -245,7 +245,7 @@ describe('writeToItemsArray', () => {
                                 where: { id: '1' },
                             })
                         },
-                        // @ts-ignore wilfully breaking schema
+                        // @ts-expect-error: wilfully breaking schema
                         { type: 'write', ts: 0, uuid: '1', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
                     ],
                     originalItems, ObjSchema, ddl, { atomic: true },
@@ -442,7 +442,7 @@ describe('writeToItemsArray', () => {
                                     type: 'array_scope', scope: 'children',
                                     action: {
                                         type: 'create',
-                                        // @ts-ignore
+                                        // @ts-expect-error: probing the runtime's response to a scoped create carrying a field the element schema does not declare
                                         data: { bad_key: 'fail' },
                                     },
                                     where: { id: '1' },
@@ -917,7 +917,7 @@ describe('writeToItemsArray', () => {
                         [
                             write({ type: 'delete_property', path: 'text', where: { id: '1' } }, '0'),
                             write({ type: 'set_property_undefined', path: 'owner', where: { id: '2' } }, '1'),
-                            // @ts-ignore wilfully breaking schema, to fail the batch after both writes land
+                            // @ts-expect-error: wilfully breaking schema, to fail the batch after both writes land
                             { type: 'write', ts: 0, uuid: '2', payload: { type: 'update', data: { none_key: 'bad' }, where: { id: '1' } } },
                         ],
                         items, ObjSchema, ddl, { mutate: true, atomic: true },

@@ -1,4 +1,4 @@
-import { FlatSchema, flatDdl, NullableFieldsSchema, nullableFieldsDdl } from "./fixtures.ts";
+import { FlatSchema, flatDdl, type Flat, NullableFieldsSchema, nullableFieldsDdl } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
 import { getWriteErrors, getWriteFailures, getWriteSuccesses } from "../helpers.ts";
 
@@ -39,8 +39,8 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    // @ts-ignore wilfully omitting the primary key
-                    writeActions: [makeAction('a1', { type: 'create', data: { text: 'no pk' } })],
+                    // @ts-expect-error: wilfully omitting the primary key
+                    writeActions: [makeAction<Flat>('a1', { type: 'create', data: { text: 'no pk' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -76,8 +76,8 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    // @ts-ignore wilfully breaking schema
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', unknown_field: 'bad' } })],
+                    // @ts-expect-error: probing the runtime's response to a create carrying a field the schema does not declare
+                    writeActions: [makeAction<Flat>('a1', { type: 'create', data: { id: '1', unknown_field: 'bad' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -145,8 +145,8 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1' }],
-                    // @ts-ignore wilfully assigning a string to a number field
-                    writeActions: [makeAction('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
+                    // @ts-expect-error: wilfully assigning a string to a number field
+                    writeActions: [makeAction<Flat>('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -165,8 +165,8 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    // @ts-ignore wilfully adding an unknown key under a strict schema
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', unknown_field: 'bad' } })],
+                    // @ts-expect-error: probing the runtime's response to an unknown key under a strict schema
+                    writeActions: [makeAction<Flat>('a1', { type: 'create', data: { id: '1', unknown_field: 'bad' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -186,8 +186,8 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                 const adapter1 = createAdapter(FlatSchema, flatDdl);
                 const rFail = await adapter1.apply({
                     initialItems: [{ id: '1' }],
-                    // @ts-ignore wilfully assigning a string to a number field
-                    writeActions: [makeAction('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
+                    // @ts-expect-error: wilfully assigning a string to a number field
+                    writeActions: [makeAction<Flat>('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });

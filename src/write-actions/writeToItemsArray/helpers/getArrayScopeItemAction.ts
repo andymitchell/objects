@@ -3,7 +3,7 @@ import { getPropertySpreadingArrays } from "../../../dot-prop-paths/getPropertyS
 import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/schema-tree.ts";
 import type { WriteAction } from "../../types.ts";
 import { isWriteActionArrayScopePayload } from "../../helpers.ts";
-import type { DDL } from "../../../ddl/types.ts";
+import type { DDL, ListRules } from "../../../ddl/types.ts";
 import type { DotPropPathValidArrayValue } from "../../../dot-prop-paths/types.ts";
 
 
@@ -33,14 +33,15 @@ export function getArrayScopeSchemaAndDDL<T extends Record<string, any>>(writeAc
     
     type ScopedType = DotPropPathValidArrayValue<T, typeof payload.scope>;
 
-    type ScopedListRules = Partial<DDL<ScopedType>['lists']>;
-    const scopedListRules:ScopedListRules = {};
+    // Each key is re-rooted by slicing the scope prefix off the path at runtime, so the result is an ordinary
+    // string rather than one of `ScopedType`'s literal paths. Collecting the entries as a plain record states
+    // that plainly; the scoped rules regain their type at the single assertion below.
+    const scopedListRules: Record<string, ListRules<any>> = {};
     let ruleKey: keyof typeof rules.lists;
     for( ruleKey in rules.lists ) {
         if( ruleKey.indexOf(scope)===0 ) {
-            const scopedRuleKey = ruleKey===scope? '.' : ruleKey.replace(scope, '') as keyof DDL<ScopedType>['lists'];
+            const scopedRuleKey = ruleKey===scope? '.' : ruleKey.replace(scope, '');
 
-            // @ts-ignore this is solvable, it's just being a pain
             scopedListRules[scopedRuleKey] = rules.lists[ruleKey];
         }
     }
@@ -58,6 +59,9 @@ export function getArrayScopeSchemaAndDDL<T extends Record<string, any>>(writeAc
     const output: ArrayScopeSchemaAndDDL<ScopedType> = {
         writeAction: scopedWriteAction,
         schema: scopedSchema,
+        // A list nested below the scope keeps a leading dot once its prefix is sliced off (`subs.items` under
+        // scope `subs` becomes `.items`), a spelling `resolveDdlListRules` resolves alongside the bare path but
+        // one that `DDL<ScopedType>` does not name, so the scoped rules are asserted rather than inferred.
         ddl: {version: rules.version, lists: scopedListRules} as DDL<ScopedType>
     };
     return output;

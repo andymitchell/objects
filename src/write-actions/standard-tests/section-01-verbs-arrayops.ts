@@ -166,7 +166,8 @@ export function registerVerbsArrayOps(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // @ts-ignore pk-mode is invalid on a scalar array — asserting the engine rejects it
+                    // `unique_by` offers 'pk' for every array path, so pairing it with a scalar array is a rule
+                    // the engine enforces at runtime rather than one the payload type expresses.
                     writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,

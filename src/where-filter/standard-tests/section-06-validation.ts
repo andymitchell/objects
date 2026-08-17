@@ -30,7 +30,7 @@ export function registerValidation(ctx: SectionCtx): void {
             await expectMalformedFilterRejected(
                 () => matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    // @ts-ignore
+                    // @ts-expect-error: probing the matcher's response to a filter that is not an object
                     null,
                     ContactSchema
                 ),
@@ -41,7 +41,7 @@ export function registerValidation(ctx: SectionCtx): void {
             await expectMalformedFilterRejected(
                 () => matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    // @ts-ignore
+                    // @ts-expect-error: probing the matcher's response to a filter that is not an object
                     42,
                     ContactSchema
                 ),
@@ -52,7 +52,7 @@ export function registerValidation(ctx: SectionCtx): void {
             await expectMalformedFilterRejected(
                 () => matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    // @ts-ignore
+                    // @ts-expect-error: probing the matcher's response to a filter that is not an object
                     'invalid',
                     ContactSchema
                 ),
@@ -63,7 +63,7 @@ export function registerValidation(ctx: SectionCtx): void {
             await expectMalformedFilterRejected(
                 () => matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    // @ts-ignore
+                    // @ts-expect-error: probing the matcher's response to a filter wrapped in an array
                     [{ 'contact.name': 'Andy' }],
                     ContactSchema
                 ),
@@ -77,7 +77,7 @@ export function registerValidation(ctx: SectionCtx): void {
             try {
                 const result = await matchJavascriptObject(
                     { contact: { name: 'Andy' } },
-                    // @ts-ignore — intentionally malformed
+                    // @ts-expect-error: $or holds an array of sub-filters, so a bare object is malformed
                     { $or: { 'contact.name': 'Andy' } },
                     ContactSchema
                 );

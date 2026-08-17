@@ -232,13 +232,10 @@ describe('arrays: escaped keys travel through array-spreading paths', () => {
         expectTypeOf<DotPropPathToObjectArraySpreadingArrays<ARRFix2>>().toEqualTypeOf<'l\\.ist'>();
     });
 
-    test('the any-array union escapes dotted keys, junk quirk preserved 1:1', () => {
-        // Parity pin, not an endorsement: DotPropPathToArraySpreadingArrays has a pre-existing quirk —
-        // its `?:` mapped-type modifier makes recursion emit `...undefined` members and `| undefined`.
-        // The escaping change mirrors that behavior exactly; fixing the quirk is a separate concern.
+    test('the any-array union escapes dotted keys at every level', () => {
         type ARRFix2 = { 'l.ist': { v: number }[]; plain: { arr2: string[] } };
         expectTypeOf<DotPropPathToArraySpreadingArrays<ARRFix2>>().toEqualTypeOf<
-            'l\\.ist' | 'plain.undefined' | 'plain.arr2' | 'l\\.ist.undefined' | undefined
+            'l\\.ist' | 'plain.arr2'
         >();
     });
 });

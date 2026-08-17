@@ -20,8 +20,10 @@ import { collectActionWhereIssues } from "./collectActionWhereIssues.ts";
  * `invalid_property_path`. An empty array means the action is valid. The target/filter check spans the WHOLE
  * action tree — the top-level `where` AND every `array_scope` scope, property path, nested `action.where` and
  * `pull.items_where` at any depth (via `collectActionWhereIssues`, shared with the write engine's preflight so
- * both reject identically) — so the gate is complete: a store can rely on the cleared action's entire `payload`
- * being JSON-roundtrippable, every nested operand included.
+ * both reject the faults it names identically) — so the gate is complete: a store can rely on the cleared
+ * action's entire `payload` being JSON-roundtrippable, every nested operand included. Clearing the gate is
+ * not a promise the engine will accept the action: refusing a write aimed at a row's primary key needs the
+ * DDL, which this function does not take, so the engine raises that `invalid_property_path` on its own.
  *
  * @example
  * const errs = validateWriteAction(action, schema, { requireSerialisableJsonSubset: true });

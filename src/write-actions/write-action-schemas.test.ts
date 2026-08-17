@@ -45,8 +45,14 @@ function allArmIssues(issue: z.core.$ZodIssue): z.core.$ZodIssue[] {
     return unionArmIssues(issue).flat();
 }
 
-/** The accepted action a parse produced, failing the test with the rejection's reason if there was one. */
-function accepted(result: z.ZodSafeParseResult<WriteAction<Record<string, unknown>>>): WriteAction<Record<string, unknown>> {
+/**
+ * The accepted action a parse produced, failing the test with the rejection's reason if there was one.
+ *
+ * Generic over the row type, because which verbs a payload union even offers depends on the row: a row with no
+ * array of objects has no `array_scope` variant to narrow to. A case that reads a verb's own fields names its row
+ * type; the rest are content with the loosest one.
+ */
+function accepted<T extends Record<string, any>>(result: z.ZodSafeParseResult<WriteAction<T>>): WriteAction<T> {
     if (!result.success) throw new Error(`expected the parse to be accepted, but it raised: ${result.error.issues[0]?.message}`);
     return result.data;
 }
@@ -277,11 +283,12 @@ describe("what an accepted write action carries", () => {
     });
 
     it("carries a nested array-scope action's data as written too, so both depths agree", () => {
+        type NestedRow = { id: string; children: { cid: string; tag: string }[] };
         const NestedRowSchema = z.object({
             id: z.string(),
             children: z.array(z.object({ cid: z.string(), tag: z.string().default("x") })),
         });
-        const nested = accepted(makeWriteActionSchema(NestedRowSchema).safeParse(action({
+        const nested = accepted(makeWriteActionSchema<NestedRow>(NestedRowSchema).safeParse(action({
             type: "array_scope",
             scope: "children",
             action: { type: "create", data: { cid: "c1" } },

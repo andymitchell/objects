@@ -89,14 +89,23 @@ export type DotPropPathsIncArrayUnion<T extends Record<string,any>, ISD extends 
 
 type Scalar = string | number | boolean | null | undefined;
 
+/*
+The key filters below all read `{[P in keyof T]-?: <test> ? P : never}[keyof T]`. The `-?` is load
+bearing: the mapping is homomorphic, so an optional key would keep its `?` and the `[keyof T]` index
+would then contribute `| undefined` to the key union. `undefined` is not a key, and a mapped type
+indexed by it resolves to `unknown` — which absorbs whatever union the result feeds. Removing the
+modifier from the RESULT does not alter `T[P]` inside the test, so the qualifying keys are unchanged.
+*/
+
 export type ScalarProperties<T> = { // Helper type to pick only scalar properties of an object
-    [P in keyof T]: NonNullable<T[P]> extends Scalar ? P : never
+    [P in keyof T]-?: NonNullable<T[P]> extends Scalar ? P : never
 }[keyof T];
-export type PrimaryKeyProperties<T> = { // Helper type to pick only string/number properties of an object
-    [P in keyof T]: T[P] extends PrimaryKeyValue ? P : never
+/** Keys of T that can identify an item: always present, and holding a string or number. */
+export type PrimaryKeyProperties<T> = {
+    [P in keyof T]-?: T[P] extends PrimaryKeyValue ? P : never
 }[keyof T];
 type ObjectProperties<T> = { // Helper type to pick only non-scalar, non-array object properties
-    [P in keyof T]: NonNullable<T[P]> extends object ? (NonNullable<T[P]> extends Array<any> ? never : P) : never
+    [P in keyof T]-?: NonNullable<T[P]> extends object ? (NonNullable<T[P]> extends Array<any> ? never : P) : never
 }[keyof T];
 type ScalarPath<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
     {
@@ -119,7 +128,7 @@ type ScalarPathSpreadingObjectArrays<T extends Record<string, any>, Prefix exten
             : never;
     }[keyof T];
 type ArrayOfScalarProperties<T> = {
-    [P in keyof T]: NonNullable<T[P]> extends Array<infer U> ? U extends Scalar ? P : never : never
+    [P in keyof T]-?: NonNullable<T[P]> extends Array<infer U> ? U extends Scalar ? P : never : never
 }[keyof T];
 type ScalarPathToScalarArraySpreadingObjectArrays<T extends Record<string, any>, Prefix extends string = ''> = T extends Scalar ? '' :
     T extends Array<infer U>
@@ -145,8 +154,18 @@ export type DotPropPathsUnionScalar<T  extends Record<string, any>> = { [K in Sc
 export type DotPropPathsUnionScalarSpreadingObjectArrays<T  extends Record<string, any>> = { [K in ScalarPathSpreadingObjectArrays<T>]: RemoveTrailingDot<K> }[ScalarPathSpreadingObjectArrays<T>];
 export type DotPropPathsUnionScalarArraySpreadingObjectArrays<T  extends Record<string, any>> = { [K in ScalarPathToScalarArraySpreadingObjectArrays<T>]: RemoveTrailingDot<K> }[ScalarPathToScalarArraySpreadingObjectArrays<T>];
 
+/**
+ * Keys of T whose value is not an array, however the key is declared.
+ *
+ * An optional (`tags?: string[]`) or undefinable (`tags: string[] | undefined`) array is still an
+ * array, so it is excluded — the question is what the key HOLDS, not whether it is always present.
+ * A key whose only value is `null` is answered before the array test, because `NonNullable<null>` is
+ * `never` and `never` satisfies every constraint, `Array<any>` included.
+ */
 export type NonArrayProperty<T> = {
-    [P in keyof T]: T[P] extends Array<any> ? never : P
+    [P in keyof T]-?: [NonNullable<T[P]>] extends [never]
+        ? P
+        : NonNullable<T[P]> extends Array<any> ? never : P
 }[keyof T];
 
 /**
@@ -210,20 +229,34 @@ T extends unknown
 // Helper type to decrement depth
 type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];
 
+/**
+ * Every path on `T` that ends at an array, of scalars or of objects alike.
+ *
+ * A path is offered whenever the runtime can walk it, so an optional or nullable object along the
+ * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
+ * escaped grammar (`rank\.value`).
+ */
 export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
-    [K in keyof T]?: K extends string
+    [K in keyof T]-?: K extends string
         ? string extends K
             ? never // Skip index-sig keys: can't enumerate array paths through an index signature
             : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
                 ? U extends object
                     ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
                     : `${Prefix}${EscapeSegment<K>}`
-                : T[K] extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<T[K], Prev[Depth], ''>}`)
+                : NonNullable<T[K]> extends object
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<NonNullable<T[K]>, Prev[Depth], ''>}`)
                     : never
         : never;
 }[keyof T] : '';
 
+/**
+ * Every path on `T` that ends at an array of objects — the paths a scoped write may target.
+ *
+ * A path is offered whenever the runtime can walk it, so an optional or nullable object along the
+ * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
+ * escaped grammar (`rank\.value`).
+ */
 export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
     [K in keyof T]-?: K extends string
         ? string extends K
@@ -232,8 +265,8 @@ export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any
                 ? U extends object // Check if the elements of array are objects
                     ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
                     : never // Exclude if the elements are not objects
-                : T[K] extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<T[K], Prev[Depth], ''>}`)
+                : NonNullable<T[K]> extends object
+                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<NonNullable<T[K]>, Prev[Depth], ''>}`)
                     : never
         : never;
 }[keyof T] : '';
@@ -361,7 +394,7 @@ export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends 
 
 /** Keys of T whose value is any variable-length array (scalar or object). Excludes tuples. */
 export type ArrayProperty<T> = {
-    [P in keyof T]: NonNullable<T[P]> extends Array<any>
+    [P in keyof T]-?: NonNullable<T[P]> extends Array<any>
         ? number extends NonNullable<T[P]>['length'] ? P : never  // exclude tuples
         : never
 }[keyof T];
@@ -372,7 +405,7 @@ export type ArrayElement<T extends Record<string, any>, P extends keyof T> =
 
 /** Keys of T whose value is generic number (excludes literal types like 1 | 2). */
 export type NumberProperty<T> = {
-    [P in keyof T]: NonNullable<T[P]> extends number
+    [P in keyof T]-?: NonNullable<T[P]> extends number
         ? number extends NonNullable<T[P]> ? P : never  // bidirectional: excludes literals
         : never
 }[keyof T];

@@ -1,11 +1,11 @@
 import {
-    FlatSchema, flatDdl,
-    FlatWithSubItemsSchema, flatWithSubItemsDdl,
+    FlatSchema, flatDdl, type Flat,
+    FlatWithSubItemsSchema, flatWithSubItemsDdl, type FlatWithSubItems,
     NestedSchema, nestedDdl, type Nested,
-    NestedObjSchema, nestedObjDdl,
+    NestedObjSchema, nestedObjDdl, type NestedObj,
     DeepSetSchema, deepSetDdl,
     NullableFieldsSchema, nullableFieldsDdl, type NullableFields,
-    MatchSchema, matchDdl,
+    MatchSchema, matchDdl, type Match,
     NumericPkSchema, numericPkDdl,
 } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, resolveCapability, type SectionCtx } from "./harness.ts";
@@ -17,7 +17,8 @@ import { assertWriteArrayScope, getWriteErrors, getWriteFailures, getWriteSucces
  * The fine-grained mutation rules every implementation must reproduce identically: an explicit `undefined`
  * in written data is refused while `null` is kept; merge deep-merges objects but replaces arrays wholesale,
  * whereas assign replaces wholesale; add_to_set's deep-equal treats `undefined`≡missing but `null`≠`undefined` and is
- * array-order-sensitive; pull never initialises a missing field; and several pinned quirks (dirty-on-
+ * array-order-sensitive; pull never initialises a missing field; a row's primary key is never writable,
+ * whether an update names it in `data` or a path verb aims at it; and several pinned quirks (dirty-on-
  * no-change for update/array_scope, no-op short-circuit for push/inc/add_to_set, falsy-PK-as-missing).
  */
 export function registerDeepVerbSemantics(ctx: SectionCtx): void {
@@ -54,7 +55,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(NestedObjSchema, nestedObjDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', note: 'x' }],
-                    writeActions: [makeAction('a1', { type: 'update', data: { note: undefined }, where: { id: '1' } })],
+                    // @ts-expect-error: probing the runtime's response to the `undefined` the payload type refuses
+                    writeActions: [makeAction<NestedObj>('a1', { type: 'update', data: { note: undefined }, where: { id: '1' } })],
                     schema: NestedObjSchema,
                     ddl: nestedObjDdl,
                 });
@@ -186,6 +188,40 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                     expect(getWriteErrors(r.result).some(e => e.type === 'update_altered_key')).toBe(false);
                 }, implName);
             });
+
+            // T-12.35
+            test('setting the primary key to a falsy value is an altered key, not a crash', async () => {
+                const adapter = createAdapter(FlatSchema, flatDdl);
+                const r = await adapter.apply({
+                    initialItems: [{ id: '1', text: 'a' }],
+                    writeActions: [makeAction('a1', { type: 'update', data: { id: '' }, where: { id: '1' } })],
+                    schema: FlatSchema,
+                    ddl: flatDdl,
+                });
+                expectOrAcknowledgeUnsupported(r, (r) => {
+                    expect(r.result.ok).toBe(false);
+                    expect(getWriteErrors(r.result)[0]?.type).toBe('update_altered_key');
+                    expect(r.finalItems).toEqual([{ id: '1', text: 'a' }]);
+                }, implName);
+            });
+
+            // T-12.36 — the same falsy value is judged differently on create (T-12.34): there the payload IS the
+            // item and carries no usable locator, so it is `missing_key`; here the row already has a key, and
+            // naming any other value in `data` is an attempted change to it.
+            test('a falsy numeric primary key on update is an altered key, not a missing key', async () => {
+                const adapter = createAdapter(NumericPkSchema, numericPkDdl);
+                const r = await adapter.apply({
+                    initialItems: [{ id: 5, text: 'ok' }],
+                    writeActions: [makeAction('a1', { type: 'update', data: { id: 0 }, where: { id: 5 } })],
+                    schema: NumericPkSchema,
+                    ddl: numericPkDdl,
+                });
+                expectOrAcknowledgeUnsupported(r, (r) => {
+                    expect(r.result.ok).toBe(false);
+                    expect(getWriteErrors(r.result)[0]?.type).toBe('update_altered_key');
+                    expect(r.finalItems).toEqual([{ id: 5, text: 'ok' }]);
+                }, implName);
+            });
         });
 
         describe('12.5 add_to_set deep_equals nuances', () => {
@@ -262,8 +298,9 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // @ts-ignore pk-mode is invalid on a scalar array — asserting the engine rejects it
-                    writeActions: [makeAction('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
+                    // `unique_by` offers 'pk' for every array path, so pairing it with a scalar array is a rule
+                    // the engine enforces at runtime rather than one the payload type expresses.
+                    writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -280,8 +317,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatWithSubItemsSchema, flatWithSubItemsDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', sub_items: [{ sid: 's1', val: 1 }] }],
-                    // @ts-ignore item is missing its pk field — asserting the engine rejects it
-                    writeActions: [makeAction('a1', { type: 'add_to_set', path: 'sub_items', items: [{ val: 5 }], unique_by: 'pk', where: { id: '1' } })],
+                    // @ts-expect-error: item is missing its pk field — asserting the engine rejects it
+                    writeActions: [makeAction<FlatWithSubItems>('a1', { type: 'add_to_set', path: 'sub_items', items: [{ val: 5 }], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatWithSubItemsSchema,
                     ddl: flatWithSubItemsDdl,
                 });
@@ -417,8 +454,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(MatchSchema, matchDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a', 'b'] }],
-                    // @ts-ignore feeding an object where a scalar value-list is expected — asserting it is a harmless no-op
-                    writeActions: [makeAction('a1', { type: 'pull', path: 'tags', items_where: { foo: 'bar' }, where: { id: '1' } })],
+                    // @ts-expect-error: feeding an object where a scalar value-list is expected — asserting it is a harmless no-op
+                    writeActions: [makeAction<Match>('a1', { type: 'pull', path: 'tags', items_where: { foo: 'bar' }, where: { id: '1' } })],
                     schema: MatchSchema,
                     ddl: matchDdl,
                 });
@@ -649,6 +686,29 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                     expect(getWriteFailures(r.result).find(f => f.action_uuid === 'a2')?.errors[0]?.type).toBe('missing_key');
                     expect(r.finalItems).toHaveLength(1);
                     expect(r.finalItems[0]!.id).toBe(5);
+                }, implName);
+            });
+        });
+
+        describe('12.13 primary-key integrity under path verbs', () => {
+
+            // T-12.37
+            test('a path verb naming the primary key is refused before any item is matched', async () => {
+                const adapter = createAdapter(NumericPkSchema, numericPkDdl);
+                const r = await adapter.apply({
+                    initialItems: [{ id: 5, text: 'ok' }],
+                    writeActions: [makeAction('a1', { type: 'inc', path: 'id', amount: 1, where: { id: 999 } })],
+                    schema: NumericPkSchema,
+                    ddl: numericPkDdl,
+                });
+                // The key locates the row for the rest of the batch and for the caller after it, so aiming a
+                // verb at it is a fault in the action itself — answered whether or not the where reaches a row.
+                expectOrAcknowledgeUnsupported(r, (r) => {
+                    expect(r.result.ok).toBe(false);
+                    const err = getWriteErrors(r.result)[0];
+                    expect(err?.type).toBe('invalid_property_path');
+                    if (err && err.type === 'invalid_property_path') expect(err.reason).toBe('primary_key');
+                    expect(r.finalItems).toEqual([{ id: 5, text: 'ok' }]);
                 }, implName);
             });
         });

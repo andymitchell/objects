@@ -4,7 +4,7 @@ import { writeToItemsArray } from "./writeToItemsArray.ts";
 import { getWriteFailures } from "../helpers.ts";
 import { WriteErrorSchema } from "../write-action-schemas.ts";
 import type { DDL } from "../../ddl/types.ts";
-import type { WriteAction } from "../types.ts";
+import type { WriteAction, WritePayloadCreate } from "../types.ts";
 import type { WhereFilterDefinition } from "../../where-filter/types.ts";
 
 // `.strict()`: unknown_field is flagged only under strict objects (the only mode the engine enforces
@@ -27,7 +27,7 @@ const seed = (): Row[] => [{ id: "1", text: "a" }];
 const where = (w: unknown) => w as WhereFilterDefinition<Row>;
 const update = (w: unknown, uuid = "u"): WriteAction<Row> => ({ type: "write", ts: 0, uuid, payload: { type: "update", data: { text: "z" }, where: where(w) } });
 const del = (w: unknown, uuid = "u"): WriteAction<Row> => ({ type: "write", ts: 0, uuid, payload: { type: "delete", where: where(w) } });
-const create = (data: Row, uuid = "u"): WriteAction<Row> => ({ type: "write", ts: 0, uuid, payload: { type: "create", data } });
+const create = (data: WritePayloadCreate<Row>["data"], uuid = "u"): WriteAction<Row> => ({ type: "write", ts: 0, uuid, payload: { type: "create", data } });
 
 describe("writeToItemsArray — invalid where clause", () => {
     it("rejects an update whose where references an unknown field, mutating nothing", () => {

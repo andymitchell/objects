@@ -99,7 +99,7 @@ export function registerEdgeCases(ctx: SectionCtx): void {
         test('non-existent deep dot-prop path: returns false', async () => {
             const result = await matchJavascriptObject(
                 { contact: { name: 'Andy' } },
-                // @ts-ignore
+                // @ts-expect-error: probing the matcher's response to a path the schema does not declare
                 { 'contact.nonexistent.deep': 'x' },
                 ContactSchema
             );

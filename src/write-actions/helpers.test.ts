@@ -2,9 +2,8 @@ import { describe, it, expect, expectTypeOf } from "vitest";
 import { isUpdateOrDeleteWritePayload } from "./helpers.ts";
 import type { WritePayload } from "./types.ts";
 
-// Keyed off a shallow single-array type, where `WritePayload<T>['type']` resolves cleanly to every arm (it
-// collapses to `unknown` for a nested-array T).
-type Canary = { id: string; score: number; tags: { tid: string }[] };
+/** A row shape offering every verb: scalars to update, and an array of objects to scope into. */
+type Canary = { id: string; score: number; label?: string; tags: { tid: string }[] };
 
 describe("isUpdateOrDeleteWritePayload — narrowing to the payloads that act on existing items", () => {
 

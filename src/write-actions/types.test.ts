@@ -324,8 +324,6 @@ describe("1. WritePayload<T> construction", () => {
     });
   });
 
-  // Annotated with the SPECIFIC payload types throughout: `WritePayload<Profile>` widens to `unknown` for a
-  // shape carrying optional properties, which would make every positive assertion here vacuous.
   describe("1.6 An explicit undefined value in written data", () => {
     /** A field whose declared type includes `null`, so the contrast between a stored `null` and a refused `undefined` is expressible. */
     type Marked = { id: string; note: string | null };

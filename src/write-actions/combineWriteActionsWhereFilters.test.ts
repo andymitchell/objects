@@ -6,7 +6,7 @@ import { assertWriteArrayScope } from "./helpers.ts";
 import { combineWriteActionsWhereFilters, type CombineWriteActionsWhereFiltersResult } from "./index.ts";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
 import type { DDL } from "../ddl/types.ts";
-import type { WriteAction, WritePayload, WriteError } from "./types.ts";
+import type { WriteAction, WritePayload, WritePayloadCreate, WriteError } from "./types.ts";
 import type { Obj, Child, NumObj, Arm } from "./combineWriteActionsWhereFilters.harness.ts";
 import {
     ObjSchema, ddl, numDdl, DS,
@@ -401,6 +401,9 @@ describe("combineWriteActionsWhereFilters", () => {
     });
 
     describe("when a create is missing its primary key", () => {
+        /** What a create action carries: an item as the action spells it, which is narrower than the row type. */
+        type ObjCreateData = WritePayloadCreate<Obj>["data"];
+
         const badPks: { name: string; data: Record<string, unknown> }[] = [
             { name: "absent", data: { score: 0 } },
             { name: "null", data: { id: null, score: 0 } },
@@ -409,7 +412,7 @@ describe("combineWriteActionsWhereFilters", () => {
             { name: "object", data: { id: {}, score: 0 } },
         ];
         it.each(badPks)("reports missing_key without throwing when the primary key is $name", ({ data }) => {
-            const run = () => combineWriteActionsWhereFilters(ddl, [wa({ type: "create", data: raw<Obj>(data) })]);
+            const run = () => combineWriteActionsWhereFilters(ddl, [wa({ type: "create", data: raw<ObjCreateData>(data) })]);
             expect(run).not.toThrow();
             const res = run();
             expect(res.success).toBe(false);
@@ -418,9 +421,9 @@ describe("combineWriteActionsWhereFilters", () => {
         });
         it("collects every missing-key error rather than failing fast", () => {
             const batch = [
-                wa({ type: "create", data: raw<Obj>({ score: 0 }) }),
-                wa({ type: "create", data: raw<Obj>({ id: null, score: 0 }) }),
-                wa({ type: "create", data: raw<Obj>({ id: true, score: 0 }) }),
+                wa({ type: "create", data: raw<ObjCreateData>({ score: 0 }) }),
+                wa({ type: "create", data: raw<ObjCreateData>({ id: null, score: 0 }) }),
+                wa({ type: "create", data: raw<ObjCreateData>({ id: true, score: 0 }) }),
             ];
             const res = combineWriteActionsWhereFilters(ddl, batch);
             expect(res.success).toBe(false);
@@ -434,7 +437,7 @@ describe("combineWriteActionsWhereFilters", () => {
         it("fails the whole batch when a valid action accompanies a bad create", () => {
             const batch = [
                 wa({ type: "update", data: { text: "u" }, where: { id: "r1" } }),
-                wa({ type: "create", data: raw<Obj>({ score: 0 }) }),
+                wa({ type: "create", data: raw<ObjCreateData>({ score: 0 }) }),
             ];
             const res = combineWriteActionsWhereFilters(ddl, batch);
             expect(res.success).toBe(false);
@@ -498,10 +501,8 @@ describe("combineWriteActionsWhereFilters", () => {
             expectTypeOf(combineWriteActionsWhereFilters<Obj>).parameter(2).toEqualTypeOf<boolean | undefined>();
         });
         it("keeps the payload arm set exhaustive", () => {
-            // Keyed off a shallow single-array type, where `WritePayload<T>['type']` resolves cleanly to every
-            // arm (it collapses to `unknown` for a nested-array T). Adding/removing an arm breaks this.
-            type CanaryObj = { id: string; score: number; tags: { tid: string }[] };
-            type SourceArm = WritePayload<CanaryObj>["type"];
+            // Keyed off the fixture the whole suite writes against, so adding or removing a verb breaks this.
+            type SourceArm = WritePayload<Obj>["type"];
             const _arms: Record<SourceArm, true> = {
                 create: true, update: true, delete: true, array_scope: true,
                 add_to_set: true, push: true, pull: true, inc: true,

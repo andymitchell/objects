@@ -1,4 +1,4 @@
-import { FlatSchema, flatDdl, NestedSchema, nestedDdl, type Nested } from "./fixtures.ts";
+import { FlatSchema, flatDdl, type Flat, NestedSchema, nestedDdl, type Nested } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
 import { assertWriteArrayScope } from "../helpers.ts";
 
@@ -106,8 +106,8 @@ export function registerResultContract(ctx: SectionCtx): void {
             const adapter = createAdapter(FlatSchema, flatDdl);
             const r = await adapter.apply({
                 initialItems: [{ id: '1' }],
-                // @ts-ignore wilfully assigning a string to a number field
-                writeActions: [makeAction('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
+                // @ts-expect-error: wilfully assigning a string to a number field
+                writeActions: [makeAction<Flat>('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
                 schema: FlatSchema,
                 ddl: flatDdl,
             });

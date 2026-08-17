@@ -1,4 +1,5 @@
 
+import matchJavascriptObject from "./matchJavascriptObject.ts";
 import { isLogicFilter, isPartialObjectFilter } from "./typeguards.ts";
 import { type PartialObjectFilter, type PartialObjectFilterStrict, type WhereFilterDefinition } from "./types.ts"
 
@@ -1386,6 +1387,71 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
                 // @ts-expect-error nested Date collapses to never, making the object operand uninhabitable
                 meta: { created: new Date(), name: 'x' }
             }) satisfies WhereFilterDefinition<NestedCarrierDoc>;
+        });
+    });
+
+    describe('a path that steps through an index signature is typed one level short of its leaf', () => {
+        // An open-ended key — one an index signature contributes — is spelled `${string}` in the path
+        // grammar, and that template matches any number of further segments. Every path continuing past
+        // such a key therefore collapses onto the one entry the template names, whose value is what the
+        // index signature holds: the type refuses the value the named leaf really has, and accepts the
+        // value of the container in its place. The matcher reads the same path segment by segment and
+        // answers on the leaf, as the runtime assertions here show.
+        //
+        // This is one disagreement between what the path generators enumerate and what the runtime path
+        // readers walk, and it has two siblings: a field holding an array of arrays, which collapses the
+        // whole key domain (pinned above), and a readonly array, which the walks read as a plain object
+        // and offer `length` and the array methods as if they were data. They are one job rather than
+        // three, and a deliberate one: the generator that skips index-sig keys also names the lists a DDL
+        // declares rules for and the paths an `array_scope` write may target, so enumerating more paths
+        // through an index signature widens the write contract as well as the filter's.
+
+        type RecordLeafDoc = { id: string; meta: Record<string, Record<string, string>> };
+        type NestedRowsDoc = { id: string; rows: { meta: Record<string, Record<string, string>> }[] };
+        type IndexedListDoc = { id: string; groups: Record<string, { items: { value: number }[] }> };
+
+        const recordLeaf = { id: '1', meta: { a: { b: 'x' } } };
+        const nestedRows = { id: '1', rows: [{ meta: { a: { b: 'x' } } }] };
+        const indexedList = { id: '1', groups: { foo: { items: [{ value: 1 }] } } };
+
+        // The filters below are the ones the type refuses, so they reach the matcher through an open row
+        // type. What it answers is the behaviour each pin is measured against.
+        const answer = (obj: Record<string, any>, filter: WhereFilterDefinition<Record<string, any>>) =>
+            matchJavascriptObject(obj, filter);
+
+        it('control: one segment past the index signature is typed correctly, and the matcher agrees', () => {
+            ({ 'meta.a': { b: 'x' } }) satisfies WhereFilterDefinition<RecordLeafDoc>;
+            expect(answer(recordLeaf, { 'meta.a': { b: 'x' } })).toBe(true);
+        });
+
+        it('gap: the leaf beyond the index signature is refused, on a plain row and through an array alike', () => {
+            // @ts-expect-error TODO the value resolves to the record the index signature holds, not the named leaf
+            ({ 'meta.a.b': 'x' }) satisfies WhereFilterDefinition<RecordLeafDoc>;
+            // @ts-expect-error TODO the same, where the record sits inside an array element
+            ({ 'rows.meta.a.b': 'x' }) satisfies WhereFilterDefinition<NestedRowsDoc>;
+            // @ts-expect-error TODO the same, where the array of objects sits under the index signature
+            ({ 'groups.foo.items.value': 1 }) satisfies WhereFilterDefinition<IndexedListDoc>;
+
+            expect(answer(recordLeaf, { 'meta.a.b': 'x' })).toBe(true);
+            expect(answer(nestedRows, { 'rows.meta.a.b': 'x' })).toBe(true);
+            expect(answer(indexedList, { 'groups.foo.items.value': 1 })).toBe(true);
+        });
+
+        it('gap: the container-shaped value is accepted at that same key, and matches nothing', () => {
+            // These COMPILE, and the matcher answers false for the very document that holds the leaf: the
+            // type is offering a comparison no row can satisfy. Typing the leaf correctly turns each of
+            // them into a compile error, which is how this pin reports that the gap has closed.
+            ({ 'meta.a.b': { c: 'x' } }) satisfies WhereFilterDefinition<RecordLeafDoc>;
+            ({ 'rows.meta.a.b': { c: 'x' } }) satisfies WhereFilterDefinition<NestedRowsDoc>;
+
+            expect(answer(recordLeaf, { 'meta.a.b': { c: 'x' } })).toBe(false);
+            expect(answer(nestedRows, { 'rows.meta.a.b': { c: 'x' } })).toBe(false);
+        });
+
+        it('gap: an array of objects under an index signature is not read as an array at all', () => {
+            // @ts-expect-error TODO the object-array path generator skips index-sig keys, so no array filter is offered here
+            ({ 'groups.foo.items': { $elemMatch: { value: 1 } } }) satisfies WhereFilterDefinition<IndexedListDoc>;
+            expect(answer(indexedList, { 'groups.foo.items': { $elemMatch: { value: 1 } } })).toBe(true);
         });
     });
 

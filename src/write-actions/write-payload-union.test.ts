@@ -50,6 +50,22 @@ type ListOfLists = { id: string; grid: string[][] };
 /** An array whose element is known to have keys, without saying which. */
 type LooseElements = { id: string; rows: Record<string, unknown>[] };
 
+/** Arrays whose element type names no key at all, in the two spellings that say so. */
+type KeylessElements = {
+  id: string;
+  values: {}[];
+  entries: Record<never, never>[];
+};
+
+/** An array whose element arrives as one of two objects with no key in common. */
+type DisjointElements = { id: string; either: ({ a: string } | { b: number })[] };
+
+/** An array whose elements differ but every one of them names the same key. */
+type TaggedElements = {
+  id: string;
+  events: ({ kind: "a"; a: string } | { kind: "b"; b: number })[];
+};
+
 /** Object arrays declared in the flavours that make a key optional or undefinable. */
 type WithOptObjArr = {
   id: string;
@@ -253,6 +269,55 @@ describe("Array verbs", () => {
         // field holding an array of arrays collapses its whole filter key domain, a gap pinned in
         // the where-filter type tests.
         where: {},
+      };
+    });
+
+    it("refuses a primary key where the element names no key to read", () => {
+      const _empty: WritePayload<KeylessElements> = {
+        type: "add_to_set",
+        path: "values",
+        items: [{}],
+        // @ts-expect-error: an element that names no key has none to be unique by
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+      const _record: WritePayload<KeylessElements> = {
+        type: "add_to_set",
+        path: "entries",
+        items: [{}],
+        // @ts-expect-error: a record declaring no keys names none to be unique by either
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+      // The control for both: the same paths accept the rule that reads no key, so the suppressions
+      // above are answering the `unique_by` question rather than standing in for some other error.
+      const _byValue: WritePayload<KeylessElements> = {
+        type: "add_to_set",
+        path: "values",
+        items: [{}],
+        unique_by: "deep_equals",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses a primary key where the elements share no key", () => {
+      const _disjoint: WritePayload<DisjointElements> = {
+        type: "add_to_set",
+        path: "either",
+        items: [{ a: "x" }],
+        // @ts-expect-error: no key is present on every element, so none can identify one
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+    });
+
+    it("offers a primary key where every element names the same key", () => {
+      const _tagged: WritePayload<TaggedElements> = {
+        type: "add_to_set",
+        path: "events",
+        items: [{ kind: "a", a: "x" }],
+        unique_by: "pk",
+        where: { id: "1" },
       };
     });
 

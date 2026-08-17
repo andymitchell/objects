@@ -139,20 +139,25 @@ type WrittenItems<E> = Exclude<E, undefined>[];
  * structurally identical to it. `pk` compares one field: an item counts as present when an element
  * already carries the same primary key, however else the two differ.
  *
- * `pk` therefore needs an element with a key to read, and is offered only where the shape guarantees
- * one. A scalar has no key. Nor has a list, whichever way it resembles an object. An element that may
- * arrive as either an object or a scalar cannot be relied on for one either, so it is refused as well.
- * An element the shape describes as unknown keeps both rules — the caller may know what the type
- * could not say.
+ * `pk` therefore needs an element that names a key to read, and is offered only where the shape names
+ * one. A scalar has no key. Nor has a list, whichever way it resembles an object. Nor has an object
+ * type that declares no keys, or a union of objects whose members share none — each of them looks like
+ * an object while leaving nothing to identify an element by. An element that may arrive as either an
+ * object or a scalar cannot be relied on for a key either, so it is refused as well. An element the
+ * shape describes as unknown keeps both rules — the caller may know what the type could not say.
  *
  * @example
  * type ForAnObjectElement = AddToSetUniqueBy<{ sid: string }>; // 'deep_equals' | 'pk'
  * type ForAStringElement = AddToSetUniqueBy<string>;           // 'deep_equals'
+ * type ForAKeylessElement = AddToSetUniqueBy<{}>;              // 'deep_equals'
  *
  * @remarks
  * `[E]` is wrapped so the check reads the element type whole rather than distributing over a union of
  * possible elements, which is what makes a mixed `({a: string} | string)[]` refuse `pk` instead of
  * offering it for the object half alone.
+ *
+ * The list's own rules are decided the same way: a list's `primary_key` is named from the keys of its
+ * element, so a keyless element leaves no key for the DDL to name and no key for the write to compare.
  *
  * A caller writing an untyped payload reaches past this, and the engine rules on the same pairing when
  * it runs: `pk` against a non-object element is a recoverable error that leaves the array untouched,
@@ -163,7 +168,9 @@ type AddToSetUniqueBy<E> = unknown extends E
   : [E] extends [readonly any[]]
     ? "deep_equals"
     : [E] extends [Record<string, any>]
-      ? "deep_equals" | "pk"
+      ? [keyof E] extends [never]
+        ? "deep_equals"
+        : "deep_equals" | "pk"
       : "deep_equals";
 
 /** Mapped-type-to-union: one variant per array property. Discriminated on `path`. */

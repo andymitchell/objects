@@ -7,13 +7,16 @@ import type { WhereFilterDefinition } from "../../../where-filter/types.ts";
 import { collectActionWhereIssues, type ActionValidationIssue } from "../../collectActionWhereIssues.ts";
 
 /**
- * Validate an action's `where` filters and `array_scope` scopes BEFORE the action mutates anything, so an
- * invalid filter or unwritable scope rejects the action cleanly with zero mutation. Two layers, both required
- * by `writeToItemsArray`'s `invalid_filter`/`invalid_scope` contract:
- *  1. **Static** (`collectActionWhereIssues`, shared with `validateWriteAction` so the engine and a stacking
- *     proxy reject identically) — schema-aware structural validation of every `where` (unknown field, type
- *     mismatch, non-finite, malformed) and every `array_scope.scope` across the whole action tree,
- *     data-independent.
+ * Validate an action's `where` filters, `array_scope` scopes and property paths BEFORE the action mutates
+ * anything, so an invalid filter or unwritable target rejects the action cleanly with zero mutation. Two
+ * layers, both required by `writeToItemsArray`'s `invalid_filter`/`invalid_scope`/`invalid_property_path`
+ * contract:
+ *  1. **Static** (`collectActionWhereIssues`, shared with `validateWriteAction` so every fault it names is
+ *     rejected identically by the engine and a stacking proxy) — schema-aware structural validation of every
+ *     `where` (unknown field, type mismatch, non-finite, malformed), every `array_scope.scope` and every
+ *     `set_property_undefined`/`delete_property` path across the whole action tree, data-independent. Its
+ *     reach is what the SCHEMA can settle: a target naming the row's primary key is named by the DDL
+ *     instead, and the engine judges that separately.
  *  2. **Runtime throw-safety** (`actionMatchThrows`) — a `$regex`/range operand can make `matchJavascriptObject`
  *     throw on certain rows; a dry-run over the items catches that up-front, so the mutation pass that follows
  *     is throw-free and never commits a partial change.

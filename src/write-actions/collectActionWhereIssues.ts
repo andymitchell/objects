@@ -31,8 +31,10 @@ export type ActionValidationIssue =
  * outer `where` matches no items (the per-item recursion never runs then).
  *
  * Single-sourced: BOTH the write engine's preflight (`preflightActionWhere`, which adds a runtime throw-safety
- * dry-run on top) and a store's up-front gate (`validateWriteAction`) call this, so the engine and a stacking
- * proxy reject identically. The caller's `options` is threaded to every nested level (not hardcoded), so the
+ * dry-run on top) and a store's up-front gate (`validateWriteAction`) call this, so every fault named here is
+ * rejected identically by the engine and a stacking proxy. Its reach is what the SCHEMA can settle; a row's
+ * primary key is named by the DDL instead, so a path aimed at that passes here and the engine refuses it alone.
+ * The caller's `options` is threaded to every nested level (not hardcoded), so the
  * `SerialisableJsonSubset` narrowing is engaged consistently top-to-bottom — essential for a store whose
  * idempotency ledger records the whole `payload` (incl. nested `where`s) in JSON-roundtripped form: an
  * un-round-trippable nested operand the gate missed would throw when that ledger clones the replay.

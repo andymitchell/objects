@@ -59,6 +59,29 @@ export type WritePayloadUpdate<
   where: WhereFilterDefinition<WF>;
   method?: UpdatingMethod;
 };
+/**
+ * Targets a nested array of objects and applies another payload to the elements inside it.
+ *
+ * `scope` names the array, `where` selects the items holding it, and `action` is a full payload
+ * written in terms of ONE element — so scoping into `subs` means `action` may create, update, push
+ * to or otherwise write a `sub`, and knows nothing of the fields around it.
+ *
+ * Mapped-type-to-union: one variant per scope path, each pairing that path with an `action` typed
+ * for the elements it reaches. Every scope is a separate variant because their element types are
+ * unrelated — a single variant spanning all of them could only offer what they have in common.
+ *
+ * @example
+ * const renameSub: WritePayloadArrayScope<Task> = {
+ *   type: 'array_scope',
+ *   scope: 'subs',
+ *   action: { type: 'update', data: { hint: 'h' }, where: { sid: 's1' } },
+ *   where: { id: '1' },
+ * };
+ *
+ * @remarks
+ * `P` narrows the type to a chosen scope, which is what an annotated variable or a builder helper
+ * such as {@link assertWriteArrayScope} needs; left at its default it is every scope on `T`.
+ */
 export type WritePayloadArrayScope<
   T extends Record<string, any>,
   P extends DotPropPathToObjectArraySpreadingArrays<T> =
@@ -66,12 +89,13 @@ export type WritePayloadArrayScope<
   W extends Record<string, any> = T,
   WF extends Record<string, any> = T,
 > = {
-  type: "array_scope";
-  scope: P;
-  // IS IT FAILING TO SPOT TYPES? YOU MUST SPECIFY THE 'P' GENERIC IN THE TYPE, OR IT FAILS. IT CANNOT PROPERLY INFER FROM 'scope'. OR USE HELPER assertWriteArrayScope
-  action: WritePayload<DotPropPathValidArrayValue<T, P>>;
-  where: WhereFilterDefinition<WF>;
-};
+  [Q in P]: {
+    type: "array_scope";
+    scope: Q;
+    action: WritePayload<DotPropPathValidArrayValue<T, Q>>;
+    where: WhereFilterDefinition<WF>;
+  };
+}[P];
 export type WritePayloadDelete<WF extends Record<string, any>> = {
   type: "delete";
   where: WhereFilterDefinition<WF>;

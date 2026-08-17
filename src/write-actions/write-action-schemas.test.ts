@@ -5,6 +5,8 @@ import { writeToItemsArray } from "./writeToItemsArray/writeToItemsArray.ts";
 import { getWriteErrors } from "./helpers.ts";
 import type { WriteAction, WriteErrorContext, WritePayloadCreate, WritePayloadUpdate } from "./types.ts";
 import type { DDL } from "../ddl/types.ts";
+import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
+import { isDraft, produce } from "immer";
 
 /**
  * A row whose schema does not merely accept data — it re-renders it. `tag` supplies a value the caller never
@@ -62,7 +64,7 @@ function carriedData(result: z.ZodSafeParseResult<WriteAction<Record<string, unk
 // written?" states both.
 
 /** Every field the engine-backed cases below write, so one item type serves them all. */
-type EngineRow = { id: string; tag?: string; n?: unknown; s?: string; meta?: Record<string, unknown>; when?: unknown; tags?: string[] };
+type EngineRow = { id: string; tag?: string; n?: unknown; s?: string; meta?: Record<string, unknown>; when?: unknown; tags?: string[]; "when.at"?: unknown };
 
 /** The two verbs that carry written data. */
 type DataPayload = WritePayloadCreate<EngineRow> | WritePayloadUpdate<EngineRow>;
@@ -206,6 +208,34 @@ describe("how the gate reports a rejected write action", () => {
         expect(keyIssue).toBeDefined();
         expect(keyIssue!.path).toEqual(["data"]);
         expect(keyIssue!.message).toBe('Unrecognized key: "unknown_field"');
+    });
+});
+
+/**
+ * The options a caller parses with reach a row schema's issues.
+ *
+ * Zod lets a caller shape one parse: an error map that words every rejection in the caller's own vocabulary,
+ * `reportInput` to attach the value that failed so a log or a form can show it. Those options describe the parse,
+ * not the schema, so they have to reach a row's issues exactly as they reach the envelope's own — a row schema
+ * measured off to one side would answer a different parse than the one the caller asked for.
+ */
+describe("a row schema's issues answer to the parse that raised them", () => {
+
+    /** The row-schema issue a bad `data` field produced, from within the union rejection that reports it. */
+    function fieldIssueFor(result: z.ZodSafeParseResult<unknown>): z.core.$ZodIssue {
+        const found = allArmIssues(onlyIssue(result)).find((issue) => issue.path?.join(".") === "data.id");
+        if (!found) throw new Error("expected an issue naming the data's id field");
+        return found;
+    }
+
+    it("words a row-schema rejection with the error map the caller passed", () => {
+        const issue = fieldIssueFor(rowAction.safeParse(action({ type: "create", data: { id: 5 } }), { error: () => "as the caller words it" }));
+        expect(issue.message).toBe("as the caller words it");
+    });
+
+    it("attaches the offending field's own value when the caller asks for the input", () => {
+        const issue = fieldIssueFor(rowAction.safeParse(action({ type: "create", data: { id: 5 } }), { reportInput: true }));
+        expect(issue.input).toBe(5);
     });
 });
 
@@ -426,6 +456,50 @@ describe("values that cannot survive a JSON round trip are refused, as the engin
         if (engine[0]?.type === "invalid_data_value") expect(engine[0].data_path).toBe("when");
     });
 
+    it("refuses data that contains itself, answering rather than running out of stack", () => {
+        // `JSON.stringify` throws on a structure that leads back to itself, so the write cannot cross a boundary
+        // — and a gate exists to say so, not to fall over on the way to finding out.
+        const data: EngineRow = { id: "a" };
+        data.n = data;
+        expect(OpenRowSchema.safeParse(data).success).toBe(true); // the row schema is content with it
+
+        const issue = onlyIssue(makeWriteActionSchema(OpenRowSchema).safeParse(action({ type: "create", data })));
+        expect(issue.path).toEqual(["payload", "data", "n"]);
+        expect(issue.message).toContain("JSON");
+
+        const [engineError] = engineErrors(OpenRowSchema, { type: "create", data });
+        expect(engineError?.type).toBe("invalid_data_value");
+        if (engineError?.type === "invalid_data_value") expect(engineError.reason).toBe("malformed");
+    });
+
+    it("admits data that names the same object twice without leading back to it", () => {
+        // Two keys sharing one value is not a cycle: JSON writes the value out twice, and both sides read back
+        // what was written.
+        const shared = { tag: "t" };
+        expect(makeWriteActionSchema(OpenRowSchema).safeParse(action({ type: "create", data: { id: "a", n: shared, meta: shared } })).success).toBe(true);
+    });
+
+    it("names a key that itself holds a dot as the one key it is", () => {
+        // A dot separates keys in a path, so a key containing one has to be escaped or the path names two keys
+        // that do not exist. The row schema below declares exactly one field, called `when.at`.
+        const DottedKeyRowSchema = z.object({ id: z.string(), "when.at": z.any().optional() });
+        const payload: DataPayload = { type: "create", data: { id: "a", "when.at": new Date() } };
+
+        const issue = onlyIssue(makeWriteActionSchema(DottedKeyRowSchema).safeParse(action(payload)));
+        expect(issue.path).toEqual(["payload", "data", "when.at"]);
+
+        const [engineError] = engineErrors(DottedKeyRowSchema, payload);
+        if (engineError?.type !== "invalid_data_value") throw new Error("expected the engine to refuse the value");
+        expect(parseDotPropPathSegments(engineError.data_path!)).toEqual(["when.at"]);
+    });
+
+    it("names an array element by its index, in the string form every path segment takes", () => {
+        // Every segment of a dot-path is a string, and `list['0']` and `list[0]` reach the same element — so an
+        // index is left as it is written rather than read back out of the path as a number.
+        const issue = onlyIssue(makeWriteActionSchema(OpenRowSchema).safeParse(action({ type: "create", data: { id: "a", n: [1, Number.NaN] } })));
+        expect(issue.path).toEqual(["payload", "data", "n", "1"]);
+    });
+
     it("still admits the values JSON does carry, including null and a nested empty object", () => {
         expect(makeWriteActionSchema(OpenRowSchema).safeParse(action({ type: "create", data: { id: "a", n: null, meta: { nested: [1, "two", null] } } })).success).toBe(true);
     });
@@ -471,6 +545,128 @@ describe("a row schema that answers asynchronously", () => {
 
     it("throws when parsed synchronously, as any asynchronous schema does", () => {
         expect(() => asyncAction.safeParse(action({ type: "create", data: { id: "a", handle: "free" } }))).toThrow();
+    });
+
+    it("runs the check once for each verb that measures the data, never twice for one", async () => {
+        // A check that reaches a database or an API is charged for every call, so a write must not pay twice for
+        // one answer. Two verbs carry data — create and update — and each measures this create's data once.
+        let checks = 0;
+        const CountingRowSchema = z.object({
+            id: z.string(),
+            handle: z.string().refine(async () => { checks++; return true; }),
+        });
+
+        await makeWriteActionSchema(CountingRowSchema).safeParseAsync(action({ type: "create", data: { id: "a", handle: "free" } }));
+
+        expect(checks).toBe(2);
+    });
+
+    it("leaves no unhandled rejection behind when the check itself fails", async () => {
+        // A check that throws is the caller's to handle, once. An abandoned second attempt would reject with
+        // nobody waiting on it, which by default takes the process down long after the write was answered.
+        const ThrowingRowSchema = z.object({
+            id: z.string(),
+            handle: z.string().refine(async () => { throw new Error("the handle service is down"); }),
+        });
+        const unhandled: unknown[] = [];
+        const capture = (reason: unknown) => { unhandled.push(reason); };
+
+        process.on("unhandledRejection", capture);
+        try {
+            await makeWriteActionSchema(ThrowingRowSchema)
+                .safeParseAsync(action({ type: "create", data: { id: "a", handle: "free" } }))
+                .catch(() => undefined);
+            await new Promise((resolve) => { setImmediate(resolve); });
+        } finally {
+            process.off("unhandledRejection", capture);
+        }
+
+        expect(unhandled).toEqual([]);
+    });
+
+    /**
+     * A row schema need not be asynchronous for every value it is given: a check may answer on the spot for most
+     * data and go looking only for some of it. Whichever kind of write arrives first, the next one of the other
+     * kind gets the same answer it would have got on its own.
+     */
+    describe("whose asynchrony depends on the data it is given", () => {
+
+        const SometimesAsyncRowSchema = z.object({
+            id: z.string(),
+            handle: z.string().refine(
+                (handle) => (handle.startsWith("looked-up-") ? Promise.resolve(handle !== "looked-up-taken") : handle !== "taken"),
+                "that handle is taken",
+            ),
+        });
+
+        /** A fresh gate per case: what one write teaches a schema must not decide how the next one is answered. */
+        const sometimesAsyncAction = () => makeWriteActionSchema(SometimesAsyncRowSchema);
+
+        it("answers a write it can settle on the spot, and then one it has to go and look up", async () => {
+            const gate = sometimesAsyncAction();
+
+            expect(gate.safeParse(action({ type: "create", data: { id: "a", handle: "free" } })).success).toBe(true);
+
+            expect((await gate.safeParseAsync(action({ type: "create", data: { id: "b", handle: "looked-up-free" } }))).success).toBe(true);
+            expect((await gate.safeParseAsync(action({ type: "create", data: { id: "c", handle: "looked-up-taken" } }))).success).toBe(false);
+        });
+
+        it("answers a write it has to look up, and then one it can settle on the spot", async () => {
+            const gate = sometimesAsyncAction();
+
+            expect((await gate.safeParseAsync(action({ type: "create", data: { id: "a", handle: "looked-up-free" } }))).success).toBe(true);
+
+            expect(gate.safeParse(action({ type: "create", data: { id: "b", handle: "free" } })).success).toBe(true);
+            expect(gate.safeParse(action({ type: "create", data: { id: "c", handle: "taken" } })).success).toBe(false);
+        });
+
+        it("still refuses a synchronous parse of a write it would have to look up", () => {
+            const gate = sometimesAsyncAction();
+            gate.safeParse(action({ type: "create", data: { id: "a", handle: "free" } }));
+
+            expect(() => gate.safeParse(action({ type: "create", data: { id: "b", handle: "looked-up-free" } }))).toThrow();
+        });
+    });
+});
+
+/**
+ * The Zod entry point the gate measures a row schema through.
+ *
+ * Measuring the data as part of the caller's parse means running the row schema the way Zod's own combinators
+ * run their inner schemas — `_zod.run` — rather than starting a separate parse beside it. That entry point is
+ * not part of Zod's documented surface, so what the gate relies on is stated here rather than assumed.
+ *
+ * A failure here after a Zod upgrade is a design decision, not a typo: either follow the moved entry point, or
+ * fall back to `dataSchema.safeParse` inside the refinement and accept what that costs — the caller's per-parse
+ * options stop reaching row issues, and an asynchronous check runs twice per verb, the second run abandoned.
+ */
+describe("the Zod entry point the gate measures a row schema through", () => {
+
+    const PinnedRowSchema = z.object({ id: z.string() });
+
+    it("judges a value and answers with the payload, synchronously for a synchronous schema", () => {
+        const result = PinnedRowSchema._zod.run({ value: { id: "a" }, issues: [] }, {});
+        if (result instanceof Promise) throw new Error("a synchronous row schema must answer without a promise");
+        expect(result.issues, "an accepted value must raise nothing").toEqual([]);
+    });
+
+    it("reports an issue unfinished, which is what leaves the wording to the caller's parse", () => {
+        const result = PinnedRowSchema._zod.run({ value: { id: 5 }, issues: [] }, {});
+        if (result instanceof Promise) throw new Error("a synchronous row schema must answer without a promise");
+
+        const issue = result.issues[0];
+        expect(issue, "a rejected value must raise an issue").toBeDefined();
+        expect(issue!.path, "the issue must be located relative to the row, for the gate to place it under `data`").toEqual(["id"]);
+        expect(issue!.inst, "the issue must still name the schema that raised it, or its own wording is lost").toBeDefined();
+        expect(issue!.input, "the issue must carry the value that failed, not the object holding it").toBe(5);
+        expect("message" in issue!, "an unfinished issue has no message yet — that is what lets the caller's error map word it").toBe(false);
+    });
+
+    it("answers with a promise for a schema that can only answer asynchronously", async () => {
+        const AsyncPinnedRowSchema = z.object({ id: z.string().refine(async () => true) });
+        const result = AsyncPinnedRowSchema._zod.run({ value: { id: "a" }, issues: [] }, {});
+        expect(result instanceof Promise, "an asynchronous row schema must answer with a promise, not throw").toBe(true);
+        expect((await result).issues).toEqual([]);
     });
 });
 
@@ -523,5 +719,43 @@ describe("a stored item never aliases the action that wrote it", () => {
         const stored = storedBy(AliasRowSchema, { type: "update", data, where: { id: "a" }, method: "assign" }, [{ id: "a", meta: { tag: "old" } }]);
         expect(stored[0]?.meta).toStrictEqual({ tag: "new" });
         expect(stored[0]?.meta).not.toBe(data.meta);
+    });
+
+    /**
+     * Callers compose objects behind proxies — an Immer draft inside a producer, a reactive object from a UI
+     * framework — and a proxy over plain data is plain data: it round-trips JSON unchanged, so the gate accepts
+     * it. Taking the copy is the engine's own step, and it cannot be the thing that refuses a write the gate
+     * already allowed.
+     */
+    describe("even when the caller composed that action behind a proxy", () => {
+
+        it("stores data written through a plain proxy, detached from what the proxy stood for", () => {
+            const behind = { id: "a", meta: { tag: "t" } };
+
+            const stored = storedBy(AliasRowSchema, { type: "create", data: new Proxy(behind, {}) });
+
+            expect(stored[0]).toStrictEqual({ id: "a", meta: { tag: "t" } });
+            behind.meta.tag = "changed after the write";
+            expect(stored[0]?.meta?.tag).toBe("t");
+        });
+
+        it("stores data written from inside a draft, which cannot be handed on once the draft is done", () => {
+            let stored: EngineRow[] = [];
+            produce({ id: "a", meta: { tag: "t" } }, (draft) => {
+                stored = storedBy(AliasRowSchema, { type: "create", data: draft });
+            });
+
+            expect(stored[0]).toStrictEqual({ id: "a", meta: { tag: "t" } });
+            expect(isDraft(stored[0])).toBe(false);
+        });
+
+        it("stores an update's values written through a proxy", () => {
+            const behind = { meta: { tag: "new" } };
+
+            const stored = storedBy(AliasRowSchema, { type: "update", data: new Proxy(behind, {}), where: { id: "a" } }, [{ id: "a", meta: { tag: "old" } }]);
+
+            expect(stored[0]?.meta).toStrictEqual({ tag: "new" });
+            expect(stored[0]?.meta).not.toBe(behind.meta);
+        });
     });
 });

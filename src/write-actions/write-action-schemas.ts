@@ -23,6 +23,7 @@ import type {
 import { resolveArrayScope } from "./arrayScopeResolution.ts";
 import { resolvePropertyPathTarget } from "./propertyPathResolution.ts";
 import { findUnwritableDataValues } from "./validateWritePayload.ts";
+import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 import { PrimaryKeyValueSchema } from "../utils/getKeyValue.ts";
 import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
 
@@ -63,8 +64,12 @@ import { JsonValueSchema } from "@andymitchell/clone-to-json-safe";
  * write, and therefore what an accepted action carries.
  *
  * Values a write action cannot carry are refused however tolerantly the row schema treats them: an explicit
- * `undefined`, a non-finite number, or anything with no JSON form, at any depth of the data. The write engine
- * refuses the same values for the same reason, so neither can admit a write the other would turn away.
+ * `undefined`, a non-finite number, anything with no JSON form, or a structure that leads back into itself, at
+ * any depth of the data. The write engine refuses the same values for the same reason, so neither can admit a
+ * write the other would turn away.
+ *
+ * A row schema's own rejections belong to the parse that asked for them: an error map passed to `parse` words
+ * them alongside the envelope's, and `reportInput` attaches the field's own value.
  *
  * The as-written guarantee is about item data — a create's or update's `data`, including the nested action of
  * an `array_scope`. The rest of a payload is rebuilt by its own schema: unrecognised keys are dropped, and a
@@ -137,12 +142,20 @@ const UNWRITABLE_VALUE_MESSAGE = {
  * applied schema would, so a caller reading `error.issues` sees the same shape either way. An unwritable value
  * suppresses them: no purpose is served by explaining a shape whose values cannot be written at all.
  *
+ * The row is measured within the caller's parse, so the options that parse was given reach its issues too — an
+ * error map words them, and `reportInput` attaches the field's own value rather than the object holding it.
+ *
  * What an accepted parse hands back is the caller's own object, by reference, rather than a copy of it.
  *
  * A row schema holding an asynchronous check answers only under `parseAsync`, as such a schema does anywhere in
  * Zod — a synchronous parse of an action guarded by one throws.
  */
 function validatedAsWritten<S extends z.ZodType>(dataSchema: S, message: string) {
+  // Whether this row schema has ever answered without going away to look something up. Zod reserves its compiled
+  // reader for a parse that declares itself synchronous, and that declaration turns an asynchronous check into a
+  // throw AFTER the check has already started — so it cannot be the first way a schema is asked, only a faster way
+  // to ask one that has answered on the spot before.
+  let answersOnTheSpot = false;
   return z.custom<z.output<S>>().superRefine((raw, ctx) => {
     const unwritable = findUnwritableDataValues(raw);
     if (unwritable.some((issue) => issue.undefined_value)) {
@@ -155,26 +168,39 @@ function validatedAsWritten<S extends z.ZodType>(dataSchema: S, message: string)
         ctx.addIssue({
           code: "custom",
           message: UNWRITABLE_VALUE_MESSAGE[issue.reason],
-          path: issue.path ? issue.path.split(".") : [],
+          path: issue.path ? parseDotPropPathSegments(issue.path) : [],
         });
       }
       return;
     }
-    const report = (error: z.ZodError) => {
-      for (const issue of error.issues) ctx.addIssue({ ...issue, continue: false });
+    const report = (result: { issues: z.core.$ZodRawIssue[] }) => {
+      // Reported as they arrive, save for aborting this arm of the payload union: a row schema's issue is already
+      // complete — it names the schema that raised it, the value that failed, and where in the row it sits.
+      for (const issue of result.issues) ctx.issues.push(Object.assign({}, issue, { continue: false }));
     };
-    try {
-      const result = dataSchema.safeParse(raw);
-      if (!result.success) report(result.error);
-    } catch (e) {
-      // A row schema with an asynchronous check cannot answer here. Returning its promise hands the wait back
-      // to Zod, which awaits it under `parseAsync` and refuses a synchronous parse — the rule any asynchronous
-      // schema follows.
-      if (!(e instanceof z.core.$ZodAsyncError)) throw e;
-      return dataSchema.safeParseAsync(raw).then((result) => {
-        if (!result.success) report(result.error);
-      });
-    }
+    // The row schema measures the data as part of THIS parse rather than a parse of its own, so its issues are
+    // still unfinished when they arrive: the caller's error map words them and their own field's value answers
+    // `reportInput`. Measuring separately would settle both questions in a context the caller never saw.
+    const measure = () => {
+      if (answersOnTheSpot) {
+        try {
+          const settled = dataSchema._zod.run({ value: raw, issues: [] }, { async: false });
+          // A parse declared synchronous throws rather than answering with a promise, so this is the answer; were
+          // that ever to change, asking again below still gets one.
+          if (!(settled instanceof Promise)) return settled;
+        } catch (e) {
+          if (!(e instanceof z.core.$ZodAsyncError)) throw e;
+          answersOnTheSpot = false; // this data reached a check that does have to go and look something up
+        }
+      }
+      const result = dataSchema._zod.run({ value: raw, issues: [] }, {});
+      if (!(result instanceof Promise)) answersOnTheSpot = true;
+      return result;
+    };
+    // An asynchronous row schema answers with a promise. Handing it back makes the wait Zod's, which awaits it
+    // under `parseAsync` and refuses a synchronous parse — the rule any asynchronous schema follows.
+    const measured = measure();
+    return measured instanceof Promise ? measured.then(report) : report(measured);
   });
 }
 

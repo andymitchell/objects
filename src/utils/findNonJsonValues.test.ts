@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { findNonJsonValues, type NonJsonValueIssue } from "./findNonJsonValues.ts";
+import { parseDotPropPathSegments } from "../dot-prop-paths/dotPropPathSegments.ts";
 
 /** Walk `value` and return the collected issues — the test-friendly shape over the mutate-an-out-array API. */
 function collect(value: unknown, opts?: { flagUndefined?: boolean }): NonJsonValueIssue[] {
@@ -88,6 +89,54 @@ describe("findNonJsonValues — the SerialisableJsonSubset value walk", () => {
                 { reason: "non_finite", path: "a" },
                 { reason: "malformed", path: "b" },
             ]);
+        });
+    });
+
+    describe("a structure that leads back into itself is malformed, and answered rather than followed", () => {
+        it("an object holding itself is reported where the loop closes", () => {
+            const looping: Record<string, unknown> = { a: 1 };
+            looping["self"] = looping;
+            expect(collect(looping)).toEqual([{ reason: "malformed", path: "self" }]);
+        });
+
+        it("an array holding itself is reported at the index that closes it", () => {
+            const looping: unknown[] = ["a"];
+            looping.push(looping);
+            expect(collect(looping)).toEqual([{ reason: "malformed", path: "1" }]);
+        });
+
+        it("a loop back to an ancestor, rather than to the value itself, is still a loop", () => {
+            const root: Record<string, unknown> = { child: {} };
+            (root["child"] as Record<string, unknown>)["parent"] = root;
+            expect(collect(root)).toEqual([{ reason: "malformed", path: "child.parent" }]);
+        });
+
+        it("one value named twice is written out twice, not refused", () => {
+            const shared = { tag: "t" };
+            expect(collect({ a: shared, b: shared })).toEqual([]);
+        });
+
+        it("one value named twice at different depths is still not a loop", () => {
+            const shared = { tag: "t" };
+            expect(collect({ a: shared, b: { deeper: [shared, shared] } })).toEqual([]);
+        });
+    });
+
+    describe("a reported path can be read back to the keys that were walked", () => {
+        it("a key holding a literal dot is escaped, so it stays one key", () => {
+            const [issue] = collect({ "a.b": 5n });
+            expect(parseDotPropPathSegments(issue!.path!)).toEqual(["a.b"]);
+        });
+
+        it("a key holding a dot keeps its ancestors and descendants distinct from it", () => {
+            const [issue] = collect({ outer: { "a.b": { inner: 5n } } });
+            expect(parseDotPropPathSegments(issue!.path!)).toEqual(["outer", "a.b", "inner"]);
+        });
+
+        it("an ordinary nested key reads back as the keys it names", () => {
+            const [issue] = collect({ outer: { inner: 5n } });
+            expect(issue!.path).toBe("outer.inner");
+            expect(parseDotPropPathSegments(issue!.path!)).toEqual(["outer", "inner"]);
         });
     });
 });

@@ -2,7 +2,8 @@
  * **SerialisableJsonSubset** — the subset of values (write-payload values and `where` filter operands) that
  * survives a lossless JSON round-trip (`deepEquals(x, JSON.parse(JSON.stringify(x)))`). It excludes every
  * non-finite number (`NaN`/`±Infinity`, which `JSON.stringify` rewrites to `null`) and every non-JSON carrier
- * (`Date`/`bigint`/`Map`/`Set`/`Symbol`/`RegExp`/class instance — no faithful JSON form). It is the single
+ * (`Date`/`bigint`/`Map`/`Set`/`Symbol`/`RegExp`/class instance — no faithful JSON form), along with a structure that
+ * leads back into itself, which `JSON.stringify` refuses outright. It is the single
  * concept behind two *opt-in* restrictions: the write engine's payload value-gate (`validateWritePayload`) and
  * the `where`-operand gate (`validateWhereFilter`'s `requireSerialisableJsonSubset`). `WhereFilterDefinition`
  * and the bare matcher still permit these values; the narrowing is engaged only by consumers that cross a
@@ -19,10 +20,17 @@
  * — a divergence would let a value pass one boundary and corrupt at the other.
  */
 
+import { joinDotpropPath } from "../dot-prop-paths/joinDotpropPath.ts";
+import { escapeDotPropPathSegment } from "../dot-prop-paths/dotPropPathSegments.ts";
+
 /** Why a walked value cannot losslessly round-trip JSON. Shared by the write-payload value-gate and the `where`-operand gate. */
 export type NonJsonValueReason = "non_finite" | "malformed";
 
-/** One non-serialisable value found by {@link findNonJsonValues}, located by its dot-path beneath the walk root (`undefined` at the root). */
+/**
+ * One non-serialisable value found by {@link findNonJsonValues}, located by its dot-path beneath the walk root
+ * (`undefined` at the root). The path is written in the dot-prop grammar — a key holding a literal dot is escaped
+ * — so `parseDotPropPathSegments` reads back the keys that were actually walked.
+ */
 export type NonJsonValueIssue = {
   reason: NonJsonValueReason;
   path?: string | undefined;
@@ -38,10 +46,14 @@ export type NonJsonValueIssue = {
  * Collect EVERY value under `value` that cannot losslessly round-trip JSON — the `SerialisableJsonSubset` walk.
  * Schema-independent (walks the live data), so it catches values an open `.passthrough()`/`.loose()` schema
  * admits. Plain objects/arrays are traversed; a non-finite number is `non_finite`; a `Date`/`Map`/`Set`/`RegExp`/
- * `bigint`/`symbol`/`function`/class instance is `malformed`. `null` and JSON primitives are safe. `undefined`
- * is safe unless `flagUndefined`, which reports it as `malformed` and additionally marks the issue
- * `undefined_value` so a caller can offer a remedy specific to it. Collects all faults (not first-only) so a
- * caller can surface every one at once.
+ * `bigint`/`symbol`/`function`/class instance is `malformed`, as is a value that leads back into itself. `null` and
+ * JSON primitives are safe. `undefined` is safe unless `flagUndefined`, which reports it as `malformed` and
+ * additionally marks the issue `undefined_value` so a caller can offer a remedy specific to it. Collects all faults
+ * (not first-only) so a caller can surface every one at once.
+ *
+ * @remarks
+ * One value named in two places is not a loop and is safe: JSON writes it out twice, and both copies read back what
+ * was written. Only a value reached from inside itself is refused, and the walk answers rather than recursing on.
  *
  * @example
  * const out: NonJsonValueIssue[] = [];
@@ -53,6 +65,21 @@ export function findNonJsonValues(
   path: string,
   out: NonJsonValueIssue[],
   opts?: { flagUndefined?: boolean },
+): void {
+  walkValue(value, path, out, opts, new Set());
+}
+
+/**
+ * One step of the walk. `enclosing` holds the containers currently being walked THROUGH — added on the way down
+ * and removed on the way back up — so a value that leads back into itself is caught while a value merely named
+ * twice is not: `JSON.stringify` writes a repeated value out twice and throws only on a loop.
+ */
+function walkValue(
+  value: unknown,
+  path: string,
+  out: NonJsonValueIssue[],
+  opts: { flagUndefined?: boolean } | undefined,
+  enclosing: Set<object>,
 ): void {
   if (typeof value === "number") {
     if (!Number.isFinite(value)) out.push({ reason: "non_finite", path: path || undefined });
@@ -69,8 +96,14 @@ export function findNonJsonValues(
     out.push({ reason: "malformed", path: path || undefined });
     return;
   }
+  if (enclosing.has(value as object)) {
+    out.push({ reason: "malformed", path: path || undefined }); // leads back into itself — JSON.stringify throws
+    return;
+  }
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) findNonJsonValues(value[i], path ? `${path}.${i}` : String(i), out, opts);
+    enclosing.add(value);
+    for (let i = 0; i < value.length; i++) walkValue(value[i], joinDotpropPath(path, String(i)), out, opts, enclosing);
+    enclosing.delete(value);
     return;
   }
   if (t === "object") {
@@ -79,9 +112,11 @@ export function findNonJsonValues(
       out.push({ reason: "malformed", path: path || undefined }); // Date/Map/Set/RegExp/class instance — not a plain object
       return;
     }
+    enclosing.add(value as object);
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      findNonJsonValues(child, path ? `${path}.${key}` : key, out, opts);
+      walkValue(child, joinDotpropPath(path, escapeDotPropPathSegment(key)), out, opts, enclosing);
     }
+    enclosing.delete(value as object);
     return;
   }
   out.push({ reason: "malformed", path: path || undefined }); // any other exotic typeof

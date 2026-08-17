@@ -374,6 +374,17 @@ describe("a row schema's substitutions reach neither the parsed action nor the s
                 existingItems: [{ id: "a", n: 1 }],
                 stored: [{ id: "a", n: "5" }],
             },
+            {
+                // The stored item is judged again once the update has merged into it, and it still holds only the
+                // keys it was written with. A layer that demanded the substituted value rather than the written one
+                // would refuse this update outright, and with it every row whose schema grew a default after the
+                // row was written.
+                substitution: "a default for a field the updated item never held",
+                rowSchema: z.object({ id: z.string(), tag: z.string().default("x"), s: z.string().optional() }),
+                payload: { type: "update", data: { s: "next" }, where: { id: "a" } },
+                existingItems: [{ id: "a" }],
+                stored: [{ id: "a", s: "next" }],
+            },
         ];
 
     it.each(register)("does not take up $substitution", ({ rowSchema, payload, existingItems, stored }: SubstitutionCase) => {

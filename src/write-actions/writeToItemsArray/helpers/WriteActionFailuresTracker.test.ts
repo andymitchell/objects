@@ -163,6 +163,28 @@ describe("gating writes on schema validity", () => {
     expect(tracker.length()).toBe(0);
   });
 
+  test("an item that never took up a value the schema offers to supply still satisfies it", () => {
+    // The check asks whether the item is something a caller could have written, not whether it looks like the
+    // schema's rendering of itself — so a stored item lacking the substitution is judged on its own terms, and
+    // the rendering the parse produced is discarded rather than becoming the item.
+    const SubstitutingSchema = z.object({ id: z.string(), tag: z.string().default("x") }).strict();
+    const untagged: z.input<typeof SubstitutingSchema> = { id: "1" };
+    const tracker = new WriteActionFailuresTracker<z.input<typeof SubstitutingSchema>>(
+      SubstitutingSchema,
+      { primary_key: "id" },
+    );
+
+    expect(tracker.testSchema(makeAction(untagged), untagged)).toBe(true);
+    expect(untagged).toStrictEqual({ id: "1" });
+
+    // Typed by what the schema renders rather than what it accepts, the tracker asks its caller for an item that
+    // holds the substitution — which no caller may write and nothing ever stores. The answer is the same either
+    // way; only the promise made to the caller differs.
+    const askingForTheRendering = new WriteActionFailuresTracker(SubstitutingSchema, { primary_key: "id" });
+    // @ts-expect-error - an item with no `tag` is not the shape this instantiation asks for
+    expect(askingForTheRendering.testSchema(makeAction(untagged), untagged)).toBe(true);
+  });
+
   test("an item that violates the schema fails and is recorded once", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
@@ -254,6 +276,18 @@ describe("gating writes on schema validity", () => {
     tracker.testSchema(makeAction(invalidFlat, "a1"), invalidFlat);
     tracker.testSchema(makeAction(invalidFlat, "a2"), invalidFlat);
     expect(tracker.length()).toBe(2);
+  });
+
+  test("a schema that can only answer asynchronously raises rather than recording a verdict it does not have", () => {
+    // The check is synchronous, and a synchronous parse of an asynchronous schema is a caller's mistake, not an
+    // item's fault: answering `false` would report the item as invalid when nothing has judged it at all.
+    const AsyncSchema = z.object({ id: z.string().refine(async (id) => id !== "taken") });
+    const tracker = new WriteActionFailuresTracker(AsyncSchema, {
+      primary_key: "id",
+    });
+
+    expect(() => tracker.testSchema(makeAction({ id: "1" }), { id: "1" })).toThrow(z.core.$ZodAsyncError);
+    expect(tracker.length()).toBe(0);
   });
 });
 

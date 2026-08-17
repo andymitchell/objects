@@ -106,6 +106,35 @@ export default class WriteActionFailuresTracker<
     if (isUnrecoverable(errorDetails.type)) failedAction.unrecoverable = true;
   }
 
+  /**
+   * Check one item against the row schema, recording a `schema` failure against `action` when it does not parse.
+   *
+   * The schema is a yardstick here, not a renderer: what the parse produces is discarded, and only whether it
+   * succeeded is read. Success therefore means the item satisfies the schema as INPUT — the shape a caller may
+   * write, and the shape that is stored.
+   *
+   * A schema that offers to supply a value the caller did not write (`.default()`, `.prefault()`, `z.coerce`,
+   * `.catch()`, `.transform()`) accepts an item that lacks that value, by design. Only the submitted values are
+   * ever stored, so an item is only ever asked to be something a caller could have written.
+   *
+   * @param action The action being applied, whose failure record a rejection is attached to.
+   * @param item The item as it stands after the write — the row the schema has to accept.
+   * @returns `true` when the item parses. `false` when it does not, having recorded an unrecoverable `schema`
+   * error carrying the schema's own issues, and attached the offending item to the action's outcome.
+   *
+   * @example
+   * // A row declaring `tag: z.string().default('x')` accepts an item holding no `tag` at all — whether the
+   * // write just created it, or an update merged a field into a stored item that never held one.
+   *
+   * @remarks
+   * The recorded error stays serialisable: the schema's issues are normalised to JSON-safe values, and the
+   * schema itself is described as a path tree on a best-effort basis. The offending item is attached to the full
+   * outcome raw instead, as an in-process diagnostic for a logger to redact.
+   *
+   * The parse is synchronous. A row schema that can only answer asynchronously for the item it is given
+   * therefore throws from here rather than reporting a failure, which is Zod's rule for any synchronous parse.
+   * Such a schema belongs on the parse of an action, where the wait can be awaited before the write begins.
+   */
   testSchema(action: WriteAction<T>, item: T): boolean {
     const result = this.schema.safeParse(item);
     if (!result.success) {

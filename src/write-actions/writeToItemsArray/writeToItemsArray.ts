@@ -121,8 +121,15 @@ class SuccessfulWriteActionesTracker<T extends Record<string, any>> {
  *
  * @param writeActions The actions to perform
  * @param items The items to perform them on (by default they will not be mutated)
- * @param schema
- * @param ddl The rules for how the write actions will be implemented * @param options Optional:
+ * @param schema The shape one stored item must still satisfy after every write that touches it. It is a yardstick,
+ * never a renderer: a value it offers to supply (`.default()`, `.prefault()`, `z.coerce`, `.catch()`,
+ * `.transform()`) is something an item is measured against, never something applied to it, because the values
+ * submitted are the values stored. Where a row schema does substitute, instantiate `T` with
+ * `z.input<typeof schema>` — the input type is what a caller may write, and therefore what is stored. The schema
+ * must answer on the spot: one holding an asynchronous check throws rather than reporting a failure, as it does
+ * under any synchronous parse.
+ * @param ddl The rules for how the write actions will be implemented
+ * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly
@@ -154,8 +161,15 @@ export function writeToItemsArrayPreserveInputType<T extends Record<string, any>
  *
  * @param writeActions The actions to perform
  * @param items The items to perform them on (by default they will not be mutated)
- * @param schema
- * @param ddl The rules for how the write actions will be implemented * @param options Optional:
+ * @param schema The shape one stored item must still satisfy after every write that touches it. It is a yardstick,
+ * never a renderer: a value it offers to supply (`.default()`, `.prefault()`, `z.coerce`, `.catch()`,
+ * `.transform()`) is something an item is measured against, never something applied to it, because the values
+ * submitted are the values stored. Where a row schema does substitute, instantiate `T` with
+ * `z.input<typeof schema>` — the input type is what a caller may write, and therefore what is stored. The schema
+ * must answer on the spot: one holding an asynchronous check throws rather than reporting a failure, as it does
+ * under any synchronous parse.
+ * @param ddl The rules for how the write actions will be implemented
+ * @param options Optional:
  *  - atomic: if an action fails, all fail (aka transactional behaviour)
     - attempt_recover_duplicate_create: conflict resolution for duplicate PKs ('never' | 'if-convergent' | 'always-update')
     - mutate: keeps the same object references and modifies the passed-in `items` array directly

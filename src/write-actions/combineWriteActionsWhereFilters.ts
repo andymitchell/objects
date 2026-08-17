@@ -85,9 +85,7 @@ export function combineWriteActionsWhereFilters<T extends Record<string, any>>(
     let sawMatchAll = false;
 
     for (const action of writeActions) {
-        // The walker reads only the spec-relevant subset of each payload; bridge the library's deep
-        // `WritePayload` (partly `unknown` for a nested-array T) to the flat `ScopedPayload` shape.
-        const outcome = deriveActionFilter(action.payload as ScopedPayload, ddl, "", includeRowDeletes);
+        const outcome = deriveActionFilter(action.payload, ddl, "", includeRowDeletes);
         if (outcome.kind === "error") { errors.push(outcome.error); continue; }
         if (outcome.kind === "skip") continue;
         if (isMatchAll(outcome.filter)) { sawMatchAll = true; continue; }
@@ -113,9 +111,13 @@ export function combineWriteActionsWhereFilters<T extends Record<string, any>>(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The flat structural view of a payload this function actually reads (discriminant + the few relevant fields).
- * Decoupled from the library's `WritePayload`, whose deep `array_scope.action` recursion partially resolves to
- * `unknown` for a nested-array `T` and so cannot be walked directly.
+ * The flat structural view of a payload this function actually reads: the discriminant, and the few fields
+ * that decide which rows an action could touch.
+ *
+ * Stating that subset rather than reusing `WritePayload<T>` keeps the walk independent of the row type. A
+ * scope's nested `action` is a payload of a DIFFERENT type — the element type at that path — so a recursion
+ * expressed in terms of `T` would have to re-derive that type at every level, while the walk itself only
+ * ever reads a `where`, a `scope` and a create's `data`.
  */
 type ScopedPayload =
     | { type: "create"; data: Record<string, any> }
@@ -129,9 +131,9 @@ type ScopedPayload =
     | { type: "delete"; where: WhereFilterDefinition }
     | { type: "array_scope"; scope: string; where: WhereFilterDefinition; action: ScopedPayload };
 
-// Compile-time bridge: because payloads reach the walker through an `as ScopedPayload` cast, a `WritePayload`
-// variant with no arm here would slip past the switch's `never` check and only surface as a runtime
-// `assertNever` throw. Pinning the discriminants against each other turns that into a compile error.
+// A write verb with no arm above would be walked as an unrecognised payload and only surface as a runtime
+// `assertNever` throw. The call site compares against a generic `T`, whose constraint is permissive enough
+// to be a weak check; comparing the discriminants directly does not depend on any row type.
 isTypeEqual<Exclude<WritePayload<any>["type"], ScopedPayload["type"]>, never>(true);
 
 type DeriveResult =

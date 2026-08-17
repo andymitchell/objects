@@ -1,4 +1,4 @@
-import { FlatSchema, flatDdl } from "./fixtures.ts";
+import { FlatSchema, flatDdl, type Flat } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
 import { getWriteFailures, getWriteSuccesses } from "../helpers.ts";
 
@@ -50,9 +50,9 @@ export function registerHaltBlocking(ctx: SectionCtx): void {
                 initialItems: [],
                 writeActions: [
                     makeAction('a1', { type: 'create', data: { id: '1' } }), // succeeds
-                    makeAction('a2', {
+                    makeAction<Flat>('a2', {
                         type: 'create',
-                        // @ts-ignore missing pk
+                        // @ts-expect-error: probing the runtime's response to a create with no primary key
                         data: { text: 'no pk' },
                     }), // fails
                     makeAction('a3', { type: 'create', data: { id: '3' } }), // blocked

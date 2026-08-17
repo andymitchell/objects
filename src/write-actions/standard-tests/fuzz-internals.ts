@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WriteAction } from "../types.ts";
+import type { WriteAction, WritePayloadCreate, WritePayloadUpdate } from "../types.ts";
 import type { WriteResult } from "../types.ts";
 import type { DDL } from "../../ddl/types.ts";
 import type { WhereFilterDefinition } from "../../where-filter/index.ts";
@@ -125,8 +125,8 @@ export function genWhere(rng: Rng, world: FuzzItem[]): WhereFilterDefinition<Fuz
     }
 }
 
-const genUpdateData = (rng: Rng): Partial<FuzzItem> => {
-    const data: Partial<FuzzItem> = {};
+const genUpdateData = (rng: Rng): WritePayloadUpdate<FuzzItem>['data'] => {
+    const data: WritePayloadUpdate<FuzzItem>['data'] = {};
     do {
         if (rng.bool(0.5)) data.text = rng.pick(TEXT_POOL);
         if (rng.bool(0.5)) data.count = rng.intRange(-10, 10);
@@ -177,7 +177,7 @@ export function genWriteAction(rng: Rng, world: FuzzItem[], uuid: string, delete
             const id = dup ? rng.pick(world).id : fresh;
             // sub_items is always present (see genWorld) so a later same-batch array_scope never hits an
             // undefined array on this freshly-created row.
-            const data: FuzzItem = { id, sub_items: [] };
+            const data: WritePayloadCreate<FuzzItem>['data'] = { id, sub_items: [] };
             if (rng.bool(0.6)) data.text = rng.pick(TEXT_POOL);
             if (rng.bool(0.6)) data.count = rng.intRange(-10, 10);
             return makeWriteAction(uuid, { type: 'create', data });
@@ -239,6 +239,7 @@ export function genInvalidAction(rng: Rng, invalidWhereCorpus: boolean): WriteAc
         case 2: return makeWriteAction('bad', { type: 'create', data: { id: 'z' + rng.int(1000), count: NaN } });
         // An explicit `undefined` value: JSON drops the key, so the action would mean nothing at all on the far
         // side of a boundary. Guaranteed-failing like its peers, whatever the world holds.
+        // @ts-expect-error: the `undefined` is the defect under test, and the payload type refuses it
         case 3: return makeWriteAction('bad', { type: 'update', data: { text: undefined }, where: {} });
         default: return makeWriteAction('bad', { type: 'update', data: { text: 'z' }, where: { nope: 1 } as WhereFilterDefinition<FuzzItem> });
     }
@@ -251,20 +252,11 @@ export function genInvalidAction(rng: Rng, invalidWhereCorpus: boolean): WriteAc
 export const sortByPk = (items: FuzzItem[]): FuzzItem[] => [...items].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
 /** The set of PKs a single action could touch: its created PK (create) or its where's match set (everything else). */
-/**
- * Minimal runtime view of a payload. `WritePayload<FuzzItem>` resolves to `unknown` for schemas with
- * object arrays (the array_scope path-type collapses the whole union), so the static type can't narrow —
- * this view names only the two runtime fields this helper reads.
- */
-type PayloadView =
-    | { type: 'create'; data: { id: string } }
-    | { type: 'update' | 'delete' | 'array_scope' | 'add_to_set' | 'push' | 'pull' | 'inc' | 'delete_property'; where?: unknown };
-
 export function touchedPks(action: WriteAction<FuzzItem>, world: FuzzItem[]): Set<string> {
-    const p = action.payload as PayloadView;
+    const p = action.payload;
     const touched = new Set<string>();
     if (p.type === 'create') touched.add(String(p.data.id));
-    else if (p.where) matchedPks(world, p.where as WhereFilterDefinition<FuzzItem>).forEach(id => touched.add(id));
+    else if (p.where) matchedPks(world, p.where).forEach(id => touched.add(id));
     return touched;
 }
 

@@ -1,4 +1,4 @@
-import { FlatSchema, flatDdl, FlatWithSubItemsSchema, flatWithSubItemsDdl } from "./fixtures.ts";
+import { FlatSchema, flatDdl, FlatWithSubItemsSchema, flatWithSubItemsDdl, type Flat, type FlatWithSubItems } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx, type WriteTestAdapterResult } from "./harness.ts";
 import { getWriteErrors, getWriteFailures } from "../helpers.ts";
 
@@ -108,7 +108,7 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatWithSubItemsSchema, flatWithSubItemsDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', sub_items: [{ sid: 's1', val: NaN }] } })],
+                    writeActions: [makeAction<FlatWithSubItems>('a1', { type: 'create', data: { id: '1', sub_items: [{ sid: 's1', val: NaN }] } })],
                     schema: FlatWithSubItemsSchema,
                     ddl: flatWithSubItemsDdl,
                 });
@@ -220,7 +220,8 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', text: 'x', count: 5 }],
-                    writeActions: [makeAction('a1', { type: 'update', data: { text: undefined }, where: { id: '1' } })],
+                    // @ts-expect-error: probing the runtime's response to the `undefined` the payload type refuses
+                    writeActions: [makeAction<Flat>('a1', { type: 'update', data: { text: undefined }, where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,
                 });
@@ -235,7 +236,7 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatWithSubItemsSchema, flatWithSubItemsDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    writeActions: [makeAction('a1', { type: 'create', data: { id: '1', sub_items: [{ sid: 's1', val: undefined }] } })],
+                    writeActions: [makeAction<FlatWithSubItems>('a1', { type: 'create', data: { id: '1', sub_items: [{ sid: 's1', val: undefined }] } })],
                     schema: FlatWithSubItemsSchema,
                     ddl: flatWithSubItemsDdl,
                 });

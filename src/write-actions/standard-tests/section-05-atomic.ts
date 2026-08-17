@@ -16,9 +16,9 @@ export function registerAtomic(ctx: SectionCtx): void {
                     initialItems: [],
                     writeActions: [
                         makeAction('a1', { type: 'create', data: { id: '1' } }),
-                        makeAction('a2', {
+                        makeAction<Flat>('a2', {
                             type: 'create',
-                            // @ts-ignore
+                            // @ts-expect-error: probing the runtime's response to a create the schema forbids
                             data: { broken: true },
                         }),
                     ],
@@ -100,9 +100,9 @@ export function registerAtomic(ctx: SectionCtx): void {
                     initialItems: [],
                     writeActions: [
                         makeAction('a1', { type: 'create', data: { id: '1' } }),
-                        makeAction('a2', {
+                        makeAction<Flat>('a2', {
                             type: 'create',
-                            // @ts-ignore
+                            // @ts-expect-error: probing the runtime's response to a create the schema forbids
                             data: { bad: true },
                         }),
                     ],

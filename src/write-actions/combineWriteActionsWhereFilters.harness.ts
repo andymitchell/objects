@@ -96,13 +96,8 @@ export function wa(payload: WritePayload<Obj>): WriteAction<Obj> {
     return { type: "write", ts: _n, uuid: `u${_n}`, payload };
 }
 
-/**
- * Every payload discriminant, spelled literally: `WritePayload<Obj>["type"]` collapses to `unknown` for
- * a nested-array `T` (the recursive `array_scope.action` hits TS's instantiation cap). The arm canary in
- * the test file pins this list to the real union via a shallow single-array type where it resolves cleanly.
- */
-export type Arm = "create" | "update" | "delete" | "array_scope" | "add_to_set" | "push" | "pull" | "inc"
-    | "set_property_undefined" | "delete_property";
+/** Every verb a payload can name, taken from the payload union itself so the corpus cannot fall behind it. */
+export type Arm = WritePayload<Obj>["type"];
 export const ALL_ARMS: readonly Arm[] = ["create", "update", "delete", "array_scope", "add_to_set", "push", "pull", "inc",
     "set_property_undefined", "delete_property"];
 
@@ -188,9 +183,11 @@ export function genBatch(rng: () => number, pool: PoolEntry[], min = 1, max = 6)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The flat structural view of a payload the oracle actually walks (discriminant + the few spec-relevant
- * fields). Decoupled from the library's `WritePayload`, whose deep `array_scope.action` recursion partially
- * resolves to `unknown` for a nested-array `T` and so can't be walked directly.
+ * The flat structural view of a payload the oracle actually walks: the discriminant, and the few fields
+ * that decide which rows an action could touch.
+ *
+ * Spelling that subset here rather than reusing `WritePayload` keeps the oracle derived from the spec
+ * alone — it stays an unbiased arbiter, unable to inherit a mistake from the types under test.
  */
 type OraclePayload =
     | { type: "create"; data: Record<string, any> }
@@ -274,9 +271,7 @@ function touchableIndices(items: Record<string, any>[], payload: OraclePayload, 
 export function requiredRootIds(ds: Obj[], actions: WriteAction<Obj>[], d: DDL<Obj>, includeDelete: boolean): Set<string> {
     const out = new Set<string>();
     for (const a of actions) {
-        // The oracle walks only the spec-relevant subset of each payload; bridge the library's deep
-        // (partially-`unknown`) `WritePayload` to the flat `OraclePayload` the walker is typed against.
-        for (const i of touchableIndices(ds as Record<string, any>[], a.payload as OraclePayload, d, ".", includeDelete)) {
+        for (const i of touchableIndices(ds as Record<string, any>[], a.payload, d, ".", includeDelete)) {
             out.add(ds[i]!.id);
         }
     }
@@ -298,7 +293,7 @@ function isSuppressedUnderExclusion(payload: OraclePayload): boolean {
  * `⊆` (which fails because an all-suppressed batch collapses to `undefined` = match-all, the top of the lattice).
  */
 export function stripDeletes(actions: WriteAction<Obj>[]): WriteAction<Obj>[] {
-    return actions.filter((a) => !isSuppressedUnderExclusion(a.payload as OraclePayload));
+    return actions.filter((a) => !isSuppressedUnderExclusion(a.payload));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

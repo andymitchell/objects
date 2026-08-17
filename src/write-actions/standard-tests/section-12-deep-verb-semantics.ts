@@ -2,7 +2,7 @@ import {
     FlatSchema, flatDdl,
     FlatWithSubItemsSchema, flatWithSubItemsDdl,
     NestedSchema, nestedDdl, type Nested,
-    NestedObjSchema, nestedObjDdl,
+    NestedObjSchema, nestedObjDdl, type NestedObj,
     DeepSetSchema, deepSetDdl,
     NullableFieldsSchema, nullableFieldsDdl, type NullableFields,
     MatchSchema, matchDdl,
@@ -54,7 +54,8 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(NestedObjSchema, nestedObjDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', note: 'x' }],
-                    writeActions: [makeAction('a1', { type: 'update', data: { note: undefined }, where: { id: '1' } })],
+                    // @ts-expect-error: probing the runtime's response to the `undefined` the payload type refuses
+                    writeActions: [makeAction<NestedObj>('a1', { type: 'update', data: { note: undefined }, where: { id: '1' } })],
                     schema: NestedObjSchema,
                     ddl: nestedObjDdl,
                 });

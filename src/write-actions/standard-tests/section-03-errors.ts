@@ -1,4 +1,4 @@
-import { FlatSchema, flatDdl } from "./fixtures.ts";
+import { FlatSchema, flatDdl, type Flat } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
 import { getWriteFailures, getWriteSuccesses, getWriteErrors } from "../helpers.ts";
 
@@ -93,9 +93,9 @@ export function registerErrors(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [],
-                    writeActions: [makeAction('a1', {
+                    writeActions: [makeAction<Flat>('a1', {
                         type: 'create',
-                        // @ts-ignore missing id
+                        // @ts-expect-error: probing the runtime's response to a create with no primary key
                         data: { text: 'no pk' },
                     })],
                     schema: FlatSchema,

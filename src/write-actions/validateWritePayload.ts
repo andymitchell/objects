@@ -99,6 +99,31 @@ export type WritePayloadSchemaIssue = {
 // `undefined` one alike, so nothing changes across the boundary.
 
 /**
+ * Every value in a create's or an update's `data` that a write action cannot carry.
+ *
+ * These two verbs describe an item's own fields, so an explicit `undefined` is a fault here alongside the values
+ * with no JSON form: `JSON.stringify` drops the key, and the same action then means something different on the
+ * other side — a create defining fewer fields, an update touching nothing.
+ *
+ * Everything that judges written data before it is stored reads this one answer, so the writes a caller can get
+ * past a parse gate are exactly the writes the engine will accept.
+ *
+ * @param data The `data` of a create or update payload.
+ * @returns One issue per offending value, each carrying its reason and its dot-path beneath `data` (absent when
+ * `data` itself is the fault). An explicit `undefined` is additionally marked `undefined_value`, so a caller can
+ * answer it with advice about how to spell the intent rather than which JSON type to use.
+ *
+ * @example
+ * findUnwritableDataValues({ id: "1", when: new Date(), label: undefined });
+ * // -> [{ reason: 'malformed', path: 'when' }, { reason: 'malformed', path: 'label', undefined_value: true }]
+ */
+export function findUnwritableDataValues(data: unknown): NonJsonValueIssue[] {
+  const issues: NonJsonValueIssue[] = [];
+  findNonJsonValues(data, "", issues, { flagUndefined: true });
+  return issues;
+}
+
+/**
  * How to spell the intention an explicit `undefined` was reaching for, one message per verb. The value itself is
  * never quoted — an error may be logged, and the path already locates the fault.
  */
@@ -139,9 +164,7 @@ export function validateWritePayloadValues(
   switch (payload.type) {
     case "create":
     case "update": {
-      const walked: NonJsonValueIssue[] = [];
-      findNonJsonValues(payload.data, "", walked, { flagUndefined: true });
-      for (const issue of walked) {
+      for (const issue of findUnwritableDataValues(payload.data)) {
         out.push(
           issue.undefined_value
             ? { reason: issue.reason, path: issue.path, message: UNDEFINED_VALUE_GUIDANCE[payload.type] }

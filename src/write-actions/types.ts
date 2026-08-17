@@ -31,6 +31,13 @@ export type WritePayloadCreate<W extends Record<string, any>> = {
    *
    * Only the top level of this restriction is expressed in the type. A nested `undefined` still compiles; the
    * write is rejected at runtime, at any depth, before anything is stored.
+   *
+   * A value with no JSON form — a `Date`, a `BigInt`, `NaN` — is refused at any depth too, and for the same
+   * reason: it cannot make the round trip intact.
+   *
+   * The item is stored as it is written here. A row schema validating the action measures this data rather than
+   * rendering it, so a default it declares is not stamped onto an omitted key and a coercion it declares does
+   * not respell a value that was given.
    */
   data: { [K in keyof W]: Exclude<W[K], undefined> };
 };
@@ -50,10 +57,16 @@ export type WritePayloadUpdate<
    * Only the top level of that restriction is expressed in the type. A nested `undefined` still compiles; the
    * write is rejected at runtime, at any depth, before anything is stored.
    *
+   * A value with no JSON form — a `Date`, a `BigInt`, `NaN` — is refused at any depth too, and for the same
+   * reason: it cannot make the round trip intact.
+   *
    * A key holding an array of objects is not offered. Setting one would replace the array wholesale, which
    * asks the caller to edit arrays before describing the change and leaves a CRDT with no way to tell an
    * intentional overwrite from a stale cache; `array_scope` describes the change to individual elements
    * instead. A scalar array can be set, because replacing it carries no such ambiguity.
+   *
+   * Each field is stored as it is written here. A row schema validating the action measures this data rather
+   * than rendering it, so a default or coercion it declares changes nothing about what the update carries.
    */
   data: { [K in NonObjectArrayProperty<W>]?: Exclude<W[K], undefined> };
   where: WhereFilterDefinition<WF>;

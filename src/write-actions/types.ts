@@ -310,7 +310,17 @@ export type WriteError =
       primary_key: string | number | symbol;
     }
   | {
+      /**
+       * An update's `data` named the primary key with a value other than the one the matched row already
+       * carries. Every row is located, reported and reconciled by that key, so an update may not move it —
+       * a falsy value least of all, which would leave the row with no usable key for the rest of the batch
+       * or for the caller after it. Writing the key's own current value back is no alteration, and the row
+       * still reports as updated. The row's actual key travels as `item_pk` (see {@link WriteErrorContext}).
+       * On create the same falsy value is `missing_key` instead: there the payload IS the item, so it has no
+       * key to keep rather than one it is trying to change.
+       */
       type: "update_altered_key";
+      /** The name of the key the update tried to change. */
       primary_key: string | number | symbol;
     }
   | {
@@ -380,16 +390,21 @@ export type WriteError =
     }
   | {
       /**
-       * The action's `set_property_undefined`/`delete_property` path can never be a valid write target: a
-       * segment is empty or `__proto__`/`prototype`/`constructor`, the schema declares no property there,
+       * The action's `path` can never be a valid write target. For `set_property_undefined`/`delete_property`:
+       * a segment is empty or `__proto__`/`prototype`/`constructor`, the schema declares no property there,
        * the path crosses an array, or the property exists but the schema will not let this verb change it
-       * (a required key cannot be removed; a field that does not store `undefined` cannot be cleared).
-       * Caught before any mutation; the action is rejected unrecoverably and state is left unchanged.
-       * Distinct from `invalid_scope` (which names an array to write INTO) and `invalid_filter` (a `where`
-       * fault): this names the single property being written.
+       * (a required key cannot be removed; a field that does not store `undefined` cannot be cleared). For
+       * those verbs and for `inc` alike: the path names the row's primary key, which locates the row and is
+       * therefore refused whatever the schema permits. Caught before any mutation; the action is rejected
+       * unrecoverably and state is left unchanged. Distinct from `invalid_scope` (which names an array to
+       * write INTO) and `invalid_filter` (a `where` fault): this names the single property being written.
        */
       type: "invalid_property_path";
-      /** The rejected path, prefix-joined from the action root when the fault is in a nested `array_scope` (e.g. `children.nope`). */
+      /**
+       * The rejected path, prefix-joined from the action root when the fault is in a nested `array_scope`
+       * (e.g. `children.nope`), and always spelled in the escaped dot-prop grammar — a key holding a literal
+       * dot reads as `a\.b`, whichever grammar the verb's own `path` uses.
+       */
       path: string;
       /** Why the property cannot be written through. */
       reason: PropertyPathRejectionReason;

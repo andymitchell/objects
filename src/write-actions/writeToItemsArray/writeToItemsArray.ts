@@ -19,7 +19,7 @@ import {
     applyAddToSet, applyPush, applyPull, applyInc,
     probeSetPropertyUndefined, commitSetPropertyUndefined, probeDeleteProperty, commitDeleteProperty,
 } from "./helpers/mutations/index.ts";
-import { parseDotPropPathSegments } from "../../dot-prop-paths/dotPropPathSegments.ts";
+import { escapeDotPropPathSegment, parseDotPropPathSegments } from "../../dot-prop-paths/dotPropPathSegments.ts";
 import { joinDotpropPath } from "../../dot-prop-paths/joinDotpropPath.ts";
 
 
@@ -396,8 +396,18 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                                 }
 
 
-                                const payloadSetsPrimaryKeyAs = rules.primary_key in action.payload.data && (action.payload.data as T)[rules.primary_key];
-                                if( payloadSetsPrimaryKeyAs && payloadSetsPrimaryKeyAs!==pk(mutableUpdatedItem) ) {
+                                // An update may not change the row's primary key: the engine matches, reports
+                                // and reconciles the row through it, so naming it in `data` with anything
+                                // other than the value the row already carries is a refused change. That
+                                // includes a falsy value, which would leave the row with no usable key at
+                                // all — unlocatable for the rest of the batch and for the caller after it.
+                                // Presence is what counts, not truthiness, and `in` is deliberately wider
+                                // than the own-enumerable walk the value gate makes, so a key on a carrier
+                                // the gate cannot see is refused rather than half-trusted. A plain
+                                // own-enumerable `undefined` never arrives — the value gate rejects it as
+                                // `invalid_data_value` first. Writing the key's own current value back is no
+                                // alteration, and the row still reports as updated like any other match.
+                                if( rules.primary_key in action.payload.data && (action.payload.data as T)[rules.primary_key]!==pkValue ) {
                                     failureTracker.report(action, item, {
                                         'type': 'update_altered_key',
                                         primary_key: rules.primary_key
@@ -622,10 +632,11 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
  * against, and report where it is.
  *
  * The engine identifies every item by its primary key: it matches `where` clauses, reports outcomes and
- * reconciles the returned changes through that value. Clearing or removing it strands the item, so the write
- * is refused whatever the schema permits — a schema that declares the key optional or defaulted would
- * otherwise let it through. Each `array_scope` level is judged against its own list's key, since a scoped
- * element is identified by that list's key rather than the outer one.
+ * reconciles the returned changes through that value. Clearing or removing it strands the item; moving it to
+ * another value re-identifies the row midway, leaving the reported changes keyed to a row the caller cannot
+ * find. Both are refused whatever the schema permits — a key the schema declares optional or defaulted, or a
+ * numeric key `inc` is willing to add to, would otherwise let one through. Each `array_scope` level is judged
+ * against its own list's key, since a scoped element is identified by that list's key rather than the outer one.
  *
  * @param action The action to inspect, at any nesting depth.
  * @param schema The schema of one item at this level.
@@ -633,10 +644,21 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
  * @param prefix The scope chain already descended, so a nested path is reported from the action's root.
  * @returns The full path of the offending write, or `undefined` when the action targets no primary key.
  *
+ * @example
+ * // A key holding a literal dot is reported in the escaped grammar, under any scope it sits in:
+ * // { type: 'array_scope', scope: 'rows', action: { type: 'inc', path: 'a.b', … } }  ->  'rows.a\\.b'
+ *
  * @remarks
  * Run before any item is matched, so an action naming the primary key is refused even against an empty list
  * or a `where` that matches nothing — a statically invalid write fails for the same reason whatever the data
  * happens to hold.
+ *
+ * The two verb families spell their target in different grammars, and each is read in its own.
+ * `set_property_undefined`/`delete_property` take an escaped dot-prop path, which is parsed into segments so
+ * that only a path naming the key itself counts (a same-named property nested inside another object is an
+ * ordinary field). `inc` takes a raw top-level key name, where a literal dot is just a character, so the
+ * whole name is compared as one key. Reported paths always speak the escaped grammar, so a raw name is
+ * escaped before it is joined onto the scope chain.
  */
 function findPrimaryKeyTargetingPropertyPath<T extends Record<string, any>>(
     action: Readonly<WriteAction<T>>,
@@ -654,6 +676,17 @@ function findPrimaryKeyTargetingPropertyPath<T extends Record<string, any>>(
         // object is an ordinary field.
         if( segments.length===1 && segments[0]===String(rules.primary_key) ) {
             return joinDotpropPath(prefix, payload.path as string);
+        }
+        return undefined;
+    }
+
+    if( payload.type==='inc' ) {
+        if( !rules ) return undefined;
+        // The path is a raw key name rather than a dot-prop path, so the whole name is one key and is
+        // compared as such — never split into segments — and escaped on the way out, because a reported
+        // path is read in the escaped grammar.
+        if( String(payload.path)===String(rules.primary_key) ) {
+            return joinDotpropPath(prefix, escapeDotPropPathSegment(String(payload.path)));
         }
         return undefined;
     }

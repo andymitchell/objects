@@ -227,12 +227,24 @@ export function genBatch(rng: Rng, world: FuzzItem[], deleteProperty: boolean): 
 }
 
 /**
- * A deliberately-invalid action for P10. By default only `invalid_data_value` variants (safe for the
- * validate-where-sync consumer, which ignores that error). The unknown-field WHERE variant produces
- * `invalid_filter` and is included ONLY when the caller supports the invalid-where corpus.
+ * Build an action whose payload names a target the payload types forbid, so the runtime is what answers.
+ *
+ * A caller arriving from untyped JavaScript can aim a verb at any field at all, including ones the
+ * TypeScript surface rules out — the single assertion is quarantined here rather than spread across the
+ * corpus.
+ */
+function makeForeignWriteAction(uuid: string, payload: unknown): WriteAction<FuzzItem> {
+    return { type: 'write', ts: 0, uuid, payload: payload as WriteAction<FuzzItem>['payload'] };
+}
+
+/**
+ * A deliberately-invalid action for P10. By default `invalid_data_value` and `invalid_property_path`
+ * variants, both safe for the validate-where-sync consumer, whose every `where` here is a legitimate
+ * filter. The unknown-field WHERE variant produces `invalid_filter` and is included ONLY when the caller
+ * supports the invalid-where corpus.
  */
 export function genInvalidAction(rng: Rng, invalidWhereCorpus: boolean): WriteAction<FuzzItem> {
-    const variants = invalidWhereCorpus ? 5 : 4;
+    const variants = invalidWhereCorpus ? 6 : 5;
     switch (rng.int(variants)) {
         case 0: return makeWriteAction('bad', { type: 'inc', path: 'count', amount: NaN, where: {} });
         case 1: return makeWriteAction('bad', { type: 'inc', path: 'count', amount: Infinity, where: {} });
@@ -241,6 +253,9 @@ export function genInvalidAction(rng: Rng, invalidWhereCorpus: boolean): WriteAc
         // side of a boundary. Guaranteed-failing like its peers, whatever the world holds.
         // @ts-expect-error: the `undefined` is the defect under test, and the payload type refuses it
         case 3: return makeWriteAction('bad', { type: 'update', data: { text: undefined }, where: {} });
+        // A verb aimed at the primary key. The key locates every row, so moving it is refused on the action
+        // itself — no world can make this one land, and no row is even reached.
+        case 4: return makeForeignWriteAction('bad', { type: 'inc', path: fuzzDdl.lists['.'].primary_key, amount: 1, where: {} });
         default: return makeWriteAction('bad', { type: 'update', data: { text: 'z' }, where: { nope: 1 } as WhereFilterDefinition<FuzzItem> });
     }
 }

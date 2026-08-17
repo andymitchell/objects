@@ -468,28 +468,39 @@ export type LogicFilter<T extends Record<string, any>, ISD extends number = 2> =
  * the type before accessing its properties.
  *
  * ---
- * ## Index-signature depth limit
+ * ## Paths through an index signature
  *
- * When your schema contains index-signature types (e.g. `Record<string, X>`,
- * `{[key: string]: JsonValue}`), dot-prop paths through those types are limited to
- * **2 levels** of depth. This prevents IDE hangs caused by infinite template literal
- * expansion (e.g. `${string}.${string}.${string}...`).
+ * A key an index signature contributes (`Record<string, X>`, `{[key: string]: JsonValue}`)
+ * is open-ended, so a path crossing one is spelled with an open segment: `meta.${string}`.
  *
- * If you get a type error on a deeply nested path through an index-signature type,
- * you have two options:
+ * One segment past an index signature is typed from what the signature holds, and behaves
+ * as any other path does:
  *
- * 1. Use `WhereFilterDefinitionDeep<T>` which defaults to 6 levels of index-sig depth,
- *    or `WhereFilterDefinitionDeep<T, 4>` for a custom depth. Be aware that higher
- *    depths may slow IDE responsiveness for schemas with recursive index-sig types
- *    (e.g. `JsonValue`).
+ * ```ts
+ * // meta: Record<string, Record<string, string>>
+ * const ok: WhereFilterDefinition<Doc> = { 'meta.a': { b: 'x' } };
+ * ```
  *
- * 2. Use `// @ts-expect-error` to suppress the error on that line (weaker, as it
- *    won't catch future regressions if the path becomes valid).
+ * A path continuing further is still a legal key, because an open segment matches any number
+ * of segments after it — but its value stays the type the signature holds rather than the
+ * leaf the path names. The leaf's own value is refused, and the container's is accepted:
  *
- * Normal (non-index-sig) properties are always traversed to the full depth of 6
- * regardless of this limit. The limit applies wherever a path can reach an index
- * signature, including inside the element of an array of objects
- * (`items.meta.${string}`).
+ * ```ts
+ * const refused: WhereFilterDefinition<Doc> = { 'meta.a.b': 'x' };        // ✗ typed as Record<string, string>
+ * const compiles: WhereFilterDefinition<Doc> = { 'meta.a.b': { c: 'x' } }; // ✓ but no row can match it
+ * ```
+ *
+ * The matcher reads the whole path and answers on the leaf, so `// @ts-expect-error` on that
+ * line filters correctly at runtime. A larger index-signature budget does not change this
+ * verdict: `IndexSigDepth` bounds how far the path grammar expands — which is what keeps a
+ * recursive schema from hanging an IDE — not which value a crossed signature yields.
+ *
+ * That budget defaults to **2 levels**; `WhereFilterDefinitionDeep<T>` raises it to 6, and
+ * `WhereFilterDefinitionDeep<T, 4>` names its own. Higher budgets may slow IDE responsiveness
+ * for schemas with recursive index-sig types (e.g. `JsonValue`). Normal (non-index-sig)
+ * properties are always traversed to the full depth of 6 regardless of this limit, which
+ * applies wherever a path can reach an index signature, including inside the element of an
+ * array of objects (`items.meta.${string}`).
  */
 export type WhereFilterDefinition<T extends Record<string, any> = any> =
     PartialObjectFilter<T>

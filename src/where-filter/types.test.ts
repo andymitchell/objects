@@ -1,7 +1,7 @@
 
 import matchJavascriptObject from "./matchJavascriptObject.ts";
 import { isLogicFilter, isPartialObjectFilter } from "./typeguards.ts";
-import { type PartialObjectFilter, type PartialObjectFilterStrict, type WhereFilterDefinition } from "./types.ts"
+import { type PartialObjectFilter, type PartialObjectFilterStrict, type WhereFilterDefinition, type WhereFilterDefinitionDeep } from "./types.ts"
 
 type TestObj = {
     name: string;
@@ -1446,6 +1446,16 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
 
             expect(answer(recordLeaf, { 'meta.a.b': { c: 'x' } })).toBe(false);
             expect(answer(nestedRows, { 'rows.meta.a.b': { c: 'x' } })).toBe(false);
+        });
+
+        it('a larger index-signature budget does not change the verdict', () => {
+            // The budget bounds how far the path grammar expands, not which value a crossed signature
+            // yields, so the deeper alias answers the same way. This is what the published type's own
+            // guidance says, kept executable so the guidance cannot drift from the type.
+            // @ts-expect-error TODO the value still resolves to the record the index signature holds
+            ({ 'meta.a.b': 'x' }) satisfies WhereFilterDefinitionDeep<RecordLeafDoc>;
+            // @ts-expect-error TODO the same at an explicitly named budget
+            ({ 'meta.a.b': 'x' }) satisfies WhereFilterDefinitionDeep<RecordLeafDoc, 4>;
         });
 
         it('gap: an array of objects under an index signature is not read as an array at all', () => {

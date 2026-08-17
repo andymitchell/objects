@@ -38,6 +38,15 @@ type ScalarOnly = { id: string; label?: string; score: number };
 /** An array reachable only through a parent that may be absent. */
 type OptParent = { id: string; box?: { rows: { rid: string }[] } };
 
+/** An array whose element arrives as either an object or a scalar. */
+type MixedElements = { id: string; mix: ({ tag: string } | string)[] };
+
+/** An array whose element is itself an array. */
+type ListOfLists = { id: string; grid: string[][] };
+
+/** An array whose element is known to have keys, without saying which. */
+type LooseElements = { id: string; rows: Record<string, unknown>[] };
+
 /** Object arrays declared in the flavours that make a key optional or undefinable. */
 type WithOptObjArr = {
   id: string;
@@ -161,6 +170,110 @@ describe("Array verbs", () => {
       items: ["urgent"],
       where: { id: "1" },
     };
+  });
+
+  describe("deciding what counts as already present", () => {
+
+    it("reads a primary key off the element where the element has keys to read", () => {
+      const _byKey: WritePayload<Task> = {
+        type: "add_to_set",
+        path: "subs",
+        items: [{ sid: "s1", items: [] }],
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+      const _byValue: WritePayload<Flat> = {
+        type: "add_to_set",
+        path: "tags",
+        items: ["urgent"],
+        unique_by: "deep_equals",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses a primary key where the element is a scalar that has none", () => {
+      const _scalars: WritePayload<Flat> = {
+        type: "add_to_set",
+        path: "tags",
+        items: ["urgent"],
+        // @ts-expect-error: a string has no key to be unique by; compare strings by value
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+    });
+
+    it("offers a primary key to an element known to have keys without saying which", () => {
+      const _loose: WritePayload<LooseElements> = {
+        type: "add_to_set",
+        path: "rows",
+        items: [{ rid: "r1" }],
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+    });
+
+    it("refuses a primary key where the element is itself a list", () => {
+      const _lists: WritePayload<ListOfLists> = {
+        type: "add_to_set",
+        path: "grid",
+        items: [["a"]],
+        // @ts-expect-error: a list has no key to be unique by, however object-like it looks
+        unique_by: "pk",
+        // An empty filter matches every item. This shape cannot name one of its own keys here: a
+        // field holding an array of arrays collapses its whole filter key domain, a gap pinned in
+        // the where-filter type tests.
+        where: {},
+      };
+    });
+
+    it("refuses a primary key where only some elements could carry one", () => {
+      const _mixed: WritePayload<MixedElements> = {
+        type: "add_to_set",
+        path: "mix",
+        items: ["x"],
+        // @ts-expect-error: an element that may arrive as a scalar cannot be relied on for a key
+        unique_by: "pk",
+        where: { id: "1" },
+      };
+    });
+
+    it("keeps both rules where the shape says nothing about the element", () => {
+      const _any: WritePayload<any> = {
+        type: "add_to_set",
+        path: "anything",
+        items: [{ id: "1" }],
+        unique_by: "pk",
+        where: {},
+      };
+      const _openRecord: WritePayload<Record<string, any>> = {
+        type: "add_to_set",
+        path: "anything",
+        items: [{ id: "1" }],
+        unique_by: "pk",
+        where: {},
+      };
+    });
+
+    it("still names the rules it knows on a shape that describes no element", () => {
+      // The control for the test above: a shape with nothing to say about its elements could offer
+      // `unique_by` as anything at all, and then accepting 'pk' there would prove nothing.
+      const _any: WritePayload<any> = {
+        type: "add_to_set",
+        path: "anything",
+        items: [],
+        // @ts-expect-error: membership is decided by one of two named rules, whatever the element
+        unique_by: "nonsense",
+        where: {},
+      };
+      const _openRecord: WritePayload<Record<string, any>> = {
+        type: "add_to_set",
+        path: "anything",
+        items: [],
+        // @ts-expect-error: membership is decided by one of two named rules, whatever the element
+        unique_by: "nonsense",
+        where: {},
+      };
+    });
   });
 
   it("pull selects elements by filter in an object array, and by value in a scalar array", () => {

@@ -166,8 +166,10 @@ export function registerVerbsArrayOps(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
-                    // `unique_by` offers 'pk' for every array path, so pairing it with a scalar array is a rule
-                    // the engine enforces at runtime rather than one the payload type expresses.
+                    // A string has no key to be unique by, so the payload type does not offer `pk` here. The
+                    // suppression writes the action anyway, standing in for an untyped caller — the engine has
+                    // to rule on the pairing whether or not a type screened it out first.
+                    // @ts-expect-error: 'pk' is not offered on a scalar array
                     writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,

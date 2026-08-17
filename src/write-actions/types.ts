@@ -114,6 +114,40 @@ export type WritePayloadDelete<WF extends Record<string, any>> = {
   where: WhereFilterDefinition<WF>;
 };
 
+/**
+ * The rules for deciding whether an item is already in the array at an element type of `E`.
+ *
+ * `deep_equals` compares whole values: an item counts as present when an existing element is
+ * structurally identical to it. `pk` compares one field: an item counts as present when an element
+ * already carries the same primary key, however else the two differ.
+ *
+ * `pk` therefore needs an element with a key to read, and is offered only where the shape guarantees
+ * one. A scalar has no key. Nor has a list, whichever way it resembles an object. An element that may
+ * arrive as either an object or a scalar cannot be relied on for one either, so it is refused as well.
+ * An element the shape describes as unknown keeps both rules — the caller may know what the type
+ * could not say.
+ *
+ * @example
+ * type ForAnObjectElement = AddToSetUniqueBy<{ sid: string }>; // 'deep_equals' | 'pk'
+ * type ForAStringElement = AddToSetUniqueBy<string>;           // 'deep_equals'
+ *
+ * @remarks
+ * `[E]` is wrapped so the check reads the element type whole rather than distributing over a union of
+ * possible elements, which is what makes a mixed `({a: string} | string)[]` refuse `pk` instead of
+ * offering it for the object half alone.
+ *
+ * A caller writing an untyped payload reaches past this, and the engine rules on the same pairing when
+ * it runs: `pk` against a non-object element is a recoverable error that leaves the array untouched,
+ * so such a write is refused rather than silently compared by the wrong rule.
+ */
+type AddToSetUniqueBy<E> = unknown extends E
+  ? "deep_equals" | "pk"
+  : [E] extends [readonly any[]]
+    ? "deep_equals"
+    : [E] extends [Record<string, any>]
+      ? "deep_equals" | "pk"
+      : "deep_equals";
+
 /** Mapped-type-to-union: one variant per array property. Discriminated on `path`. */
 export type WritePayloadAddToSet<
   W extends Record<string, any>,
@@ -123,7 +157,8 @@ export type WritePayloadAddToSet<
     type: "add_to_set";
     path: P;
     items: ArrayElement<W, P>[];
-    unique_by: "deep_equals" | "pk";
+    /** How membership is decided — see {@link AddToSetUniqueBy}. There is no default. */
+    unique_by: AddToSetUniqueBy<ArrayElement<W, P>>;
     where: WhereFilterDefinition<WF>;
   };
 }[ArrayProperty<W>];

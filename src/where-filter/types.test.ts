@@ -1269,6 +1269,21 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
         });
     });
 
+    describe('a field holding an array of arrays collapses the key domain', () => {
+        type ListOfListsDoc = { id: string; grid: string[][] };
+
+        it('control: the same question on a shape without one type-checks', () => {
+            const ok: WhereFilterDefinition<{ id: string; grid: string[] }> = { id: '1' };
+        });
+
+        it('gap: every key of such a shape reads as an array path — the matcher answers on the scalar sibling regardless', () => {
+            const a: WhereFilterDefinition<ListOfListsDoc> = {
+                // @ts-expect-error TODO the array-path domain degrades to `string` for an array of arrays, so every key takes the array branch
+                id: '1'
+            };
+        });
+    });
+
     describe('nested $not is unmodelled', () => {
         it('control: a single $not wrapping a range type-checks', () => {
             const ok: WhereFilterDefinition<NumberDoc> = { age: { $not: { $gt: 5 } } };

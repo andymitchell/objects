@@ -31,6 +31,9 @@ import {
   getWriteSuccesses,
   getWriteErrors,
 } from "./helpers.ts";
+// From the public barrel, so the pins cover the export itself as well as the behaviour.
+import { isWriteActionArrayScopePayload, readGenericArrayScope } from "./index.ts";
+import type { WritePayloadArrayScopeParts } from "./index.ts";
 import { validateWriteAction } from "./validateWriteAction.ts";
 import {
   WriteErrorSchema,
@@ -435,6 +438,71 @@ describe("1. WritePayload<T> construction", () => {
         helper(actions, (uuid) => applied.get(uuid));
       }
       void caller;
+    });
+
+    describe("1.7.1 Reading an array-scope payload whose row type is still generic", () => {
+      const scopedPayload: WritePayloadArrayScope<Task, "subtasks"> = {
+        type: "array_scope",
+        scope: "subtasks",
+        action: { type: "update", data: { label: "renamed" }, where: { sid: "s1" } },
+        where: { id: "1" },
+      };
+
+      /** Consumes an element-level payload by inference — the supported way to spend a scoped action. */
+      function applyToElement<E extends Record<string, any>>(w: WritePayload<E>): WritePayload<E> {
+        return w;
+      }
+
+      it("reads the scope back as a path the row's own vocabulary accepts", () => {
+        function scopeOf<T extends Record<string, any>>(p: WritePayloadArrayScope<T>): DotPropPathToObjectArraySpreadingArrays<T> {
+          return readGenericArrayScope(p).scope;
+        }
+        void scopeOf;
+      });
+
+      it("hands the scoped action to machinery typed for the elements", () => {
+        function forward<T extends Record<string, any>>(p: WritePayloadArrayScope<T>) {
+          return applyToElement(readGenericArrayScope(p).action);
+        }
+        void forward;
+      });
+
+      it("narrows a generic payload to the array-scope verb when that verb is tested first", () => {
+        function nameTheVerb<T extends Record<string, any>>(p: WritePayload<T>): string {
+          if (isWriteActionArrayScopePayload<T>(p)) {
+            return readGenericArrayScope(p).scope;
+          }
+          switch (p.type) {
+            case "create":
+              return "create";
+            default:
+              return p.type;
+          }
+        }
+        void nameTheVerb;
+      });
+
+      it("hands back the very same payload object", () => {
+        expect(readGenericArrayScope<Task, "subtasks">(scopedPayload)).toBe(scopedPayload);
+      });
+
+      it("leaves a known row type's scope exactly as precise as it already was", () => {
+        // A payload whose row type is already known names its row type here: there is no generic
+        // parameter left for the row type to be discovered from.
+        const parts = readGenericArrayScope<Task, "subtasks">(scopedPayload);
+        isTypeEqual<typeof parts.scope, "subtasks">(true);
+        isTypeEqual<typeof parts, WritePayloadArrayScopeParts<Task, "subtasks">>(true);
+      });
+
+      it("refuses a direct scope read on a generic payload, which is the reason the helper exists", () => {
+        function scopeOfDirectly<T extends Record<string, any>>(p: WritePayloadArrayScope<T>): DotPropPathToObjectArraySpreadingArrays<T> {
+          // @ts-expect-error KNOWN LIMITATION: on a generically typed payload `scope` widens to a bare
+          // string rather than a path, because the checker cannot resolve the payload member-by-member
+          // until the row type is known. `readGenericArrayScope(p).scope` is the supported spelling.
+          return p.scope;
+        }
+        void scopeOfDirectly;
+      });
     });
   });
 });

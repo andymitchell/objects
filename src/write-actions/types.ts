@@ -98,6 +98,12 @@ export type WritePayloadUpdate<
  * @remarks
  * `P` narrows the type to a chosen scope, which is what an annotated variable or a builder helper
  * such as {@link assertWriteArrayScope} needs; left at its default it is every scope on `T`.
+ *
+ * Reading `.scope` or `.action` on a *generic* payload — inside a `function f<T>(…)` where `T` is
+ * still a type parameter — gives junk (`scope` becomes a `"" | `${string}.`-style string instead of a
+ * path). The payload is fine; the checker just cannot see through the lazy declaration until `T` is
+ * known. Pass the payload through {@link readGenericArrayScope} and both members read with their real types.
+ * On a concrete row type, direct reads are always exact.
  */
 export type WritePayloadArrayScope<
   T extends Record<string, any>,
@@ -111,11 +117,51 @@ export type WritePayloadArrayScope<
 > = P extends any
   ? {
       type: "array_scope";
+      /**
+       * The escaped dot-prop path naming which array of objects this write steps into.
+       *
+       * If this member's type reads as junk (a `"" | `${string}.`-style string rather than a path), the
+       * payload itself is generically typed — pass the payload through {@link readGenericArrayScope} to read
+       * it properly.
+       */
       scope: P;
+      /**
+       * The write to apply inside the scoped array — an ordinary `WritePayload` whose row type is the
+       * array's element type.
+       *
+       * If this member's type reads as junk, the payload itself is generically typed — pass the payload
+       * through {@link readGenericArrayScope} to read it properly.
+       */
       action: WritePayload<DotPropPathValidArrayValue<T, P>>;
       where: WhereFilterDefinition<WF>;
     }
   : never;
+
+/**
+ * An array-scope payload whose `scope` and `action` members stay usable when the row type is generic.
+ *
+ * Reading `.scope` or `.action` directly off a `WritePayloadArrayScope<T>` inside a generic function
+ * gives junk (`scope` becomes a `"" | `${string}.`-style string instead of a path). This is the same
+ * payload shape spelled so the checker can read each member properly. Obtain one with
+ * {@link readGenericArrayScope}; the members then read with their real types.
+ *
+ * @remarks
+ * When `P` is a union of paths, `scope` and `action` widen independently here — the guarantee that a
+ * scope is paired with its own element's action lives in {@link WritePayloadArrayScope}. Use this alias
+ * to read a payload, never to construct one.
+ */
+export type WritePayloadArrayScopeParts<
+  T extends Record<string, any>,
+  P extends DotPropPathToObjectArraySpreadingArrays<T> =
+    DotPropPathToObjectArraySpreadingArrays<T>,
+  WF extends Record<string, any> = T,
+> = {
+  type: "array_scope";
+  scope: P;
+  action: WritePayload<DotPropPathValidArrayValue<T, P>>;
+  where: WhereFilterDefinition<WF>;
+};
+
 export type WritePayloadDelete<WF extends Record<string, any>> = {
   type: "delete";
   where: WhereFilterDefinition<WF>;
@@ -324,6 +370,18 @@ export type WritePayloadDeleteProperty<
   where: WhereFilterDefinition<WF>;
 };
 
+/**
+ * One write instruction: the verb to apply, and the fields that verb needs.
+ *
+ * A union discriminated on `type`, so a `switch (payload.type)` narrows it to a single verb and each
+ * branch offers only the fields that verb takes.
+ *
+ * @remarks
+ * In generic code, a `WritePayload<T>` narrowed through a type guard can silently lose its
+ * array-scope member (a later `case 'array_scope'` stops compiling). Test for that verb first with
+ * {@link isWriteActionArrayScopePayload} in its own branch, then switch on `type` for the rest.
+ * Concrete row types narrow normally.
+ */
 export type WritePayload<
   T extends Record<string, any>,
   W extends Record<string, any> = T,

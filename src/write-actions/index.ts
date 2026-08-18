@@ -1,6 +1,6 @@
 import { writeToItemsArray, writeToItemsArrayPreserveInputType } from "./writeToItemsArray/index.ts";
 import { deepEquals } from "./writeToItemsArray/helpers/mutations/index.ts";
-import { assertWriteArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
+import { assertWriteArrayScope, isWriteActionArrayScopePayload, readGenericArrayScope, getWriteFailures, getWriteSuccesses, getWriteErrors } from "./helpers.ts";
 import { getWrittenPaths } from "./getWrittenPaths.ts";
 import { WriteErrorSchema, WriteAffectedItemSchema, WriteOutcomeOkSchema, WriteOutcomeFailedSchema, WriteOutcomeSchema, WriteOutcomeOkCoreSchema, WriteOutcomeFailedCoreSchema, WriteOutcomeCoreSchema, WriteResultSchema, makeWriteActionSchema, makeWriteOutcomeOkSchema, makeWriteOutcomeFailedSchema, makeWriteOutcomeSchema, makeWriteOutcomeOkCoreSchema, makeWriteOutcomeFailedCoreSchema, makeWriteOutcomeCoreSchema, makeWriteResultSchema, WriteActionSchema } from "./write-action-schemas.ts";
 
@@ -33,6 +33,18 @@ export type { CombineWriteActionsWhereFiltersResult } from "./combineWriteAction
 // ─── Helpers ───
 export {
     assertWriteArrayScope,
+    /**
+     * Tests whether a payload is the array-scope verb, narrowing it as a type guard. In generic
+     * code, narrow with this guard in its own branch (`if (isWriteActionArrayScopePayload<T>(p))
+     * { … } else switch (p.type) { … }`) — guard-narrowing a generic `WritePayload<T>` can
+     * otherwise drop the array-scope member entirely.
+     */
+    isWriteActionArrayScopePayload,
+    /**
+     * Exposes usable `scope` and `action` types when reading a generically typed array-scope
+     * payload. Identity at runtime.
+     */
+    readGenericArrayScope,
     getWriteFailures,
     getWriteSuccesses,
     getWriteErrors,
@@ -69,6 +81,7 @@ export type {
     WritePayloadUpdate,
     WritePayloadDelete,
     WritePayloadArrayScope,
+    WritePayloadArrayScopeParts,
     WritePayloadAddToSet,
     WritePayloadPush,
     WritePayloadPull,

@@ -364,6 +364,10 @@ export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Dep
  * A path is offered whenever the runtime can walk it, so an optional or nullable object along the
  * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
  * escaped grammar (`rank\.value`).
+ *
+ * @example
+ * type Task = { id: string; subtasks: { sid: string }[] };
+ * type Scopes = DotPropPathToObjectArraySpreadingArrays<Task>; // 'subtasks'
  */
 export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
     [K in keyof T]-?: K extends string
@@ -497,6 +501,21 @@ export type DotPropPathToUndefinableProperty<T, ISD extends number = 2> = Proper
 export type DotPropPathToOptionalProperty<T, ISD extends number = 2> = PropertyPermissionPath<T, 'optional', 6, ISD>;
 
 
+/**
+ * The element record type of the array that path `P` reaches on `T`.
+ *
+ * Use it to type work done inside a nested array — a scoped write into `subtasks` is written in
+ * terms of one `DotPropPathValidArrayValue<Task, 'subtasks'>`, knowing nothing of the fields
+ * around the array.
+ *
+ * @example
+ * type Task = { id: string; subtasks: { sid: string; done: boolean }[] };
+ * type Subtask = DotPropPathValidArrayValue<Task, 'subtasks'>; // { sid: string; done: boolean }
+ *
+ * @remarks
+ * A path reaching an array of scalars resolves to `never` — only element types that are records
+ * qualify.
+ */
 export type DotPropPathValidArrayValue<T extends Record<string, any>, P extends DotPropPathToArraySpreadingArrays<T> = DotPropPathToArraySpreadingArrays<T>> = PathValue<T, P> extends Array<infer ElementType> ? EnsureRecord<ElementType> : never;
 
 

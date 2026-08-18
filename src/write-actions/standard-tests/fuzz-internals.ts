@@ -250,8 +250,8 @@ export function genInvalidAction(rng: Rng, invalidWhereCorpus: boolean): WriteAc
         case 1: return makeWriteAction('bad', { type: 'inc', path: 'count', amount: Infinity, where: {} });
         case 2: return makeWriteAction('bad', { type: 'create', data: { id: 'z' + rng.int(1000), count: NaN } });
         // An explicit `undefined` value: JSON drops the key, so the action would mean nothing at all on the far
-        // side of a boundary. Guaranteed-failing like its peers, whatever the world holds.
-        // @ts-expect-error: the `undefined` is the defect under test, and the payload type refuses it
+        // side of a boundary. The payload type admits it (the field's own type does); the runtime value gate is
+        // what refuses it. Guaranteed-failing like its peers, whatever the world holds.
         case 3: return makeWriteAction('bad', { type: 'update', data: { text: undefined }, where: {} });
         // A verb aimed at the primary key. The key locates every row, so moving it is refused on the action
         // itself — no world can make this one land, and no row is even reached.

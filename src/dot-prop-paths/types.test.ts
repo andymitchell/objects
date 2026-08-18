@@ -1,5 +1,9 @@
 import { describe, test, expectTypeOf } from "vitest";
 import { z } from "zod";
+import type {
+    DotPropPathToObjectArraySpreadingArrays as PublicScopePaths,
+    DotPropPathValidArrayValue as PublicScopeElement,
+} from "./index.ts";
 import type { ArrayProperty, DotPropPathsRecord, DotPropPathsRecordWithOptionalAdditionalValues, DotPropPathsUnion, DotPropPathsUnionScalarArraySpreadingObjectArrays, DotPropPathsUnionScalarSpreadingObjectArrays, DotPropPathToArraySpreadingArrays, DotPropPathToObjectArraySpreadingArrays, NonArrayProperty, NonObjectArrayProperty, NumberProperty, PathValue, PrimaryKeyProperties, ScalarProperties } from "./types.ts";
 
 it('no test just type errors', () => {
@@ -311,6 +315,26 @@ describe('a readonly array is walked as an object by every generator alike', () 
     test('an array member is offered as a path by the plain and the spreading generators alike', () => {
         ('ro.length') satisfies DotPropPathsUnion<ReadonlyArrayRow>;
         ('ro.length') satisfies DotPropPathsUnionScalarSpreadingObjectArrays<ReadonlyArrayRow>;
+    });
+});
+
+/**
+ * The scoped-write path vocabulary is public surface: consumers name a scope with
+ * `DotPropPathToObjectArraySpreadingArrays` and type the elements it reaches with
+ * `DotPropPathValidArrayValue`, so both must stay importable from the barrel and keep their meaning.
+ */
+describe('the public barrel names the scoped-write path vocabulary', () => {
+
+    type Task = { id: string; subtasks: { sid: string; done: boolean }[] };
+    type Nested = { id: string; box: { rows: { r: string; kids: { k: number }[] }[] } };
+
+    test('every object-array path on a shape is offered, at any depth', () => {
+        expectTypeOf<PublicScopePaths<Task>>().toEqualTypeOf<'subtasks'>();
+        expectTypeOf<PublicScopePaths<Nested>>().toEqualTypeOf<'box.rows' | 'box.rows.kids'>();
+    });
+
+    test('a path resolves to the element record it reaches', () => {
+        expectTypeOf<PublicScopeElement<Task, 'subtasks'>>().toEqualTypeOf<{ sid: string; done: boolean }>();
     });
 });
 

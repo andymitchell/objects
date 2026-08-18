@@ -4,7 +4,7 @@ import { getZodSchemaAtSchemaDotPropPath } from "../../../dot-prop-paths/schema-
 import type { WriteAction } from "../../types.ts";
 import { isWriteActionArrayScopePayload } from "../../helpers.ts";
 import type { DDL, ListRules } from "../../../ddl/types.ts";
-import type { DotPropPathValidArrayValue } from "../../../dot-prop-paths/types.ts";
+import type { DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "../../../dot-prop-paths/types.ts";
 
 
 type ArrayScopeSchemaAndDDL<ScopedType extends Record<string, any>> = {writeAction:WriteAction<ScopedType>, schema: z.ZodType<ScopedType, any, any>, ddl: DDL<ScopedType>};
@@ -31,7 +31,9 @@ export function getArrayScopeSchemaAndDDL<T extends Record<string, any>>(writeAc
     const scope: string = payload.scope;
     const action = payload.action;
     
-    type ScopedType = DotPropPathValidArrayValue<T, typeof payload.scope>;
+    // The element union across every scope on T. Not `typeof payload.scope`: reading `scope` off the
+    // narrowed payload degrades to a junk template union when T is generic, failing the path constraint.
+    type ScopedType = DotPropPathValidArrayValue<T, DotPropPathToObjectArraySpreadingArrays<T>>;
 
     // Each key is re-rooted by slicing the scope prefix off the path at runtime, so the result is an ordinary
     // string rather than one of `ScopedType`'s literal paths. Collecting the entries as a plain record states
@@ -92,7 +94,9 @@ export default function getArrayScopeItemAction<T extends Record<string, any>>(i
     const scopedSchemaAndDDL = getArrayScopeSchemaAndDDL<T>(writeAction, schema, rules);
 
 
-    type ScopedType = DotPropPathValidArrayValue<T, typeof payload.scope>;
+    // The element union across every scope on T. Not `typeof payload.scope`: reading `scope` off the
+    // narrowed payload degrades to a junk template union when T is generic, failing the path constraint.
+    type ScopedType = DotPropPathValidArrayValue<T, DotPropPathToObjectArraySpreadingArrays<T>>;
 
 
     const propertyResults = getPropertySpreadingArrays(item, scope);

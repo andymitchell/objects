@@ -55,7 +55,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 const adapter = createAdapter(NestedObjSchema, nestedObjDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', note: 'x' }],
-                    // @ts-expect-error: probing the runtime's response to the `undefined` the payload type refuses
+                    // The field's own type admits `undefined`, so this compiles — the runtime value gate is what refuses it
                     writeActions: [makeAction<NestedObj>('a1', { type: 'update', data: { note: undefined }, where: { id: '1' } })],
                     schema: NestedObjSchema,
                     ddl: nestedObjDdl,

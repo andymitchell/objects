@@ -1,6 +1,6 @@
 
 import type  {  WriteAction,  WriteOutcomeOk, WriteOutcome, WritePayload } from "../types.ts";
-import {isUpdateOrDeleteWritePayload, getWriteFailures} from '../helpers.ts';
+import {isUpdateOrDeleteWritePayload, isWriteActionArrayScopePayload, getWriteFailures} from '../helpers.ts';
 import { setProperty } from "dot-prop";
 import matchJavascriptObject from "../../where-filter/matchJavascriptObject.ts";
 import { compileValidateWhereFilter } from "../../where-filter/validateWhereFilter.ts";
@@ -403,7 +403,51 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
 
 
                     if( !failureTracker.shouldHalt() ) {
-                        switch (action.payload.type) {
+                        // `array_scope` runs in its own branch rather than a switch case: narrowing the guard's
+                        // union for a generic T drops the deferred array-scope variant, so a `case 'array_scope'`
+                        // no longer type-checks. The runtime discriminant test is identical either way.
+                        if (isWriteActionArrayScopePayload<T>(action.payload)) {
+                            if (!mutableUpdatedItem) {
+                                mutableUpdatedItem = getMutableItem(item, objectCloneMode);
+                            }
+                            // Get all arrays that match the scope, then recurse into writeToItemsArray for them
+                            const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
+
+
+
+                            for( const scopedArray of scopedArrays ) {
+
+
+                                // #immer_cannot_mutate_in_atomic
+                                // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.
+                                // In Immer, any update to an object or property flags the whole draft, and it cannot be undone.
+                                // At the moment, Immer+atomic can rollback because it clones the object before updating it, only accepting it if all actions succeed.
+                                // The problem is when it recurses into _writeToItemsArray: the recursed level succeeds and mutates an object.
+                                // Now it can no longer be rolled back, even if the top level now fails on a subsequent action.
+                                // To workaround this, in the case of (`atomic` + Immer + array_scope), it must clone the target before recursing into it
+                                const preventMutation = optionsIncDefaults.mutate && optionsIncDefaults.atomic && isDraft(scopedArray.items);
+
+                                const arrayResponse = _writeToItemsArray(
+                                    [scopedArray.writeAction],
+                                    preventMutation? structuredClone(current(scopedArray.items)) : scopedArray.items,
+                                    scopedArray.schema,
+                                    scopedArray.ddl,
+                                    optionsIncDefaults,
+                                    true
+                                    );
+
+                                if( !arrayResponse.ok ) {
+                                    failureTracker.mergeUnderAction(action, getWriteFailures(arrayResponse));
+                                }
+
+                                setProperty(
+                                    mutableUpdatedItem,
+                                    scopedArray.path,
+                                    arrayResponse.changes.final_items
+                                )
+
+                            }
+                        } else switch (action.payload.type) {
                             case 'update':
                                 if (!mutableUpdatedItem) {
                                     mutableUpdatedItem = getMutableItem(item, objectCloneMode);
@@ -430,49 +474,6 @@ function _writeToItemsArray<T extends Record<string, any>>(writeActions: WriteAc
                                     writeStrategy.update_handler(action.payload, mutableUpdatedItem);
                                     failureTracker.testSchema(action, mutableUpdatedItem);
                                     // #fail_continues — if schema failed, shouldHalt() prevents commit
-                                }
-
-                                break;
-                            case 'array_scope':
-                                if (!mutableUpdatedItem) {
-                                    mutableUpdatedItem = getMutableItem(item, objectCloneMode);
-                                }
-                                // Get all arrays that match the scope, then recurse into writeToItemsArray for them
-                                const scopedArrays = getArrayScopeItemAction<T>(item, action, schema, ddl);
-
-
-
-                                for( const scopedArray of scopedArrays ) {
-
-
-                                    // #immer_cannot_mutate_in_atomic
-                                    // Immer is an edge case here because of the need to handle atomic rollbacks: it must switch away from 'mutate' for nested properties.
-                                    // In Immer, any update to an object or property flags the whole draft, and it cannot be undone.
-                                    // At the moment, Immer+atomic can rollback because it clones the object before updating it, only accepting it if all actions succeed.
-                                    // The problem is when it recurses into _writeToItemsArray: the recursed level succeeds and mutates an object.
-                                    // Now it can no longer be rolled back, even if the top level now fails on a subsequent action.
-                                    // To workaround this, in the case of (`atomic` + Immer + array_scope), it must clone the target before recursing into it
-                                    const preventMutation = optionsIncDefaults.mutate && optionsIncDefaults.atomic && isDraft(scopedArray.items);
-
-                                    const arrayResponse = _writeToItemsArray(
-                                        [scopedArray.writeAction],
-                                        preventMutation? structuredClone(current(scopedArray.items)) : scopedArray.items,
-                                        scopedArray.schema,
-                                        scopedArray.ddl,
-                                        optionsIncDefaults,
-                                        true
-                                        );
-
-                                    if( !arrayResponse.ok ) {
-                                        failureTracker.mergeUnderAction(action, getWriteFailures(arrayResponse));
-                                    }
-
-                                    setProperty(
-                                        mutableUpdatedItem,
-                                        scopedArray.path,
-                                        arrayResponse.changes.final_items
-                                    )
-
                                 }
 
                                 break;

@@ -28,7 +28,7 @@ const ProfileSchema = z.object({
 }).strict();
 ```
 
-**An explicit `undefined` in `create.data` or `update.data` is rejected.** At the top level of `data` the payload types refuse it outright, so typed code never reaches the question. When one arrives anyway — from parsed JSON, an `any`-typed value, or nested inside an object — the whole action fails as `invalid_data_value`: nothing is written, and the failure is unrecoverable, so no retry will make it work. The error carries the path of the offending field and a `message` naming what to do instead.
+**An explicit `undefined` in `create.data` or `update.data` is rejected.** The rejection happens at runtime, before anything is stored: the whole action fails as `invalid_data_value` — nothing is written, and the failure is unrecoverable, so no retry will make it work. The error carries the path of the offending field and a `message` naming what to do instead.
 
 ```ts
 { type: 'update', data: { nickname: undefined }, where: { id: '1' } }
@@ -74,7 +74,7 @@ Both verbs take a full path, so they reach properties inside nested objects — 
 
 ### Two details worth knowing
 
-**The rejection reaches any depth, but the types only reach the top level.** A nested `undefined` such as `{ meta: { badge: undefined } }` compiles, because excluding it recursively would cost more in type machinery than it buys. The runtime gate is the authority and rejects it at any depth, before anything is stored.
+**The rejection is a runtime rule, not a type.** `data` keeps the plain row shape, so an explicit `undefined` compiles wherever the row type itself admits one. Excluding it structurally would break two things the payload type must do: a caller's own row-typed value could no longer be assigned directly, and a generic caller could no longer infer the row type from the payload at all. The runtime gate is the authority and rejects an explicit `undefined` at any depth, before anything is stored.
 
 **The list-valued verbs make a deliberate exception, for keys only.** An item a `push` or `add_to_set` writes may hold an `undefined` **key**, because those items are compared by deep equality, which reads an absent key and an `undefined` one as the same thing — nothing about the item changes when it crosses a JSON boundary, so there is nothing to protect it from.
 

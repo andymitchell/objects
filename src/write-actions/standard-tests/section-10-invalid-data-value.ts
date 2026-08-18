@@ -220,7 +220,7 @@ export function registerInvalidDataValue(ctx: SectionCtx): void {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', text: 'x', count: 5 }],
-                    // @ts-expect-error: probing the runtime's response to the `undefined` the payload type refuses
+                    // The field's own type admits `undefined`, so this compiles — the runtime value gate is what refuses it
                     writeActions: [makeAction<Flat>('a1', { type: 'update', data: { text: undefined }, where: { id: '1' } })],
                     schema: FlatSchema,
                     ddl: flatDdl,

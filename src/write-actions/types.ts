@@ -23,14 +23,16 @@ export type WritePayloadCreate<W extends Record<string, any>> = {
   /**
    * The whole new item.
    *
-   * A key may be omitted wherever the shape allows it, but no key may be given the value `undefined`: a write
+   * A key may be omitted wherever the shape allows it, but no key may carry the value `undefined`: a write
    * action is a JSON document, and `JSON.stringify` erases such a key, so the action would define a different
    * item after a round trip. Omitting the key says the same thing and survives the journey. A field whose type
-   * is `string | undefined` therefore has to be given a real value here — its empty state belongs to
+   * is `string | undefined` has to be given a real value here — its empty state belongs to
    * `set_property_undefined`, once the item exists.
    *
-   * Only the top level of this restriction is expressed in the type. A nested `undefined` still compiles; the
-   * write is rejected at runtime, at any depth, before anything is stored.
+   * That restriction is enforced at runtime, at any depth, before anything is stored — the type deliberately
+   * stays the plain row shape. Excluding `undefined` structurally would break two things this type must do:
+   * a caller's own `W`-typed value could no longer be assigned directly, and a generic caller could no longer
+   * infer `W` from the payload at all.
    *
    * A value with no JSON form — a `Date`, a `BigInt`, `NaN` — is refused at any depth too, and for the same
    * reason: it cannot make the round trip intact.
@@ -39,7 +41,7 @@ export type WritePayloadCreate<W extends Record<string, any>> = {
    * rendering it, so a default it declares is not stamped onto an omitted key and a coercion it declares does
    * not respell a value that was given.
    */
-  data: { [K in keyof W]: Exclude<W[K], undefined> };
+  data: W;
 };
 export type WritePayloadUpdate<
   W extends Record<string, any>,
@@ -54,8 +56,10 @@ export type WritePayloadUpdate<
    * property's value is `set_property_undefined` and removing it is `delete_property` — both name the intention
    * outright, and both survive serialisation.
    *
-   * Only the top level of that restriction is expressed in the type. A nested `undefined` still compiles; the
-   * write is rejected at runtime, at any depth, before anything is stored.
+   * That restriction is enforced at runtime, at any depth, before anything is stored — the type deliberately
+   * keeps each offered field's own shape. Excluding `undefined` structurally would break generic callers:
+   * a value of the field's own type could no longer be assigned directly, and inference through the payload
+   * would fail.
    *
    * A value with no JSON form — a `Date`, a `BigInt`, `NaN` — is refused at any depth too, and for the same
    * reason: it cannot make the round trip intact.
@@ -68,7 +72,7 @@ export type WritePayloadUpdate<
    * Each field is stored as it is written here. A row schema validating the action measures this data rather
    * than rendering it, so a default or coercion it declares changes nothing about what the update carries.
    */
-  data: { [K in NonObjectArrayProperty<W>]?: Exclude<W[K], undefined> };
+  data: Partial<Pick<W, NonObjectArrayProperty<W>>>;
   where: WhereFilterDefinition<WF>;
   method?: UpdatingMethod;
 };
@@ -79,9 +83,9 @@ export type WritePayloadUpdate<
  * written in terms of ONE element — so scoping into `subs` means `action` may create, update, push
  * to or otherwise write a `sub`, and knows nothing of the fields around it.
  *
- * Mapped-type-to-union: one variant per scope path, each pairing that path with an `action` typed
- * for the elements it reaches. Every scope is a separate variant because their element types are
- * unrelated — a single variant spanning all of them could only offer what they have in common.
+ * One union variant per scope path, each pairing that path with an `action` typed for the elements
+ * it reaches. Every scope is a separate variant because their element types are unrelated — a
+ * single variant spanning all of them could only offer what they have in common.
  *
  * @example
  * const renameSub: WritePayloadArrayScope<Task> = {
@@ -101,14 +105,17 @@ export type WritePayloadArrayScope<
     DotPropPathToObjectArraySpreadingArrays<T>,
   W extends Record<string, any> = T,
   WF extends Record<string, any> = T,
-> = {
-  [Q in P]: {
-    type: "array_scope";
-    scope: Q;
-    action: WritePayload<DotPropPathValidArrayValue<T, Q>>;
-    where: WhereFilterDefinition<WF>;
-  };
-}[P];
+  // A distributive conditional, not an indexed map over P: both spell one variant per path, but only the
+  // conditional keeps a bare-generic instantiation assignable to itself when a helper's T is inferred.
+  // Rewriting this as `{ [Q in P]: … }[P]` re-breaks generic consumers even though every concrete test stays green.
+> = P extends any
+  ? {
+      type: "array_scope";
+      scope: P;
+      action: WritePayload<DotPropPathValidArrayValue<T, P>>;
+      where: WhereFilterDefinition<WF>;
+    }
+  : never;
 export type WritePayloadDelete<WF extends Record<string, any>> = {
   type: "delete";
   where: WhereFilterDefinition<WF>;

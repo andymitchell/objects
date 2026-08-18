@@ -7,4 +7,4 @@ export { findNormalizingPaths } from "./schema-normalization.ts";
 export type { SchemaNormalization } from "./schema-normalization.ts";
 export { joinDotpropPath } from "./joinDotpropPath.ts";
 export { parseDotPropPathSegments, escapeDotPropPathSegment } from "./dotPropPathSegments.ts";
-export type { DotPropPathsUnion, DotPropPathsUnionScalarSpreadingObjectArrays, DotPropPathsRecord, PathValue, ArrayProperty, ArrayElement, NumberProperty, DotPropPathToUndefinableProperty, DotPropPathToOptionalProperty } from "./types.ts";
+export type { DotPropPathsUnion, DotPropPathsUnionScalarSpreadingObjectArrays, DotPropPathsRecord, PathValue, ArrayProperty, ArrayElement, NumberProperty, DotPropPathToUndefinableProperty, DotPropPathToOptionalProperty, DotPropPathToObjectArraySpreadingArrays, DotPropPathValidArrayValue } from "./types.ts";

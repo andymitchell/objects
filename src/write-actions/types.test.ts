@@ -328,32 +328,12 @@ describe("1. WritePayload<T> construction", () => {
     /** A field whose declared type includes `null`, so the contrast between a stored `null` and a refused `undefined` is expressible. */
     type Marked = { id: string; note: string | null };
 
-    it("is refused in an update, whichever permission the field carries", () => {
-      const _clearable: WritePayloadUpdate<Profile> = {
-        type: "update",
-        // @ts-expect-error: undefined is not a value an action can carry — clear the field with set_property_undefined
-        data: { clearableOnly: undefined },
-        where: { id: "1" },
-      };
-      const _both: WritePayloadUpdate<Profile> = {
-        type: "update",
-        // @ts-expect-error: undefined is not a value an action can carry — remove the field with delete_property
-        data: { both: undefined },
-        where: { id: "1" },
-      };
+    it("is refused in an update where the field's declared type does not admit undefined", () => {
       const _removable: WritePayloadUpdate<Profile> = {
         type: "update",
-        // @ts-expect-error: undefined is not a value an action can carry — remove the field with delete_property
+        // @ts-expect-error: 'removableOnly' is optional without naming undefined, and exactOptionalPropertyTypes holds its value to the declared type — remove the field with delete_property
         data: { removableOnly: undefined },
         where: { id: "1" },
-      };
-    });
-
-    it("is refused in a create, where the remedy is to omit the key", () => {
-      const _create: WritePayloadCreate<Profile> = {
-        type: "create",
-        // @ts-expect-error: undefined is not a value an action can carry — omit 'both' instead
-        data: { id: "1", clearableOnly: "x", both: undefined, nested: {}, bag: {}, rows: [] },
       };
     });
 
@@ -389,10 +369,26 @@ describe("1. WritePayload<T> construction", () => {
       };
     });
 
-    // KNOWN LIMITATION, pinned deliberately: the exclusion reaches the top level of `data` only. Making it
-    // recursive costs instantiation depth and stops a caller assigning their own row-typed value straight in.
-    // The runtime value gate is the authority, and it rejects these at any depth before anything is stored.
-    it("compiles a nested undefined, which the runtime gate is what refuses", () => {
+    // KNOWN LIMITATION, pinned deliberately: the undefined ban is enforced at runtime only, the top level of
+    // `data` included. Excluding `undefined` structurally would stop a generic caller assigning a row of its
+    // own type straight in and would break inferring the row type from the payload at all, so the type keeps
+    // each field's declared shape. A value therefore compiles wherever the field itself admits `undefined`;
+    // the runtime value gate is the authority, and it rejects these at any depth before anything is stored.
+    it("compiles an explicit undefined wherever the field admits one, which the runtime gate is what refuses", () => {
+      const _clearable: WritePayloadUpdate<Profile> = {
+        type: "update",
+        data: { clearableOnly: undefined },
+        where: { id: "1" },
+      };
+      const _both: WritePayloadUpdate<Profile> = {
+        type: "update",
+        data: { both: undefined },
+        where: { id: "1" },
+      };
+      const _create: WritePayloadCreate<Profile> = {
+        type: "create",
+        data: { id: "1", clearableOnly: "x", both: undefined, nested: {}, bag: {}, rows: [] },
+      };
       const _updateNested: WritePayloadUpdate<Profile> = {
         type: "update",
         data: { nested: { note: undefined } },
@@ -402,6 +398,43 @@ describe("1. WritePayload<T> construction", () => {
         type: "create",
         data: { id: "1", clearableOnly: "x", nested: { note: undefined }, bag: { anything: undefined }, rows: [] },
       };
+    });
+  });
+
+  describe("1.7 Generic callers", () => {
+    /** A payload-taking helper whose row type is discovered from the argument alone. */
+    function passThrough<T extends Record<string, any>>(p: WritePayload<T>): WritePayload<T> {
+      return p;
+    }
+
+    it("infers the row type from a create's data alone", () => {
+      const p = passThrough({ type: "create", data: { id: "1" } });
+      isTypeEqual<typeof p, WritePayload<{ id: string }>>(true);
+    });
+
+    it("passes a generic row through a payload-taking helper without casts", () => {
+      function viaInference<T extends Record<string, any>>(row: T): WritePayload<T> {
+        return passThrough({ type: "create", data: row });
+      }
+      void viaInference;
+    });
+
+    it("assigns a generic row straight into a create payload", () => {
+      function direct<T extends Record<string, any>>(row: T): WritePayloadCreate<T> {
+        return { type: "create", data: row };
+      }
+      void direct;
+    });
+
+    it("relates a payload-reading callback to the actions it serves when the row type is inferred", () => {
+      function helper<T extends Record<string, any>>(actions: ReadonlyArray<WriteAction<T>>, get: (uuid: string) => WritePayload<T> | undefined): void {
+        void actions;
+        void get;
+      }
+      function caller<T extends Record<string, any>>(actions: WriteAction<T>[], applied: Map<string, WritePayload<T>>): void {
+        helper(actions, (uuid) => applied.get(uuid));
+      }
+      void caller;
     });
   });
 });

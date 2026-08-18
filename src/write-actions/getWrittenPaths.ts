@@ -57,8 +57,10 @@ function extractFromPayload<T extends Record<string, any>>(
             // escaping, these carry a whole path already written in the escaped grammar.
             return [join(payload.path as string)];
         case 'array_scope':
-            // scope: same keyof-derived widening as path above.
-            return extractFromPayload(payload.action, join(payload.scope as string));
+            // scope: same keyof-derived widening as path above. The nested action is re-anchored at the
+            // element type, which a generic T cannot name — recursion only reads keys, so the widest row
+            // type is honest here.
+            return extractFromPayload(payload.action as WritePayload<Record<string, any>>, join(payload.scope as string));
         case 'delete':
             return [];
         default: {

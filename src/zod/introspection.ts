@@ -72,9 +72,9 @@ export function getZodKind(schema: AnyZodSchema): ZodKind {
 /**
  * Return the inner schema stored by one transparent wrapper.
  *
- * Optional, nullable, default, catch, and readonly wrappers change presence, fallback, or mutability,
- * but not the value's structural shape. They all store the wrapped schema on `def.innerType`, so
- * walkers can step through them uniformly.
+ * Optional, nullable, default, prefault, nonoptional, catch, and readonly wrappers change presence,
+ * fallback, or mutability, but not the value's structural shape. They all store the wrapped schema on
+ * `def.innerType`, so walkers can step through them uniformly.
  *
  * @example
  * getZodKind(unwrap(z.string().optional())); // "string"
@@ -85,13 +85,14 @@ export function unwrap(schema: AnyZodSchema): AnyZodSchema {
 }
 
 /** Wrapper kinds that store their structural schema on `def.innerType`. */
-const TRANSPARENT_WRAPPER_KINDS: readonly ZodKind[] = ["optional", "nullable", "default", "catch", "readonly"];
+const TRANSPARENT_WRAPPER_KINDS: readonly ZodKind[] = ["optional", "nullable", "default", "prefault", "nonoptional", "catch", "readonly"];
 
 /**
  * Return whether a kind should be stepped through with {@link unwrap}.
  *
  * `optional` and `nullable` may also matter to the caller's policy. `default`, `catch`, and `readonly`
- * still wrap structure, but they do not by themselves mean the parsed value is absent.
+ * still wrap structure, but they do not by themselves mean the parsed value is absent. `prefault` and
+ * `nonoptional` replace an absent input and otherwise wrap structure.
  *
  * @example
  * isTransparentWrapper("default"); // true

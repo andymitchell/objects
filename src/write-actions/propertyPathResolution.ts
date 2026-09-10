@@ -54,8 +54,7 @@ const DISALLOWED_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
  * Strip the wrappers that change a value's presence, fallback or mutability without changing the shape a
  * path segment is looked up in, and resolve a lazily-declared schema to the schema it produces.
  *
- * `prefault` is stripped alongside the shared transparent-wrapper set, which does not name it. A
- * self-referential lazy schema can return itself, so the walk stops as soon as it revisits a schema.
+ * A self-referential lazy schema can return itself, so the walk stops as soon as it revisits a schema.
  */
 function toCoreShape(schema: AnyZodSchema): AnyZodSchema {
     const seen = new Set<AnyZodSchema>();
@@ -64,7 +63,7 @@ function toCoreShape(schema: AnyZodSchema): AnyZodSchema {
         seen.add(current);
         const kind = getZodKind(current);
         if (kind === 'lazy') { current = getLazyInner(current); continue; }
-        if (isTransparentWrapper(kind) || kind === 'prefault') { current = unwrap(current); continue; }
+        if (isTransparentWrapper(kind)) { current = unwrap(current); continue; }
         return current;
     }
     return current;

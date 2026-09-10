@@ -114,6 +114,14 @@ describe("getSchemaChildren (pinned to the installed zod)", () => {
         expect(shape(z.string().default("x"))).toEqual([{ relation: "wrapped", key: undefined, kind: "string" }]);
     });
 
+    it("a nonoptional wrapper reports its inner schema as the wrapped child", () => {
+        expect(shape(z.number().optional().nonoptional())).toEqual([{ relation: "wrapped", key: undefined, kind: "optional" }]);
+    });
+
+    it("a prefault wrapper reports its inner schema as the wrapped child", () => {
+        expect(shape(z.number().prefault(0))).toEqual([{ relation: "wrapped", key: undefined, kind: "number" }]);
+    });
+
     it("leaves and value-transforming/opaque kinds → [] (explicit, never reflectively crawled)", () => {
         expect(getSchemaChildren(z.string())).toEqual([]);
         expect(getSchemaChildren(z.literal("x"))).toEqual([]);

@@ -92,7 +92,7 @@
   },
   "dependencies": {
     "@andymitchell/clone-to-json-safe": "^0.1.1",
-    "@andymitchell/utils": "^1.0.0",
+    "@andymitchell/utils": "^0.33.0",
     "@andyrmitchell/composite-timestamps": "^0.5.1",
     "deep-eql": "^5.0.2",
     "dot-prop": "^9.0.0",

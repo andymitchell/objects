@@ -100,12 +100,6 @@
     "lodash-es": "^4.17.21"
   },
   "peerDependencies": {
-    "vitest": "^3 || ^4",
     "zod": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
   }
 }

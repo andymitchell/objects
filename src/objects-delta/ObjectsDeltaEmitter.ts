@@ -1,4 +1,4 @@
-import { TypedCancelableEventEmitter } from "@andyrmitchell/utils/typed-cancelable-event-emitter";
+import { TypedCancelableEventEmitter } from "@andymitchell/utils/typed-cancelable-event-emitter";
 import type { ObjectsArrayDiffer, ObjectsArrayDifferOptions, ObjectsDelta } from "./types.ts";
 import { createObjectsArrayDiffer } from "./createObjectsArrayDiffer.ts";
 

@@ -1,4 +1,4 @@
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeEqual } from "@andymitchell/utils";
 import type { WhereFilterDefinition } from "../where-filter/types.ts";
 import type { DDL } from "../ddl/types.ts";
 import { resolveDdlListRules } from "../ddl/resolveDdlListRules.ts";

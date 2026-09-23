@@ -92,8 +92,8 @@
   },
   "dependencies": {
     "@andymitchell/clone-to-json-safe": "^0.1.1",
+    "@andymitchell/utils": "^1.0.0",
     "@andyrmitchell/composite-timestamps": "^0.5.1",
-    "@andyrmitchell/utils": "^0.30.0",
     "deep-eql": "^5.0.2",
     "dot-prop": "^9.0.0",
     "immer": "^10.1.1",

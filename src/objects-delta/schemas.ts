@@ -1,5 +1,5 @@
 
-import { isTypeEqual, isTypeExtended } from "@andyrmitchell/utils";
+import { isTypeEqual, isTypeExtended } from "@andymitchell/utils";
 import { PrimaryKeyValueSchema} from "../utils/getKeyValue.ts";
 import { z } from "zod";
 import type { ObjectsDelta, ObjectsDeltaApplicable} from "./types.ts";

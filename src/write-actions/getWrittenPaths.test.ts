@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTypeEqual } from '@andyrmitchell/utils';
+import { isTypeEqual } from '@andymitchell/utils';
 import type { WriteAction, WritePayload } from './types.ts';
 import { assertWriteArrayScope } from './helpers.ts';
 import { getWrittenPaths } from './getWrittenPaths.ts';

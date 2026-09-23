@@ -12,7 +12,7 @@
  * shape beside it.
  */
 import { describe, it, expectTypeOf } from "vitest";
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeEqual } from "@andymitchell/utils";
 import type {
   WriteAction,
   WritePayload,

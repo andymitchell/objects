@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
-import { deepFreeze } from "@andyrmitchell/utils/deep-freeze";
+import { deepFreeze } from "@andymitchell/utils/deep-freeze";
 import matchJavascriptObject from "../where-filter/matchJavascriptObject.ts";
 import { prepareWhereClauseForSqlite, PropertyTranslatorSqliteJsonSchema } from "../where-filter/index.ts";
 import { assertWriteArrayScope } from "./helpers.ts";

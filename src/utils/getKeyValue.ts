@@ -1,4 +1,4 @@
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeEqual } from "@andymitchell/utils";
 import { z } from "zod";
 
 

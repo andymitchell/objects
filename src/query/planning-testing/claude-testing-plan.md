@@ -57,7 +57,7 @@ src/utils/sql/
 - `where-filter/sql/` ← imports from `utils/sql/` (path converters, base types)
 - `query/sql/` ← imports from `utils/sql/` (path converters, base types)
 - `query/sql/` ← imports from `where-filter/` (only `prepareWhereClauseForPg`/`ForSqlite` — needed by `prepareObjectTableQuery` to convert `WhereFilterDefinition` to SQL)
-- `query/sql/` ← imports from `@andyrmitchell/utils` (`concatSqlParametersForDialect`, `SqlDialect`)
+- `query/sql/` ← imports from `@andymitchell/utils` (`concatSqlParametersForDialect`, `SqlDialect`)
 
 ---
 

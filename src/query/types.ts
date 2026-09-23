@@ -5,7 +5,7 @@ import type { PreparedStatementArgument, SortValueKind } from '../utils/sql/type
 import type { PreparedWhereClauseStatement } from '../where-filter/sql/types.ts';
 import type { EncodedSortValue } from './sortCompare.ts';
 import type { SortAndSliceSchema, SortAndSliceBaseSchema, SortAndSliceCursorSchema, SortBoundarySchema, EncodedSortValueSchema, SortDefinitionSchema, SortEntrySchema } from './schemas.ts';
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeEqual } from "@andymitchell/utils";
 
 // Re-export for consumer convenience
 export type { PrimaryKeyValue } from '../utils/getKeyValue.ts';

@@ -1,4 +1,4 @@
-import { isTypeExtended } from "@andyrmitchell/utils";
+import { isTypeExtended } from "@andymitchell/utils";
 import type { PrimaryKeyValue } from "../utils/getKeyValue.ts";
 import type { FlexibleTimestamp } from "@andyrmitchell/composite-timestamps";
 

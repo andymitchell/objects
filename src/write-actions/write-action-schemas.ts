@@ -3,7 +3,7 @@ import {
   UpdatingMethodSchema,
   WhereFilterSchema,
 } from "../where-filter/schemas.ts";
-import { isTypeEqual } from "@andyrmitchell/utils";
+import { isTypeEqual } from "@andymitchell/utils";
 import type {
   WriteAction,
   WriteError,

@@ -213,8 +213,8 @@ type WrittenItems<E> = Exclude<E, undefined>[];
  * element, so a keyless element leaves no key for the DDL to name and no key for the write to compare.
  *
  * A caller writing an untyped payload reaches past this, and the engine rules on the same pairing when
- * it runs: `pk` against a non-object element is a recoverable error that leaves the array untouched,
- * so such a write is refused rather than silently compared by the wrong rule.
+ * it runs: `pk` against a non-object element is refused unrecoverably, leaving the array untouched, so
+ * such a write fails plainly rather than being silently compared by the wrong rule.
  */
 type AddToSetUniqueBy<E> = unknown extends E
   ? "deep_equals" | "pk"
@@ -443,7 +443,19 @@ export type WriteAction<
  * if (error.type === 'schema') console.log(error.issues);
  */
 export type WriteError =
-  | { type: "custom"; message?: string | undefined }
+  | {
+      /**
+       * A refusal none of the other classes describes; `message` says what, in plain English. The engine raises
+       * it when a verb cannot apply to the value it found or was given: `inc` on a field holding `null`, a
+       * non-number or `NaN`; `push`, `pull` or `add_to_set` on a field holding `null` or a non-array; `add_to_set`
+       * by `pk` whose items are not objects carrying the list's primary key, or whose list has no DDL rules. Each
+       * is a ruling on the action and the data it met, so the engine marks the action `unrecoverable` and leaves
+       * the row unchanged. Other stores use `custom` for refusals of their own and flag each outcome by their own
+       * judgement, so the class alone does not say whether a retry can succeed: read `unrecoverable`.
+       */
+      type: "custom";
+      message?: string | undefined;
+    }
   | {
       type: "schema";
       issues: ZodIssue[];
@@ -628,7 +640,20 @@ export type WriteOutcomeFailedCore<
   action_uuid: string;
   /** The action's errors; always at least one. A blocked action carries a single `blocked` error. */
   errors: [WriteErrorContext, ...WriteErrorContext[]];
-  /** True if the action can never succeed (e.g. schema violation, permission denied). */
+  /**
+   * `true` when the engine has ruled on the action itself, so re-sending it unchanged against the same data can
+   * only draw the same errors: a `schema` violation; a missing, duplicated or altered primary key; an invalid
+   * filter, scope, property path or data value; a conflicting `uuid`; or a verb that cannot apply to the value it
+   * found (`custom`). A retrying layer stops on `true` and returns the failure to its caller; a corrected
+   * re-submission is a new action. Absent on a `blocked` action, which was never judged on its own merits: its
+   * fate follows the action named by `blocked_by_action_uuid`. A store relaying refusals of its own sets or omits
+   * the flag per outcome by the same rule.
+   *
+   * The verdict is about the rows this call was given. The same write may land later if something else changes
+   * the rows first, but that is a new write against a new base, not a recovery of this one. A caller that runs the
+   * engine over a copy of the rows learns how the write fares against that copy, not how the store holding the
+   * rows will rule; a refusal that reads a row's current value is for that store to adjudicate.
+   */
   unrecoverable?: boolean | undefined;
   /** Don't retry until this timestamp. */
   back_off_until_ts?: number | undefined;

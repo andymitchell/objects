@@ -338,54 +338,63 @@ describe("accumulating and de-duplicating errors", () => {
     expect(tracker.get()[0]!.errors.length).toBe(2);
   });
 
-  const unrecoverableErrors: WriteError[] = [
-    { type: "schema", issues: [] },
-    { type: "missing_key", primary_key: "id" },
-    { type: "create_duplicated_key", primary_key: "id" },
-    { type: "update_altered_key", primary_key: "id" },
-    { type: "invalid_filter", reason: "unknown_field" },
-    { type: "invalid_scope", scope: "children", reason: "unknown_path" },
-    { type: "invalid_property_path", path: "label", reason: "not_optional" },
-  ];
+  /**
+   * One representative error per class, each declaring whether the tracker treats it as a verdict on the
+   * action. The mapped type forces the table to name every member of the `WriteError` union, so a new
+   * class cannot be added without deciding its classification here.
+   */
+  const classification: {
+    [K in WriteError["type"]]: { sample: Extract<WriteError, { type: K }>; verdict: boolean };
+  } = {
+    custom: { sample: { type: "custom", message: "cannot inc null field 'n'" }, verdict: true },
+    schema: { sample: { type: "schema", issues: [] }, verdict: true },
+    missing_key: { sample: { type: "missing_key", primary_key: "id" }, verdict: true },
+    create_duplicated_key: { sample: { type: "create_duplicated_key", primary_key: "id" }, verdict: true },
+    uuid_conflict: { sample: { type: "uuid_conflict", uuid: "u1" }, verdict: true },
+    update_altered_key: { sample: { type: "update_altered_key", primary_key: "id" }, verdict: true },
+    invalid_filter: { sample: { type: "invalid_filter", reason: "unknown_field" }, verdict: true },
+    invalid_scope: { sample: { type: "invalid_scope", scope: "children", reason: "unknown_path" }, verdict: true },
+    invalid_data_value: { sample: { type: "invalid_data_value", reason: "non_finite" }, verdict: true },
+    invalid_property_path: { sample: { type: "invalid_property_path", path: "label", reason: "not_optional" }, verdict: true },
+    // The action never ran; the engine holds no verdict on it.
+    blocked: { sample: { type: "blocked", blocked_by_action_uuid: "earlier" }, verdict: false },
+  };
 
-  test.each(unrecoverableErrors)(
-    'an error of type "$type" marks the action as unrecoverable',
-    (errorDetails) => {
+  const classificationRows = Object.values(classification).map(({ sample, verdict }) => ({
+    type: sample.type,
+    sample,
+    verdict,
+  }));
+
+  test.each(classificationRows)(
+    "reporting an error of type $type sets unrecoverable to $verdict",
+    ({ sample, verdict }) => {
       const tracker = new WriteActionFailuresTracker(FlatSchema, {
         primary_key: "id",
       });
-      tracker.report(makeAction(validFlat), validFlat, errorDetails);
-      expect(tracker.get()[0]!.unrecoverable).toBe(true);
+      tracker.report(makeAction(validFlat), validFlat, sample);
+      const flag = tracker.get()[0]!.unrecoverable;
+      if (verdict) expect(flag).toBe(true);
+      else expect(flag).toBeUndefined();
     },
   );
 
-  test("a custom error leaves the action recoverable", () => {
-    const tracker = new WriteActionFailuresTracker(FlatSchema, {
-      primary_key: "id",
-    });
-    tracker.report(makeAction(validFlat), validFlat, {
-      type: "custom",
-      message: "soft",
-    });
-    expect(tracker.get()[0]!.unrecoverable).toBeUndefined();
-  });
-
-  test("an unrecoverable error keeps the action unrecoverable when a soft error follows", () => {
+  test("a verdict is not cleared by a blocked error reported after it", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
     tracker.report(action, validFlat, { type: "schema", issues: [] });
-    tracker.report(action, validFlat, { type: "custom", message: "soft" });
+    tracker.report(action, validFlat, { type: "blocked", blocked_by_action_uuid: "later" });
     expect(tracker.get()[0]!.unrecoverable).toBe(true);
   });
 
-  test("a soft error followed by an unrecoverable one ends up unrecoverable", () => {
+  test("a blocked error followed by a verdict ends up unrecoverable", () => {
     const tracker = new WriteActionFailuresTracker(FlatSchema, {
       primary_key: "id",
     });
     const action = makeAction(validFlat);
-    tracker.report(action, validFlat, { type: "custom", message: "soft" });
+    tracker.report(action, validFlat, { type: "blocked", blocked_by_action_uuid: "earlier" });
     tracker.report(action, validFlat, { type: "schema", issues: [] });
     expect(tracker.get()[0]!.unrecoverable).toBe(true);
   });
@@ -417,7 +426,7 @@ describe("blocking an action behind an earlier failure", () => {
     if (error.type === "blocked") {
       expect(error.blocked_by_action_uuid).toBe("blocker-uuid");
     }
-    // A blocked action can run once the blocker is resolved, so it stays recoverable.
+    // The engine holds no verdict on an action that never ran, so the flag stays unset.
     expect(failure.unrecoverable).toBeUndefined();
   });
 
@@ -435,6 +444,8 @@ describe("blocking an action behind an earlier failure", () => {
     expect(failure.errors.length).toBe(2);
     expect(failure.errors.some((e) => e.type === "custom")).toBe(true);
     expect(failure.errors.some((e) => e.type === "blocked")).toBe(true);
+    // The action's own refusal is a verdict; the blocked marker joining it does not soften that.
+    expect(failure.unrecoverable).toBe(true);
   });
 
   test("re-blocking the same action keeps one blocked error at the latest blocker", () => {
@@ -588,6 +599,22 @@ describe("merging sub-action failures under a parent", () => {
       action_uuid: "sub-action",
       errors: [
         { type: "schema", issues: [], item_pk: "sub-1" },
+      ],
+      affected_items: [{ item_pk: "sub-1", item: subItem }],
+    };
+    tracker.mergeUnderAction(makeAction(validFlat, "parent"), [subAction]);
+    expect(tracker.get()[0]!.unrecoverable).toBe(true);
+  });
+
+  test("a custom sub-error flags the parent even when the sub-outcome carried no flag of its own", () => {
+    const tracker = new WriteActionFailuresTracker(FlatSchema, {
+      primary_key: "id",
+    });
+    const subAction: WriteOutcomeFailed<FlatItem> = {
+      ok: false,
+      action_uuid: "sub-action",
+      errors: [
+        { type: "custom", message: "cannot inc null field 'n'", item_pk: "sub-1" },
       ],
       affected_items: [{ item_pk: "sub-1", item: subItem }],
     };

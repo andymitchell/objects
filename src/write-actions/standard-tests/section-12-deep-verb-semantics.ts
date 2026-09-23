@@ -3,7 +3,7 @@ import {
     FlatWithSubItemsSchema, flatWithSubItemsDdl, type FlatWithSubItems,
     NestedSchema, nestedDdl, type Nested,
     NestedObjSchema, nestedObjDdl, type NestedObj,
-    DeepSetSchema, deepSetDdl,
+    DeepSetSchema, deepSetDdl, type DeepSet,
     NullableFieldsSchema, nullableFieldsDdl, type NullableFields,
     MatchSchema, matchDdl, type Match,
     NumericPkSchema, numericPkDdl,
@@ -294,14 +294,14 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
             });
 
             // T-12.15
-            test('pk-mode on a scalar array is a recoverable custom error, leaving the array untouched', async () => {
+            test('pk-mode on a scalar array is an unrecoverable custom error, leaving the array untouched', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', tags: ['a'] }],
                     // A string has no key to be unique by, so the payload type does not offer `pk` here. The
                     // suppression writes the action anyway, standing in for an untyped caller — the engine has
-                    // to rule on the pairing whether or not a type screened it out first, and it must do so
-                    // recoverably, leaving the array as it was.
+                    // to rule on the pairing whether or not a type screened it out first, and its ruling is
+                    // final: the write is refused unrecoverably, leaving the array as it was.
                     // @ts-expect-error: 'pk' is not offered on a scalar array
                     writeActions: [makeAction<Flat>('a1', { type: 'add_to_set', path: 'tags', items: ['b'], unique_by: 'pk', where: { id: '1' } })],
                     schema: FlatSchema,
@@ -310,7 +310,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
-                    expect(getWriteFailures(r.result)[0]?.unrecoverable).not.toBe(true);
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                     expect(r.finalItems[0]!.tags).toEqual(['a']);
                 }, implName);
             });
@@ -328,12 +328,13 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                     expect(r.finalItems[0]!.sub_items).toEqual([{ sid: 's1', val: 1 }]);
                 }, implName);
             });
         });
 
-        describe('12.7 array/number verbs on a null field are custom errors', () => {
+        describe('12.7 array/number verbs on a null field are unrecoverable custom errors', () => {
 
             // T-12.17
             test('add_to_set on a null array field is a custom error', async () => {
@@ -347,6 +348,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                     expect(r.finalItems[0]!.tags).toBe(null);
                 }, implName);
             });
@@ -363,6 +365,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                     expect(r.finalItems[0]!.tags).toBe(null);
                 }, implName);
             });
@@ -379,6 +382,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                     expect(r.finalItems[0]!.tags).toBe(null);
                 }, implName);
             });
@@ -395,12 +399,36 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                     expect(r.finalItems[0]!.n).toBe(null);
+                }, implName);
+            });
+
+            // T-12.38 — the ruling survives an array_scope: the parent action is what the caller submitted.
+            test('inc on a null number inside an array_scope is an unrecoverable custom error on the parent action', async () => {
+                const adapter = createAdapter(DeepSetSchema, deepSetDdl);
+                const r = await adapter.apply({
+                    initialItems: [{ id: '1', entries: [{ k: 'e1', n: null }] }],
+                    writeActions: [makeAction<DeepSet>('a1', assertWriteArrayScope<DeepSet, 'entries'>({
+                        type: 'array_scope',
+                        scope: 'entries',
+                        action: { type: 'inc', path: 'n', amount: 1, where: { k: 'e1' } },
+                        where: { id: '1' },
+                    }))],
+                    schema: DeepSetSchema,
+                    ddl: deepSetDdl,
+                });
+                expectOrAcknowledgeUnsupported(r, (r) => {
+                    expect(r.result.ok).toBe(false);
+                    const failure = getWriteFailures(r.result).find(f => f.action_uuid === 'a1');
+                    expect(failure?.errors[0]?.type).toBe('custom');
+                    expect(failure?.unrecoverable).toBe(true);
+                    expect(r.finalItems[0]!.entries![0]!.n).toBe(null);
                 }, implName);
             });
         });
 
-        describe('12.8 inc on a non-numeric current value is a custom error', () => {
+        describe('12.8 inc on a non-numeric current value is an unrecoverable custom error', () => {
 
             // T-12.21 — NaN field (a valid number, no cast). Contrast T-10.12: a NaN AMOUNT is invalid_data_value.
             test('inc on a NaN-valued field is a custom error', async () => {
@@ -414,6 +442,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                 }, implName);
             });
 
@@ -431,6 +460,7 @@ export function registerDeepVerbSemantics(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     expect(r.result.ok).toBe(false);
                     expect(getWriteFailures(r.result)[0]?.errors[0]?.type).toBe('custom');
+                    expect(getWriteFailures(r.result)[0]?.unrecoverable).toBe(true);
                 }, implName);
             });
         });

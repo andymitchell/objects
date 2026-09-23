@@ -1,4 +1,4 @@
-import { FlatSchema, flatDdl, type Flat, NullableFieldsSchema, nullableFieldsDdl } from "./fixtures.ts";
+import { FlatSchema, flatDdl, type Flat, NullableFieldsSchema, nullableFieldsDdl, type NullableFields } from "./fixtures.ts";
 import { makeAction, expectOrAcknowledgeUnsupported, type SectionCtx } from "./harness.ts";
 import { getWriteErrors, getWriteFailures, getWriteSuccesses } from "../helpers.ts";
 
@@ -101,7 +101,7 @@ export function registerErrorDetail(ctx: SectionCtx): void {
             });
 
             // T-11.6
-            test('a custom failure is NOT flagged unrecoverable', async () => {
+            test('a custom failure is flagged unrecoverable', async () => {
                 const adapter = createAdapter(NullableFieldsSchema, nullableFieldsDdl);
                 const r = await adapter.apply({
                     initialItems: [{ id: '1', n: null }],
@@ -112,11 +112,12 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                 expectOrAcknowledgeUnsupported(r, (r) => {
                     const failure = getWriteFailures(r.result)[0];
                     expect(failure?.errors[0]?.type).toBe('custom');
-                    expect(failure?.unrecoverable).not.toBe(true);
+                    expect(failure?.unrecoverable).toBe(true);
                 }, implName);
             });
 
             // T-11.7
+            // The engine holds no verdict on an action that never ran; whether the survivors are re-sent is the caller's decision.
             test('a blocked failure names its blocker and is NOT flagged unrecoverable', async () => {
                 const adapter = createAdapter(FlatSchema, flatDdl);
                 const r = await adapter.apply({
@@ -134,6 +135,34 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                     expect(blocked!.blocked_by_action_uuid).toBe('a1');
                     expect(blocked!.errors[0]?.type).toBe('blocked');
                     expect(blocked!.unrecoverable).not.toBe(true);
+                }, implName);
+            });
+
+            // T-11.12 — the flag is a verdict about the rows the engine was given, not a property of the action.
+            test('the same inc that is refused unrecoverably over a null field succeeds over a numeric one', async () => {
+                const inc = () => makeAction<NullableFields>('a1', { type: 'inc', path: 'n', amount: 1, where: { id: '1' } });
+
+                const refused = await createAdapter(NullableFieldsSchema, nullableFieldsDdl).apply({
+                    initialItems: [{ id: '1', n: null }],
+                    writeActions: [inc()],
+                    schema: NullableFieldsSchema,
+                    ddl: nullableFieldsDdl,
+                });
+                expectOrAcknowledgeUnsupported(refused, (r) => {
+                    const failure = getWriteFailures(r.result)[0];
+                    expect(failure?.errors[0]?.type).toBe('custom');
+                    expect(failure?.unrecoverable).toBe(true);
+                }, implName);
+
+                const applied = await createAdapter(NullableFieldsSchema, nullableFieldsDdl).apply({
+                    initialItems: [{ id: '1', n: 0 }],
+                    writeActions: [inc()],
+                    schema: NullableFieldsSchema,
+                    ddl: nullableFieldsDdl,
+                });
+                expectOrAcknowledgeUnsupported(applied, (r) => {
+                    expect(r.result.ok).toBe(true);
+                    expect(r.finalItems[0]?.n).toBe(1);
                 }, implName);
             });
         });

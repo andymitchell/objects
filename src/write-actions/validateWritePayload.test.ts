@@ -373,7 +373,7 @@ describe("writeToItemsArray — rejects a non-JSON value up-front, before any mu
         if (e?.type === "invalid_data_value") expect(e.reason).toBe("non_finite");
     });
 
-    it("an inc with NaN is reclassified from a recoverable 'custom' to an unrecoverable invalid_data_value", () => {
+    it("an inc with a NaN amount is refused up-front as invalid_data_value, never reaching the engine's custom error", () => {
         const r = writeToItemsArray<any>([wa("a1", { type: "inc", path: "count", amount: NaN, where: { id: "1" } })], [{ id: "1", count: 1 }], OpenSchema, openDdl);
         const fail = firstFailure(r);
         expect(fail.unrecoverable).toBe(true);

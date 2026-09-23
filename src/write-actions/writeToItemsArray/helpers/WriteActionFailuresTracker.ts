@@ -17,9 +17,21 @@ import {
   type JsonValueCapped,
 } from "@andymitchell/clone-to-json-safe";
 
-/** Error kinds an action can never recover from, however many times it is retried. */
+/**
+ * Whether an error of this kind is a verdict the engine has reached on the action itself.
+ *
+ * Every error the engine reports is a deterministic reading of the action against the data and DDL in front
+ * of it: the same action re-sent unchanged against the same data draws the same error. A retrying layer
+ * therefore gains nothing by re-sending, and `unrecoverable` tells it so. A `custom` refusal is a verdict
+ * like any other — "cannot inc a null field" is the engine's ruling on that action, and a later foreign write
+ * that happens to change the field is a situation the caller never saw, not a recovery of this write.
+ *
+ * `blocked` is the one exception: the action never ran, because an earlier action in its batch failed, so
+ * the engine holds no verdict on it and leaves the flag unset. Its fate follows the action that blocked it.
+ */
 function isUnrecoverable(type: WriteError["type"]): boolean {
   switch (type) {
+    case "custom":
     case "schema":
     case "missing_key":
     case "create_duplicated_key":
@@ -30,7 +42,6 @@ function isUnrecoverable(type: WriteError["type"]): boolean {
     case "invalid_data_value":
     case "invalid_property_path":
       return true;
-    case "custom":
     case "blocked":
       return false;
   }

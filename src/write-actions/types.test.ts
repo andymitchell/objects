@@ -219,6 +219,13 @@ describe("1. WritePayload<T> construction", () => {
         where: { id: "1" },
       };
     });
+
+    it("refuses a scope on a field that is an object on some rows and an array on others", () => {
+      type Doc = { id: string; ctx?: { cid: string } | { cid: string }[] };
+      // @ts-expect-error 'ctx' is not an object array on every row, so a scoped write cannot target it
+      const scopedWrite = (p: WritePayloadArrayScope<Doc, "ctx">) => p;
+      void scopedWrite;
+    });
   });
 
   describe("1.5 Property-targeting payloads (clear a value, remove a key)", () => {

@@ -109,7 +109,16 @@ export type ValueComparisonFlexi<T = any> =
 type WhereFilterCore<T extends Record<string, any>, ISD extends number> =
     PartialObjectFilter<T, ISD> | LogicFilter<T, ISD>;
 
-export type ArrayValueComparisonElemMatch<T = any, ISD extends number = 2>  = {$elemMatch: T extends Record<string, any>? WhereFilterCore<T, ISD> : ValueComparisonFlexi<T>};
+/**
+ * The question `$elemMatch` asks of one element. Object members are asked together as one where-filter
+ * (a discriminated union keeps its shared discriminator); an element that is itself an array takes the
+ * array operators; a primitive takes the value comparison, member by member.
+ */
+type ElemMatchBody<T, ISD extends number> =
+    ([ObjectMembers<T>] extends [never] ? never : WhereFilterCore<ObjectMembers<T>, ISD>)
+    | ([ArrayMembers<T>] extends [never] ? never : ValueComparisonExists | ValueComparisonType | ArrayValueComparison<ArrayMembers<T>[number], ISD>)
+    | (ScalarMembers<T> extends infer S ? S extends unknown ? ValueComparisonFlexi<S> : never : never);
+export type ArrayValueComparisonElemMatch<T = any, ISD extends number = 2> = { $elemMatch: ElemMatchBody<T, ISD> };
 // `$all` operands are DATA, and share the bare value's JSON-serialisable domain: non-JSON carriers as elements
 // collapse to `never` via `JsonCompatible` (see {@link ValueComparisonFlexi} and DECISIONS.md).
 export type ArrayValueComparisonAll<T = any> = { $all: JsonCompatible<T>[] };
@@ -123,18 +132,43 @@ export type ArrayValueComparison<T = any, ISD extends number = 2> = ArrayValueCo
 
 type IsAssignableTo<A, B> = A extends B ? true : false;
 
+/**
+ * The members of a value's type that a filter asks of as one object: every non-primitive member that is
+ * not an array. They are asked TOGETHER, so a discriminated union keeps its shared discriminator —
+ * `{type: 'a' | 'b'}` is one question of the union, not one question per arm.
+ */
+type ObjectMembers<T> = Exclude<Extract<T, Record<string, any>>, readonly unknown[]>;
+/** The members of a value's type that are arrays. An array satisfies `Record<string, any>`, so it must be set apart before the object members are read. */
+type ArrayMembers<T> = Extract<T, readonly unknown[]>;
+/** The primitive members of a value's type. */
+type ScalarMembers<T> = Exclude<T, Record<string, any>>;
+
 // A scalar element takes the full value-operator vocabulary, read element-wise, plus the bare element as a
 // containment test. An OBJECT element deliberately does not take the comparison family ($eq/$ne/range/$regex):
 // its filter arm is `PartialObjectFilter`, whose keys are all optional, and TypeScript disables the excess-
 // property check on a union as soon as a key is known in ANY member — so admitting `$eq` beside it would let
 // an arbitrary unchecked operand through (`{addresses: {$eq: 5}}`). The runtime gate rejects an object operand
 // for those operators anyway; an object element is filtered with a sub-document filter or `$elemMatch`.
+// An element that is itself an array takes only the field-level questions; an array satisfies `Record<string, any>`,
+// so without the grouping it would be asked as an object whose key domain is empty — `{}`, which admits any value at all.
 type ArrayElementFilter<T = any, ISD extends number = 2> =
-    (T extends Record<string, any>
-        ? PartialObjectFilter<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType
-        : (T extends string | number | boolean ? T : never) | ValueComparisonOperators<T>)
+    ([ObjectMembers<T>] extends [never] ? never
+        : PartialObjectFilter<ObjectMembers<T>, ISD> | ValueComparisonIn<ObjectMembers<T>> | ValueComparisonNin<ObjectMembers<T>> | ValueComparisonNot<ObjectMembers<T>> | ValueComparisonExists | ValueComparisonType)
+    | ([ArrayMembers<T>] extends [never] ? never : ValueComparisonExists | ValueComparisonType)
+    | (ScalarMembers<T> extends infer S ? S extends unknown ? (S extends string | number | boolean ? S : never) | ValueComparisonOperators<S> : never : never)
     | ArrayValueComparison<T, ISD>;
-export type ArrayFilter<T extends [], ISD extends number = 2> = ArrayElementFilter<T[number], ISD> | T;
+export type ArrayFilter<T extends readonly unknown[], ISD extends number = 2> = ArrayElementFilter<T[number], ISD> | T;
+
+/**
+ * The filter a path's VALUE admits, read per member of the value's type: its array members take one
+ * array filter over all of them, and its other members take the value comparison. A field declared
+ * `X | X[]` is therefore offered BOTH readings — `$elemMatch`, `$size`, `$all`, a partial element
+ * object and whole-array equality from the array side; whole-object equality, `$exists`, `$type` and
+ * bare `null` from the object side.
+ */
+type PathFilterByValue<V, ISD extends number> =
+    ([ArrayMembers<V>] extends [never] ? never : ArrayFilter<ArrayMembers<V>, ISD>)
+    | ([Exclude<V, readonly unknown[]>] extends [never] ? never : ValueComparisonFlexi<Exclude<V, readonly unknown[]>> | null);
 
 /*
 The value branch offers a bare `null` on every path it covers. `null` asks whether the field is null
@@ -143,7 +177,8 @@ engine answers. The path's own value type cannot supply the answer: {@link PathV
 strips `null` at every leaf, and its walk is contractually kept in lockstep with `PathValue`, so it
 cannot be forked to preserve nullability. The `null` therefore belongs here, at the one position where
 a value is compared directly. Array paths take the array branch instead, where the question is asked
-of elements.
+of elements. A path whose value is an array on some documents and an object on others (`X | X[]`) is
+offered both readings, so it takes the bare `null` too, through its object reading.
 
 `undefined` is deliberately NOT offered: under `exactOptionalPropertyTypes` the surrounding `Partial`
 admits an absent key without admitting a present `undefined`, and a present-undefined filter value
@@ -151,7 +186,7 @@ matches nothing.
 */
 export type PartialObjectFilter<T extends Record<string, any>, ISD extends number = 2> = Partial<{
     [P in DotPropPathsIncArrayUnion<T, ISD>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
-        ? ArrayFilter<PathValueIncDiscrimatedUnions<T, P>, ISD>
+        ? PathFilterByValue<PathValueIncDiscrimatedUnions<T, P>, ISD>
         : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>> | null
 }>;
 
@@ -161,20 +196,29 @@ export type PartialObjectFilter<T extends Record<string, any>, ISD extends numbe
 // → ArrayElementFilter → ArrayFilter → PartialObjectFilter chain, but every
 // recursion target is the strict variant so $and/$or/$nor cannot appear anywhere.
 
-type ArrayValueComparisonElemMatchStrict<T = any, ISD extends number = 2> = {
-    $elemMatch: T extends Record<string, any> ? PartialObjectFilterStrict<T, ISD> : ValueComparisonFlexi<T>
-};
+/** Strict mirror of {@link ElemMatchBody}: the same grouping, with every recursion target the strict variant. */
+type ElemMatchBodyStrict<T, ISD extends number> =
+    ([ObjectMembers<T>] extends [never] ? never : PartialObjectFilterStrict<ObjectMembers<T>, ISD>)
+    | ([ArrayMembers<T>] extends [never] ? never : ValueComparisonExists | ValueComparisonType | ArrayValueComparisonStrict<ArrayMembers<T>[number], ISD>)
+    | (ScalarMembers<T> extends infer S ? S extends unknown ? ValueComparisonFlexi<S> : never : never);
+type ArrayValueComparisonElemMatchStrict<T = any, ISD extends number = 2> = { $elemMatch: ElemMatchBodyStrict<T, ISD> };
 
 type ArrayValueComparisonStrict<T = any, ISD extends number = 2> =
     ArrayValueComparisonElemMatchStrict<T, ISD> | ArrayValueComparisonAll<T> | ArrayValueComparisonSize;
 
 type ArrayElementFilterStrict<T = any, ISD extends number = 2> =
-    (T extends Record<string, any>
-        ? PartialObjectFilterStrict<T, ISD> | ValueComparisonIn<T> | ValueComparisonNin<T> | ValueComparisonNot<T> | ValueComparisonExists | ValueComparisonType
-        : (T extends string | number | boolean ? T : never) | ValueComparisonOperators<T>)
+    ([ObjectMembers<T>] extends [never] ? never
+        : PartialObjectFilterStrict<ObjectMembers<T>, ISD> | ValueComparisonIn<ObjectMembers<T>> | ValueComparisonNin<ObjectMembers<T>> | ValueComparisonNot<ObjectMembers<T>> | ValueComparisonExists | ValueComparisonType)
+    | ([ArrayMembers<T>] extends [never] ? never : ValueComparisonExists | ValueComparisonType)
+    | (ScalarMembers<T> extends infer S ? S extends unknown ? (S extends string | number | boolean ? S : never) | ValueComparisonOperators<S> : never : never)
     | ArrayValueComparisonStrict<T, ISD>;
 
-type ArrayFilterStrict<T extends [], ISD extends number = 2> = ArrayElementFilterStrict<T[number], ISD> | T;
+type ArrayFilterStrict<T extends readonly unknown[], ISD extends number = 2> = ArrayElementFilterStrict<T[number], ISD> | T;
+
+/** Strict mirror of {@link PathFilterByValue}. */
+type PathFilterByValueStrict<V, ISD extends number> =
+    ([ArrayMembers<V>] extends [never] ? never : ArrayFilterStrict<ArrayMembers<V>, ISD>)
+    | ([Exclude<V, readonly unknown[]>] extends [never] ? never : ValueComparisonFlexi<Exclude<V, readonly unknown[]>> | null);
 
 /**
  * Like {@link PartialObjectFilter}, but rejects the logic operators
@@ -215,7 +259,7 @@ type ArrayFilterStrict<T extends [], ISD extends number = 2> = ArrayElementFilte
  */
 export type PartialObjectFilterStrict<T extends Record<string, any>, ISD extends number = 2> = Partial<{
     [P in DotPropPathsIncArrayUnion<T, ISD>]: IsAssignableTo<P, DotPropPathToArraySpreadingArrays<T>> extends true
-        ? ArrayFilterStrict<PathValueIncDiscrimatedUnions<T, P>, ISD>
+        ? PathFilterByValueStrict<PathValueIncDiscrimatedUnions<T, P>, ISD>
         : ValueComparisonFlexi<PathValueIncDiscrimatedUnions<T, P>> | null
 }>;
 

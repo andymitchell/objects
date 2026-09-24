@@ -343,20 +343,29 @@ type Prev = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8, ...0[]];
  * A path is offered whenever the runtime can walk it, so an optional or nullable object along the
  * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
  * escaped grammar (`rank\.value`).
+ *
+ * A field declared `X | X[]` is an array on some documents, so it is offered, and its object member
+ * is walked for the arrays beneath it. An array of arrays is offered as a leaf. A `readonly` array is
+ * neither offered nor walked.
  */
-export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
-    [K in keyof T]-?: K extends string
-        ? string extends K
-            ? never // Skip index-sig keys: can't enumerate array paths through an index signature
-            : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
-                ? U extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
-                    : `${Prefix}${EscapeSegment<K>}`
-                : NonNullable<T[K]> extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<NonNullable<T[K]>, Prev[Depth], ''>}`)
+export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =
+    Depth extends 0 ? never
+    : T extends readonly any[] ? never // An array is never walked as an object: its own members (`length`, the methods) are not data, and its element is entered from the array arm below
+    : T extends object ? {
+        [K in keyof T]-?: K extends string
+            ? string extends K
+                ? never // Skip index-sig keys: can't enumerate array paths through an index signature
+                : NonNullable<T[K]> extends infer V // NonNullable handles optional property here; `infer V` then distributes over each member of a union value, so `X | X[]` takes the array arm for its array member and the object arm for its object member
+                    ? V extends Array<infer U>
+                        ? U extends object
+                            ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
+                            : `${Prefix}${EscapeSegment<K>}`
+                        : V extends object
+                            ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToArraySpreadingArrays<V, Prev[Depth], ''>}`)
+                            : never
                     : never
-        : never;
-}[keyof T] : '';
+            : never;
+    }[keyof T] : '';
 
 /**
  * Every path on `T` that ends at an array of objects — the paths a scoped write may target.
@@ -365,23 +374,38 @@ export type DotPropPathToArraySpreadingArrays<T extends Record<string, any>, Dep
  * way is traversed rather than treated as a dead end. Keys holding a literal dot are spelled in the
  * escaped grammar (`rank\.value`).
  *
+ * A key is offered only when its value is an array of objects on every document, and a parent is
+ * walked only when it is an object on every document: a scoped write must reach the array wherever
+ * it runs. A field declared `X | X[]` is therefore excluded together with its subtree (a write into it
+ * would throw on the documents where it is not an array), as is an array of arrays, whose element is
+ * no record a write could target. A `readonly` array is neither offered nor walked.
+ *
  * @example
  * type Task = { id: string; subtasks: { sid: string }[] };
  * type Scopes = DotPropPathToObjectArraySpreadingArrays<Task>; // 'subtasks'
  */
-export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =  Depth extends 0 ? never : T extends object ? {
-    [K in keyof T]-?: K extends string
-        ? string extends K
-            ? never // Skip index-sig keys: can't enumerate object-array paths through an index signature
-            : NonNullable<T[K]> extends Array<infer U> // NonNullable handles optional property here
-                ? U extends object // Check if the elements of array are objects
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
-                    : never // Exclude if the elements are not objects
-                : NonNullable<T[K]> extends object
-                    ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<NonNullable<T[K]>, Prev[Depth], ''>}`)
+export type DotPropPathToObjectArraySpreadingArrays<T extends Record<string, any>, Depth extends number = 8, Prefix extends string = ''> =
+    Depth extends 0 ? never
+    : T extends readonly any[] ? never // An array is never walked as an object: its own members (`length`, the methods) are not data
+    : T extends object ? {
+        [K in keyof T]-?: K extends string
+            ? string extends K
+                ? never // Skip index-sig keys: can't enumerate object-array paths through an index signature
+                : NonNullable<T[K]> extends infer V // NonNullable handles optional property here
+                    ? [V] extends [Array<infer U>] // An array on every document (a union of arrays included)
+                        ? U extends readonly any[]
+                            ? never // An array of arrays is not an array of objects: its element is no record a scoped write could target
+                            : U extends object // Check if the elements of array are objects
+                                ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<U, Prev[Depth], ''>}`) | `${Prefix}${EscapeSegment<K>}`
+                                : never // Exclude if the elements are not objects
+                        : [Extract<V, readonly any[]>] extends [never]
+                            ? ([V] extends [object] // A parent is walked only when it is an object on every document: a scoped write must reach its array everywhere
+                                ? (K extends `${string}\\` ? never : `${Prefix}${EscapeSegment<K>}.${DotPropPathToObjectArraySpreadingArrays<V, Prev[Depth], ''>}`)
+                                : never)
+                            : never // An array on some documents only (`X | X[]`): a scoped write into it would throw on the documents where it is not, so neither it nor its subtree is offered
                     : never
-        : never;
-}[keyof T] : '';
+            : never;
+    }[keyof T] : '';
 
 
 

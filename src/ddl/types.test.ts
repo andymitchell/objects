@@ -132,6 +132,13 @@ describe("The list map keys", () => {
     };
   });
 
+  it("does not expose a list scope for a field that is an object array on some rows only, nor under a parent that is a scalar on some rows", () => {
+    type Ctx = { type: "a" | "b"; description: string };
+    expectTypeOf<keyof DDL<{ id: string; context?: Ctx | Ctx[] }>["lists"]>().toEqualTypeOf<".">();
+    expectTypeOf<keyof DDL<{ id: string; parent: string | { rows: { rid: string }[] } }>["lists"]>().toEqualTypeOf<".">();
+    expectTypeOf<keyof DDL<{ id: string; grid: string[][] }>["lists"]>().toEqualTypeOf<".">();
+  });
+
   it("exposes a list scope for each object-array path", () => {
     expectTypeOf<keyof DDL<Nested>["lists"]>().toEqualTypeOf<"." | "rows">();
   });

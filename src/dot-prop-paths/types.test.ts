@@ -234,6 +234,48 @@ describe('array paths are offered wherever the runtime can walk to them', () => 
         expectTypeOf<DotPropPathToObjectArraySpreadingArrays<OptParent>>().toEqualTypeOf<'box.rows'>();
         expectTypeOf<DotPropPathToArraySpreadingArrays<OptParent>>().toEqualTypeOf<'box.rows'>();
     });
+
+    /**
+     * A field that is an array on some rows and not on others is an array the filter can spread, but
+     * not a list a scoped write can target: the write would throw on the rows where it is not an array.
+     */
+    describe('a field that is an array on some rows only is a filter path, not a write scope', () => {
+        type Ctx = { type: 'a' | 'b'; description: string };
+        type Inner = { 'a.b': number; tags: string[]; kids: { k: number }[] };
+
+        test('an object-or-array-of-objects field is offered to the filter, with its object member walked, and withheld from writes', () => {
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ type: string; context?: Ctx | Ctx[] }>>().toEqualTypeOf<'context'>();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ type: string; context?: Ctx | Ctx[] }>>().toBeNever();
+
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ ctx?: Inner | Inner[] }>>().toEqualTypeOf<'ctx' | 'ctx.tags' | 'ctx.kids'>();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ ctx?: Inner | Inner[] }>>().toBeNever();
+        });
+
+        test('a scalar-or-array-of-scalars field is offered to the filter only', () => {
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ id: string; tag?: string | string[] }>>().toEqualTypeOf<'tag'>();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ id: string; tag?: string | string[] }>>().toBeNever();
+        });
+
+        test('an array of arrays is offered to the filter as a leaf, and is no write scope', () => {
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ id: string; grid: string[][] }>>().toEqualTypeOf<'grid'>();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ id: string; grid: string[][] }>>().toBeNever();
+        });
+
+        test('an array under a parent that is a scalar on some rows is reachable by the filter, not by a write', () => {
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ id: string; parent: string | { rows: { rid: string }[] } }>>().toEqualTypeOf<'parent.rows'>();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ id: string; parent: string | { rows: { rid: string }[] } }>>().toBeNever();
+        });
+
+        test('a field that is an array on every row, of one element type or another, stays one path for both', () => {
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ id: string; list: { x: number }[] | { y: string }[] }>>().toEqualTypeOf<'list'>();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ id: string; list: { x: number }[] | { y: string }[] }>>().toEqualTypeOf<'list'>();
+        });
+
+        test('a row that is itself an array has no array paths', () => {
+            expectTypeOf<DotPropPathToArraySpreadingArrays<{ name: string }[]>>().toBeNever();
+            expectTypeOf<DotPropPathToObjectArraySpreadingArrays<{ name: string }[]>>().toBeNever();
+        });
+    });
 });
 
 /**
@@ -299,22 +341,27 @@ describe('scalar paths that spread object arrays are bounded by depth and by ind
 });
 
 /**
- * A `readonly` array is not assignable to `Array<any>`, so every path generator here reads it as a
- * plain object and walks its own members (`length`, the array methods) as if they were data — offering
- * paths the runtime path readers do not resolve to a value.
+ * A `readonly` array is not assignable to `Array<any>`, so the scalar path generators read it as a
+ * plain object and walk its own members (`length`, the array methods) as if they were data — offering
+ * paths the runtime path readers do not resolve to a value. The two array-path generators stop at it
+ * instead: they neither offer it nor walk it, because walking it collapsed their whole domain to `string`.
  *
- * This pin exists so the hole cannot be half-closed. All the generators read readonly arrays the same
- * way today; the day one of them learns to treat a readonly array AS an array, this test fails and
- * names the others that must learn it in the same change — otherwise the plain paths and the spread
- * paths would offer different key domains for the same row.
+ * This pin exists so the hole cannot be half-closed. The day a generator learns to treat a readonly
+ * array AS an array, this test fails and names the others that must learn it in the same change —
+ * otherwise the plain paths and the spread paths would offer different key domains for the same row.
  */
-describe('a readonly array is walked as an object by every generator alike', () => {
+describe('a readonly array is walked as an object by the scalar generators and skipped by the array generators', () => {
 
     type ReadonlyArrayRow = { ro: readonly string[]; name: string };
 
-    test('an array member is offered as a path by the plain and the spreading generators alike', () => {
+    test('an array member is offered as a path by the plain and the spreading scalar generators alike', () => {
         ('ro.length') satisfies DotPropPathsUnion<ReadonlyArrayRow>;
         ('ro.length') satisfies DotPropPathsUnionScalarSpreadingObjectArrays<ReadonlyArrayRow>;
+    });
+
+    test('the array-path generators offer nothing for it and nothing through it', () => {
+        expectTypeOf<DotPropPathToArraySpreadingArrays<ReadonlyArrayRow>>().toBeNever();
+        expectTypeOf<DotPropPathToObjectArraySpreadingArrays<ReadonlyArrayRow>>().toBeNever();
     });
 });
 

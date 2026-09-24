@@ -899,6 +899,34 @@ describe('WhereFilterDefinition types', () => {
             logStorage.get<LogEntry<MessagingError>>({'context.serializedError.stack': 1}); // Problem: it should recognise this should be a string not a number
             logStorage.get<LogEntry<MessagingError>>({'context.serializedError.stack2': ''}); // Ok. It's a Record<string, any> at heart, so it allows anything.
 
+            // A discriminator that is still the whole union (a parameter, not a literal) is one question of the
+            // union, so it is accepted wherever a literal member would be: on the path into the field, inside
+            // $elemMatch, and on the partial-element form. The consumer's real call shape is kept verbatim.
+            function findByErrorType(t: MessagingError['type']) {
+                logStorage.get<LogEntry<MessagingError | MessagingError[]>>({$and: [
+                    {type: 'error'},
+                    {$or: [
+                        {'context.type': t},
+                        {context: {$elemMatch: {type: t}}}
+                    ]}
+                ]});
+                logStorage.get<LogEntry<MessagingError | MessagingError[]>>({context: {type: t}});
+                // @ts-expect-error Not a known type value
+                logStorage.get<LogEntry<MessagingError | MessagingError[]>>({context: {$elemMatch: {type: 'bad-value'}}});
+                // @ts-expect-error Not a known type value
+                logStorage.get<LogEntry<MessagingError | MessagingError[]>>({'context.type': 'bad-value'});
+
+                type Items = {items: MessagingError[]};
+                ({items: {$elemMatch: {type: t}}}) satisfies WhereFilterDefinition<Items>;
+                ({items: {type: t}}) satisfies WhereFilterDefinition<Items>;
+                // @ts-expect-error `nope` is not a key of any arm
+                ({items: {$elemMatch: {type: t, nope: 1}}}) satisfies WhereFilterDefinition<Items>;
+                // The arms are asked together, so every arm's keys are optional together — as the top-level
+                // filter over a union already reads them. A key one arm declares is accepted beside any discriminator.
+                ({items: {$elemMatch: {type: t, serializedError: {name: 'x'}}}}) satisfies WhereFilterDefinition<Items>;
+            }
+            void findByErrorType;
+
         })
     })
 
@@ -912,11 +940,54 @@ describe('WhereFilterDefinition types', () => {
 
         })
 
-        it('handles an object or array union', () => {
-            type Obj = {name: string};
-            const b: WhereFilterDefinition<{objects: Obj | Obj[]}> = {
-                // Finds no dot-prop, but I'd expect it offer both object or $elemMatch for array. And to handle both.
-            }
+        describe('a field declared X | X[] is offered both the array reading and the object reading', () => {
+            type Ctx = { type: 'a' | 'b'; description: string };
+            type Doc = { type: 'error' | 'info'; context?: Ctx | Ctx[] };
+
+            it('keeps a sibling scalar typed as itself', () => {
+                ({ type: 'error' }) satisfies WhereFilterDefinition<Doc>;
+                // @ts-expect-error a number is not the sibling's literal type
+                ({ type: 123 }) satisfies WhereFilterDefinition<Doc>;
+            });
+
+            it('offers a path into the field, typed by the field\'s leaf', () => {
+                ({ 'context.type': 'a' }) satisfies WhereFilterDefinition<Doc>;
+                // @ts-expect-error not one of the leaf's literals
+                ({ 'context.type': 'zzz' }) satisfies WhereFilterDefinition<Doc>;
+                // @ts-expect-error a number is not the leaf's type
+                ({ 'context.type': 1 }) satisfies WhereFilterDefinition<Doc>;
+                // @ts-expect-error `nope` is not a key of the field
+                ({ 'context.nope': 1 }) satisfies WhereFilterDefinition<Doc>;
+            });
+
+            it('reads the field as an array: element match, size, all, a partial element and whole-array equality', () => {
+                ({ context: { $elemMatch: { type: 'a' } } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: { $size: 1 } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: { $all: [{ type: 'a', description: 'x' }] } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: { type: 'a' } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: [{ type: 'a', description: 'x' }] }) satisfies WhereFilterDefinition<Doc>;
+            });
+
+            it('checks the array reading\'s operands against the element', () => {
+                // @ts-expect-error not one of the element's literals
+                ({ context: { $elemMatch: { type: 'zzz' } } }) satisfies WhereFilterDefinition<Doc>;
+                // @ts-expect-error `nope` is not a key of the element
+                ({ context: { $elemMatch: { nope: 1 } } }) satisfies WhereFilterDefinition<Doc>;
+                // @ts-expect-error $size takes a number
+                ({ context: { $size: 'x' } }) satisfies WhereFilterDefinition<Doc>;
+            });
+
+            it('reads the field as an object: whole-object equality, existence, type and a bare null', () => {
+                ({ context: { type: 'a', description: 'x' } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: { $exists: true } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: { $type: 'array' } }) satisfies WhereFilterDefinition<Doc>;
+                ({ context: null }) satisfies WhereFilterDefinition<Doc>;
+            });
+
+            it('does not admit the comparison family on the object reading', () => {
+                // @ts-expect-error an object is not compared with $eq
+                ({ context: { $eq: 5 } }) satisfies WhereFilterDefinition<Doc>;
+            });
         })
 
         it('treat nested objects are partial matches, not deepEql', () => {
@@ -1047,6 +1118,29 @@ describe('PartialObjectFilterStrict types', () => {
                 // @ts-expect-error — $nor rejected by PartialObjectFilterStrict
                 $nor: [{ name: 'Andy' }]
             };
+        });
+    });
+
+    describe('a field declared X | X[] takes the strict array reading', () => {
+        type Ctx = { type: 'a' | 'b'; description: string };
+        type Union = { context?: Ctx | Ctx[] };
+
+        it('accepts $elemMatch on the field', () => {
+            ({ context: { $elemMatch: { type: 'a' } } }) satisfies PartialObjectFilterStrict<Union>;
+        });
+
+        it('rejects a logic operator inside $elemMatch', () => {
+            ({ context: { $elemMatch: {
+                // @ts-expect-error — $or inside $elemMatch rejected by PartialObjectFilterStrict
+                $or: [{ type: 'a' }]
+            } } }) satisfies PartialObjectFilterStrict<Union>;
+        });
+
+        it('asks an array of arrays as arrays, with no logic operator inside $elemMatch', () => {
+            type Grid = { id: string; grid: string[][] };
+            ({ grid: { $elemMatch: { $size: 2 } } }) satisfies PartialObjectFilterStrict<Grid>;
+            // @ts-expect-error — $or inside $elemMatch rejected by PartialObjectFilterStrict
+            ({ grid: { $elemMatch: { $or: [{ $size: 1 }] } } }) satisfies PartialObjectFilterStrict<Grid>;
         });
     });
 
@@ -1185,6 +1279,52 @@ describe('filter keys reach scalars inside arrays of objects, and any non-array 
         });
     });
 
+    describe('a field holding an array of arrays keeps its siblings typed and asks its rows as arrays', () => {
+
+        type Grid = { id: string; grid: string[][] };
+
+        it('keeps a sibling scalar typed as itself', () => {
+            ({ id: '1' }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error a number is not the sibling's string type
+            ({ id: 1 }) satisfies WhereFilterDefinition<Grid>;
+        });
+
+        it('accepts whole-array equality, size and all on the outer array', () => {
+            ({ grid: [['a']] }) satisfies WhereFilterDefinition<Grid>;
+            ({ grid: { $size: 2 } }) satisfies WhereFilterDefinition<Grid>;
+            ({ grid: { $all: [['a']] } }) satisfies WhereFilterDefinition<Grid>;
+            ({ grid: { $exists: true } }) satisfies WhereFilterDefinition<Grid>;
+        });
+
+        it('asks a row through $elemMatch with the array operators', () => {
+            ({ grid: { $elemMatch: { $size: 2 } } }) satisfies WhereFilterDefinition<Grid>;
+            ({ grid: { $elemMatch: { $elemMatch: 'a' } } }) satisfies WhereFilterDefinition<Grid>;
+            ({ grid: { $elemMatch: { $all: ['a'] } } }) satisfies WhereFilterDefinition<Grid>;
+        });
+
+        it('checks the operands against the row and the cell', () => {
+            // @ts-expect-error a row is an array of strings, not a string
+            ({ grid: ['a'] }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error a string is not the array
+            ({ grid: 'a' }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error a cell is a string, not a number
+            ({ grid: [[1]] }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error a row has no keys to ask of
+            ({ grid: { nope: 1 } }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error $size takes a number
+            ({ grid: { $elemMatch: { $size: 'bad' } } }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error a row has no keys to ask of
+            ({ grid: { $elemMatch: { nope: 1 } } }) satisfies WhereFilterDefinition<Grid>;
+        });
+
+        it('does not offer the comparison family or a bare null on the array', () => {
+            // @ts-expect-error an array is not compared with $in
+            ({ grid: { $in: [['a']] } }) satisfies WhereFilterDefinition<Grid>;
+            // @ts-expect-error the array reading has no null member
+            ({ grid: null }) satisfies WhereFilterDefinition<Grid>;
+        });
+    });
+
     describe('a bare null asks the null-or-missing question', () => {
 
         it('accepts null on a nullable field', () => {
@@ -1266,21 +1406,6 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
             const a: WhereFilterDefinition<ScalarArrayDoc> = {
                 // @ts-expect-error TODO the array filter branch doesn't include null
                 tags: null
-            };
-        });
-    });
-
-    describe('a field holding an array of arrays collapses the key domain', () => {
-        type ListOfListsDoc = { id: string; grid: string[][] };
-
-        it('control: the same question on a shape without one type-checks', () => {
-            const ok: WhereFilterDefinition<{ id: string; grid: string[] }> = { id: '1' };
-        });
-
-        it('gap: every key of such a shape reads as an array path — the matcher answers on the scalar sibling regardless', () => {
-            const a: WhereFilterDefinition<ListOfListsDoc> = {
-                // @ts-expect-error TODO the array-path domain degrades to `string` for an array of arrays, so every key takes the array branch
-                id: '1'
             };
         });
     });
@@ -1399,10 +1524,9 @@ describe('WhereFilterDefinition — known type-level gaps (TODO pins)', () => {
         // answers on the leaf, as the runtime assertions here show.
         //
         // This is one disagreement between what the path generators enumerate and what the runtime path
-        // readers walk, and it has two siblings: a field holding an array of arrays, which collapses the
-        // whole key domain (pinned above), and a readonly array, which the walks read as a plain object
+        // readers walk, and it has a sibling: a readonly array, which the walks read as a plain object
         // and offer `length` and the array methods as if they were data. They are one job rather than
-        // three, and a deliberate one: the generator that skips index-sig keys also names the lists a DDL
+        // two, and a deliberate one: the generator that skips index-sig keys also names the lists a DDL
         // declares rules for and the paths an `array_scope` write may target, so enumerating more paths
         // through an index signature widens the write contract as well as the filter's.
 

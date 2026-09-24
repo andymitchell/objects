@@ -7,11 +7,26 @@ import { getWriteErrors, getWriteFailures, getWriteSuccesses } from "../helpers.
  *
  * Pins the diagnostic payload an implementation must expose on failure: the offending row's PK value
  * (`item_pk`), the PK field name (`primary_key`), the recoverability flag (`unrecoverable`), the Zod
- * `issues` on schema faults, and the success/failure asymmetry of `affected_items` (failures carry the
- * item body, successes carry only the PK). All `where` clauses are legitimate — safe for both consumers.
+ * `issues` on schema faults, and the success/failure asymmetry of `affected_items` (a failure locates the row
+ * and, unless `payloadFailureAttachesResolvedItem` is declared off, carries the merged item body; a success
+ * carries only the PK). All `where` clauses are legitimate — safe for both consumers.
  */
 export function registerErrorDetail(ctx: SectionCtx): void {
-    const { describe, test, expect, createAdapter, implName } = ctx;
+    const { describe, test, expect, createAdapter, implName, itIfSupported } = ctx;
+
+    /**
+     * The one scenario §11.4 judges the failure side on: an update writing a string into a number field of
+     * row `{ id: '1' }`. Shared by the locator leaf and the resolved-item leaf so the two cannot drift.
+     */
+    const applyMistypedUpdate = () => createAdapter(FlatSchema, flatDdl).apply({
+        initialItems: [{ id: '1' }],
+        // @ts-expect-error: wilfully assigning a string to a number field
+        writeActions: [makeAction<Flat>('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
+        schema: FlatSchema,
+        ddl: flatDdl,
+    });
+    /** The row as it stands after the mistyped update is merged into it — what a failure that resolved the row attaches. */
+    const MERGED_ROW = { id: '1', count: 'not-a-number' };
 
     describe('11. Error detail', () => {
 
@@ -210,20 +225,13 @@ export function registerErrorDetail(ctx: SectionCtx): void {
         describe('11.4 affected_items asymmetry & result.error', () => {
 
             // T-11.10
-            test('failure affected_items carry the offending item body; success affected_items carry only the PK', async () => {
-                // Failure side — post-merge item is attached
-                const adapter1 = createAdapter(FlatSchema, flatDdl);
-                const rFail = await adapter1.apply({
-                    initialItems: [{ id: '1' }],
-                    // @ts-expect-error: wilfully assigning a string to a number field
-                    writeActions: [makeAction<Flat>('a1', { type: 'update', data: { count: 'not-a-number' }, where: { id: '1' } })],
-                    schema: FlatSchema,
-                    ddl: flatDdl,
-                });
+            test('failure affected_items locate the offending row (any item they carry is the merged row); success affected_items carry only the PK', async () => {
+                // Failure side — the locator is always owed; an attached item, if any, must be the merged row
+                const rFail = await applyMistypedUpdate();
                 expectOrAcknowledgeUnsupported(rFail, (r) => {
                     const ai = getWriteFailures(r.result)[0]?.affected_items?.[0];
                     expect(ai?.item_pk).toBe('1');
-                    expect(ai?.item).toEqual({ id: '1', count: 'not-a-number' });
+                    if (ai?.item !== undefined) expect(ai.item).toEqual(MERGED_ROW);
                 }, implName);
 
                 // Success side — only the PK is exposed
@@ -238,6 +246,16 @@ export function registerErrorDetail(ctx: SectionCtx): void {
                     const sai = getWriteSuccesses(r.result)[0]?.affected_items?.[0];
                     expect(sai?.item_pk).toBe('1');
                     expect('item' in sai!).toBe(false);
+                }, implName);
+            });
+
+            // T-11.13 — an implementation that refuses the value before it reads the row has no merged row to
+            // attach; it declares `payloadFailureAttachesResolvedItem: false` and this leaf skips visibly.
+            itIfSupported('payloadFailureAttachesResolvedItem')('a failure judged from the submitted payload attaches the resolved post-merge item', async () => {
+                const rFail = await applyMistypedUpdate();
+                expectOrAcknowledgeUnsupported(rFail, (r) => {
+                    const ai = getWriteFailures(r.result)[0]?.affected_items?.[0];
+                    expect(ai?.item).toEqual(MERGED_ROW);
                 }, implName);
             });
 

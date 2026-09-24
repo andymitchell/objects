@@ -42,10 +42,11 @@ export type AdapterFactory = <T extends Record<string, any>>(
 /**
  * Optional feature flags describing which behaviours an implementation supports.
  *
- * Each flag gates a group of tests: when the flag resolves to `false` the tests register as a
- * VISIBLE `test.skip` (never silently green), so a partial implementation reports honestly rather
- * than appearing to pass tests it never ran. Defaults ({@link CAPABILITY_DEFAULTS}) reproduce the
- * reference engine's behaviour, so omitting `capabilities` entirely leaves the full battery running.
+ * Each flag declares a deviation from the reference engine. The section leaves that depend on it register as a
+ * VISIBLE `test.skip` (never silently green), so a partial implementation reports honestly rather than appearing
+ * to pass tests it never ran. Fuzz properties cannot be split per flag, so they relax inline and name the flag
+ * they read. Defaults ({@link CAPABILITY_DEFAULTS}) reproduce the reference engine's behaviour, so omitting
+ * `capabilities` entirely leaves the full battery running.
  */
 export type WriteTestCapabilities = {
     /** Impl maintains a persistent uuid→payload idempotency ledger ACROSS apply() calls. DEFAULT false. */
@@ -81,6 +82,17 @@ export type WriteTestCapabilities = {
     setPropertyUndefined?: boolean;
     /** Impl supports `delete_property` — taking a property's key away from a row entirely. DEFAULT true. */
     deleteProperty?: boolean;
+    /**
+     * Impl attaches the resolved post-merge item to a failure whose offending value came from the submitted
+     * payload itself (a mistyped update value). DEFAULT true.
+     *
+     * The only reason to declare `false`: the impl refuses such a value BEFORE it reads the addressed row, so no
+     * merged row exists to attach. An impl that reads the row must attach it. Declaring `false` skips (visibly)
+     * the one §11.4 leaf that demands the resolved item; the row locator (`item_pk`) is still owed, any item that
+     * IS attached must still equal the merged row, and a failure judged from a value read off the row (`inc` on a
+     * `null` field, for instance) is unaffected.
+     */
+    payloadFailureAttachesResolvedItem?: boolean;
 };
 
 export type StandardTestConfig = {
@@ -124,6 +136,7 @@ export const CAPABILITY_DEFAULTS: Required<WriteTestCapabilities> = {
     reconstructsOutcomes: false,
     setPropertyUndefined: true,
     deleteProperty: true,
+    payloadFailureAttachesResolvedItem: true,
 };
 
 /** Resolve a single capability flag against the defaults. */

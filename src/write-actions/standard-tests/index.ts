@@ -33,8 +33,9 @@ import { runFuzzSection } from "./fuzz.ts";
  *
  * @param config The caller's `test`/`expect` (so the suite registers under the caller's runner), the adapter
  *               factory, an optional `implementationName` used in skip diagnostics, and optional
- *               {@link WriteTestCapabilities} declaring which behaviours the implementation supports — each
- *               one declared unsupported turns its tests into visible skips rather than failures.
+ *               {@link WriteTestCapabilities} declaring where the implementation deviates from the reference
+ *               engine — the section leaves that depend on a declared flag register as visible skips rather
+ *               than failures, and the fuzz properties relax inline.
  * @example
  * standardTests({ test, expect, createAdapter, implementationName: 'my-store' });
  */
